@@ -24,8 +24,11 @@ for pkg in $(go list ./...); do
     failed=1
     continue
   fi
-  # Packages without tests produce no binary.
-  [ -f "$exe" ] || continue
+  # Packages without tests produce no binary, only the build's output.
+  if [ ! -f "$exe" ]; then
+    rm -f "$out"
+    continue
+  fi
   # The binary runs in its package's folder, where its testdata is.
   if (cd "$root/${pkg#github.com/kanggu12/wsl-shrinker/}" 2>/dev/null || cd "$root"; "$exe" -test.count=1 >"$out" 2>&1); then
     echo "ok    $pkg"

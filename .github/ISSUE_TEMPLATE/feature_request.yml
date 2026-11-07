@@ -1,0 +1,16 @@
+name: Feature request
+description: Something wsl-shrinker could do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and where wsl-shrinker gets in the way or falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How it could work. If it removes or changes anything, say how it keeps what people need safe.

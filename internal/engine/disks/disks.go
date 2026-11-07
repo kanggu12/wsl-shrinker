@@ -1,0 +1,179 @@
+// Package disks finds the WSL disk files on this PC and works out, for each,
+// how much a trim and a compaction would give back. It only reads.
+package disks
+
+import (
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/kanggu12/wsl-shrinker/internal/core/estimate"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/ext4"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/vhdx"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
+)
+
+// Kind says what a disk belongs to.
+type Kind string
+
+const (
+	// KindDistro is a registered WSL 2 distribution's disk.
+	KindDistro Kind = "distro"
+	// KindDocker is Docker Desktop's data disk, which WSL does not register.
+	KindDocker Kind = "docker"
+	// KindFile is another VHDX file the settings list.
+	KindFile Kind = "file"
+)
+
+// Disk is one disk file and what is known about it.
+type Disk struct {
+	// Name is what the screen calls it: the distribution's name, or the file's.
+	Name string `json:"name"`
+	// Kind says what it belongs to.
+	Kind Kind `json:"kind"`
+	// Distro is the registered distribution, empty for other files.
+	Distro string `json:"distro,omitempty"`
+	// Path is the disk file.
+	Path string `json:"path"`
+	// Default and Running describe the distribution.
+	Default bool `json:"default,omitempty"`
+	Running bool `json:"running,omitempty"`
+	// File is what Windows says about the file.
+	File winapi.FileInfo `json:"file"`
+	// Estimate is the outcome of reading it; nil with Err set when it could
+	// not be read.
+	Estimate *estimate.Result `json:"estimate,omitempty"`
+	Err      string           `json:"error,omitempty"`
+}
+
+// Env is what discovery reads from: WSL, the files, and where Docker Desktop
+// keeps its disks.
+type Env struct {
+	WSL wsl.System
+	// Stat and Open reach the files; tests give fakes.
+	Stat func(string) (winapi.FileInfo, error)
+	Open func(string) (ReaderAtCloser, int64, error)
+	// LocalAppData is the per-user folder Docker Desktop's disks are under.
+	LocalAppData string
+	// Extra lists more VHDX files to look at, from the settings.
+	Extra []string
+}
+
+// ReaderAtCloser is an open disk file.
+type ReaderAtCloser interface {
+	io.ReaderAt
+	io.Closer
+}
+
+// OpenFile opens a file for reading, next to the process that holds it.
+func OpenFile(path string) (ReaderAtCloser, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	return f, st.Size(), nil
+}
+
+// dockerDisks are where Docker Desktop keeps disks WSL does not register,
+// relative to %LOCALAPPDATA%: the data disk of current releases, and the
+// one older releases used.
+var dockerDisks = []string{`Docker\wsl\disk\docker_data.vhdx`, `Docker\wsl\data\ext4.vhdx`}
+
+// Find lists every disk with its estimate, the default distribution first,
+// then by how much each gives back.
+func Find(ctx context.Context, env Env) ([]Disk, error) {
+	distros, err := env.WSL.Distros(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []Disk
+	seen := map[string]bool{}
+	for _, d := range distros {
+		// WSL 1 distributions keep their files in the Windows filesystem.
+		if d.Version != 2 || d.VHD == "" {
+			continue
+		}
+		out = append(out, Disk{Name: d.Name, Kind: KindDistro, Distro: d.Name, Path: d.VHD, Default: d.Default, Running: d.Running})
+		seen[strings.ToLower(d.VHD)] = true
+	}
+	// Docker Desktop's data disk, when it exists and is not registered.
+	if env.LocalAppData != "" {
+		for _, rel := range dockerDisks {
+			p := filepath.Join(env.LocalAppData, rel)
+			if seen[strings.ToLower(p)] {
+				continue
+			}
+			if _, err := env.Stat(p); err == nil {
+				out = append(out, Disk{Name: "Docker Desktop data", Kind: KindDocker, Path: p})
+				seen[strings.ToLower(p)] = true
+			}
+		}
+	}
+	for _, p := range env.Extra {
+		if !seen[strings.ToLower(p)] {
+			out = append(out, Disk{Name: filepath.Base(p), Kind: KindFile, Path: p})
+			seen[strings.ToLower(p)] = true
+		}
+	}
+	// Read every disk at once: each read is a few dozen MiB of metadata.
+	var wg sync.WaitGroup
+	for i := range out {
+		wg.Go(func() { inspect(env, &out[i]) })
+	}
+	wg.Wait()
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Default != b.Default {
+			return a.Default
+		}
+		return reclaim(a) > reclaim(b)
+	})
+	return out, nil
+}
+
+// Inspect reads one disk again, after a change.
+func Inspect(env Env, d *Disk) { inspect(env, d) }
+
+// inspect fills in a disk's file facts and estimate.
+func inspect(env Env, d *Disk) {
+	d.Estimate, d.Err = nil, ""
+	fi, err := env.Stat(d.Path)
+	if err != nil {
+		d.Err = err.Error()
+		return
+	}
+	d.File = fi
+	f, size, err := env.Open(d.Path)
+	if err != nil {
+		d.Err = err.Error()
+		return
+	}
+	defer f.Close()
+	vd, err := vhdx.Read(f, size)
+	if err != nil {
+		d.Err = err.Error()
+		return
+	}
+	// A disk without ext4 still gets an estimate, from its blocks alone.
+	fs, _ := ext4.Read(vd.Contents(), vd.VirtualSize)
+	r := estimate.Of(vd, fs, fi.OnDisk)
+	d.Estimate = &r
+}
+
+// reclaim is what a disk gives back, zero when unknown.
+func reclaim(d Disk) int64 {
+	if d.Estimate == nil {
+		return 0
+	}
+	return d.Estimate.Reclaim
+}

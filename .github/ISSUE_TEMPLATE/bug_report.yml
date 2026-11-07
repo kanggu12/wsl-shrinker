@@ -1,0 +1,37 @@
+name: Bug report
+description: An estimate far from the result, a step that failed, or something that does not work as the docs say.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: list
+    attributes:
+      label: "`wsl-shrinker list --json`"
+      description: Before the shrink if you can. Replace a private path or name with any placeholder.
+      render: json
+  - type: textarea
+    id: history
+    attributes:
+      label: "`wsl-shrinker history --json`"
+      description: The run in question.
+      render: json
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`wsl-shrinker doctor`"
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: wsl-shrinker v0.1.0, WSL 3.0.3.0, Windows 11 24H2
+    validations:
+      required: true

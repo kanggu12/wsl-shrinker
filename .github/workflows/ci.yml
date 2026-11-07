@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The release workflow runs all of CI first.
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # The newest patch of the Go release go.mod names: it carries the
+          # standard library's security fixes.
+          go-version: "1.26.x"
+      # The ext4 reader is checked against e2fsprogs.
+      - run: sudo apt-get update && sudo apt-get install -y e2fsprogs shellcheck
+      - name: gofmt, vet and staticcheck for Linux and Windows, shellcheck, go test -race
+        run: make check
+      - name: fuzzing, 10s per target
+        run: make fuzz FUZZTIME=10s
+      # The notices ship with every release: they must list what it is built from now.
+      - name: third-party notices are current
+        run: make notices && git diff --exit-code docs/THIRD_PARTY_NOTICES.md
+      - name: the README's release badge names the newest release
+        run: |
+          v=$(awk '/^## \[[0-9]/ { gsub(/[][]/, "", $2); print $2; exit }' CHANGELOG.md)
+          if ! grep -q "release: v$v" docs/assets/badges/release.svg || ! grep -q "alt=\"Release v$v\"" README.md; then
+            echo "the release badge does not say v$v: run make badges"
+            exit 1
+          fi
+
+  windows:
+    name: tests on Windows
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # The newest patch of the Go release go.mod names: it carries the
+          # standard library's security fixes.
+          go-version: "1.26.x"
+      # The Windows API code and wsl.exe's output parsing run where they belong;
+      # the ext4 tests skip themselves without e2fsprogs.
+      - run: go test -count=1 ./...

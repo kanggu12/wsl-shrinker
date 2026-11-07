@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # A release is built only from a commit that passes every check.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          # The newest patch of the Go release go.mod names: it carries the
+          # standard library's security fixes.
+          go-version: "1.26.x"
+      - name: the tag, CHANGELOG.md and the notes agree
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          # The section for this tag, up to the next "## " heading, is the release notes.
+          awk -v tag="$v" '
+            $0 ~ "^## \\[?" tag "\\]?( |$)" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md" || { echo "CHANGELOG.md has no section for $GITHUB_REF_NAME"; exit 1; }
+      - run: sudo apt-get update && sudo apt-get install -y zip
+      - name: the zips and checksums
+        run: scripts/dist.sh "${GITHUB_REF_NAME#v}"
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip dist/checksums.txt dist/install.ps1 --title "wsl-shrinker ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md"

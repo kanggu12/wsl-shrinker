@@ -1,0 +1,61 @@
+# Everyday tasks. CI runs `make check`.
+
+STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
+VERSION ?= $(shell awk '/^## \[[0-9]/ { gsub(/[][]/, "", $$2); print $$2; exit }' CHANGELOG.md)
+
+.PHONY: build check fmt vet lint test fuzz test-windows dist notices badges clean
+
+## build: the Windows program and its WSL launcher, in dist/
+build:
+	CGO_ENABLED=0 GOOS=windows go build -trimpath -o dist/wsl-shrinker.exe ./cmd/wsl-shrinker
+	CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wsl-shrinker ./cmd/wsl-shrinker
+
+## check: everything CI checks
+check: fmt vet lint test
+
+fmt:
+	@out=$$(gofmt -l cmd internal); if [ -n "$$out" ]; then echo "not gofmt'ed:"; echo "$$out"; exit 1; fi
+
+# The Windows code is vetted too: it builds only there.
+vet:
+	go vet ./...
+	GOOS=windows go vet ./...
+
+# staticcheck is built for this machine once, then run for both systems:
+# `go run` with GOOS=windows would build it as a Windows program.
+lint:
+	go install $(STATICCHECK)
+	$$(go env GOPATH)/bin/staticcheck ./...
+	GOOS=windows $$(go env GOPATH)/bin/staticcheck ./...
+	shellcheck scripts/*.sh
+
+test:
+	go test -race -count=1 ./...
+
+## fuzz: every fuzz target for FUZZTIME each (default 30s); failures land in testdata/fuzz
+FUZZTIME ?= 30s
+fuzz:
+	@for pkg in ./internal/machine/vhdx ./internal/machine/ext4; do \
+	  for f in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
+	    go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) $$pkg || exit 1; \
+	  done; \
+	done
+
+## test-windows: from WSL, the tests again as Windows programs (the Windows API code)
+test-windows:
+	scripts/test-windows.sh
+
+## dist: the release zips and checksums for VERSION (default: the newest in CHANGELOG.md)
+dist:
+	scripts/dist.sh $(VERSION)
+
+## notices: docs/THIRD_PARTY_NOTICES.md from what the program is built from
+notices:
+	scripts/third-party-notices.sh
+
+## badges: the README's badges in docs/assets/badges, for a release
+badges:
+	scripts/badges.sh
+
+clean:
+	rm -f dist/*.zip dist/checksums.txt dist/install.ps1 dist/wsl-shrinker.exe dist/wsl-shrinker

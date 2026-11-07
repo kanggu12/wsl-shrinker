@@ -66,12 +66,12 @@ func TestEveryScreenFitsEveryWidth(t *testing.T) {
 func TestMainScreenSaysWhatMatters(t *testing.T) {
 	out := ansi.Strip(Snapshot(demo(), 132, 34, true, nil, ""))
 	for _, want := range []string{
-		"wsl-shrinker", "WSL 3.0.3.0", "123 GB can be given back", // header: protected Work's 13 GB is not counted
+		"wsl-shrinker", "WSL 3.0.3.0", "87.3 GB can be given back now", "+36.0 GB in use", // header: protected Work is not counted, the docker disk in use apart
 		"Ubuntu-24.04", "Docker Desktop data", "in use", // the docker disk and its state
-		"Gives back about 64.0 GB.", "stays 248 GB", // the selected disk's verdict and bar
+		"Gives back about 64.0 GB.", "after 248 GB", // the selected disk's verdict and bar
 		"WSL 3.0.3.0 can compact", "read while running", // its checks
-		"Docker build cache", "c chooses what to remove first", // what fills it
-		"5 disks · 3 worth shrinking", // the status line
+		"Docker build cache", "c: choose what to remove before shrinking", // what fills it
+		"5 disks · 2 worth shrinking", // the status line: the docker disk in use is not counted
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
@@ -126,7 +126,8 @@ func TestRunPlaysToTheEnd(t *testing.T) {
 
 func TestCleanChoicesGoToTheRun(t *testing.T) {
 	d := &recording{Demo: demo()}
-	// Space chooses and moves down a row: the first and the third item.
+	// Space chooses and moves down a row: the first and the third item of
+	// the list, which starts with the caches, largest first.
 	m := playKeys(t, d, []string{"c", "space", "down", "space", "enter", "enter"})
 	for m.run != nil && !m.run.done {
 		next, _ := m.Update(<-m.run.events)
@@ -136,7 +137,7 @@ func TestCleanChoicesGoToTheRun(t *testing.T) {
 	for _, it := range d.cleaned {
 		got = append(got, it.ID)
 	}
-	if !slices.Equal(got, []string{"docker-build-cache", "huggingface:/home/ann/.cache/huggingface"}) {
+	if !slices.Equal(got, []string{"docker-build-cache", "pip:/home/ann/.cache/pip"}) {
 		t.Fatalf("cleaned %v", got)
 	}
 }
@@ -275,7 +276,7 @@ func TestCatalogsComplete(t *testing.T) {
 	// ".one" form, which Korean does not need.
 	used := map[string]bool{}
 	re := regexp.MustCompile(`i18n\.TN?\("([a-z.]+)"[,)]`)
-	dyn := regexp.MustCompile(`i18n\.T\("([a-z.]+)"\+`)
+	dyn := regexp.MustCompile(`i18n\.TN?\("([a-z.]+)"\s*\+`)
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
 		b, _ := os.ReadFile(f)
@@ -285,7 +286,8 @@ func TestCatalogsComplete(t *testing.T) {
 		for _, m := range dyn.FindAllStringSubmatch(string(b), -1) {
 			// Keys built from a step, a kind or a finding: check each value.
 			switch m[1] {
-			case "step.", "run.skipped.":
+			case "step.", "run.skipped.", "run.about.", "run.state.":
+				used["run.state.compact.stopped"] = true
 				for _, s := range shrink.Steps {
 					used[m[1]+string(s)] = true
 				}
@@ -294,9 +296,16 @@ func TestCatalogsComplete(t *testing.T) {
 					"trash", "apt", "journal", "docker-build-cache", "docker-dangling"} {
 					used[m[1]+w] = true
 				}
-			case "kind.":
+			case "since.":
+				for _, u := range []string{"second", "minute", "hour", "day", "week", "month", "year"} {
+					used[m[1]+u] = true
+				}
+			case "kind.", "group.":
 				for _, k := range []survey.Kind{survey.KindCache, survey.KindDownload, survey.KindLog, survey.KindImage} {
 					used[m[1]+string(k)] = true
+					if m[1] == "group." {
+						used[m[1]+string(k)+".cost"] = true
+					}
 				}
 			}
 		}
@@ -348,3 +357,66 @@ func (r *recording) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options
 func (r *recording) Hosts(distro string) bool { return distro == r.hosts }
 
 func (r *recording) Reopen(args []string) error { r.reopened = args; return nil }
+
+func TestSinceInKorean(t *testing.T) {
+	i18n.Set(i18n.Korean)
+	defer i18n.Set(i18n.English)
+	for in, want := range map[string]string{"5 weeks ago": "5주 전", "About an hour ago": "1시간 전", "17 months ago": "17개월 전", "2 years ago": "2년 전", "soon": "soon"} {
+		if got := since(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+	// English keeps Docker's own words.
+	i18n.Set(i18n.English)
+	if got := since("5 weeks ago"); got != "5 weeks ago" {
+		t.Errorf("English: %q", got)
+	}
+}
+
+// failingRun fails every run at its compaction, as WSL can.
+type failingRun struct{ recording }
+
+func (f *failingRun) Shrink(_ context.Context, d disks.Disk, _ shrink.Options, emit func(shrink.Event)) shrink.Result {
+	for _, s := range []shrink.Step{shrink.StepCheck, shrink.StepClean, shrink.StepStop} {
+		emit(shrink.Event{Step: s, Status: shrink.Done})
+	}
+	emit(shrink.Event{Step: shrink.StepCompact, Status: shrink.Failed, Detail: "E_ACCESSDENIED"})
+	return shrink.Result{Disk: d.Name, Err: "E_ACCESSDENIED"}
+}
+
+func TestFailedRunSaysWhereThingsStand(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		// The running Ubuntu, then the stopped Debian: started again, or not.
+		for _, c := range []struct {
+			keys []string
+			want map[i18n.Lang]string
+		}{
+			{[]string{"s", "enter"}, map[i18n.Lang]string{i18n.English: "started again as it was", i18n.Korean: "원래대로 다시 켰습니다"}},
+			{[]string{"down", "down", "s", "enter"}, map[i18n.Lang]string{i18n.English: "The disk was not changed.", i18n.Korean: "디스크는 그대로입니다."}},
+		} {
+			out := ansi.Strip(Snapshot(&failingRun{recording{Demo: demo()}}, 120, 30, true, c.keys, ""))
+			if !strings.Contains(out, c.want[lang]) || strings.Contains(out, "%!") || strings.Contains(out, "Shrank") {
+				t.Errorf("%s %v:\n%s", lang, c.keys, out)
+			}
+		}
+	}
+	i18n.Set(i18n.English)
+}
+
+func TestNoHeadingWithoutItsLines(t *testing.T) {
+	// In short windows a section of the details shows whole or not at all.
+	for _, h := range []int{14, 18, 20, 24, 28} {
+		for _, w := range []int{60, 80, 100} {
+			lines := strings.Split(ansi.Strip(Snapshot(demo(), w, h, true, nil, "")), "\n")
+			for i, l := range lines[:len(lines)-2] {
+				head := strings.TrimSpace(l)
+				if head == "Space" || head == "Checks" || head == "Inside" {
+					if i+1 >= len(lines)-2 || strings.TrimSpace(lines[i+1]) == "" {
+						t.Fatalf("%dx%d: %q has nothing under it", w, h, head)
+					}
+				}
+			}
+		}
+	}
+}

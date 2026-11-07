@@ -194,6 +194,12 @@ func shrinkCmd() *cobra.Command {
 			var results []shrink.Result
 			failed := false
 			for _, d := range queue {
+				// Ctrl+C between disks ends the run before the next one.
+				if ctx.Err() != nil {
+					failed = true
+					results = append(results, shrink.Result{Disk: d.Name, Err: "cancelled"})
+					break
+				}
 				if !asJSON {
 					fmt.Fprintf(out, "%s\n", d.Name)
 				}

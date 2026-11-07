@@ -103,6 +103,16 @@ func (t Theme) Bar(w int, total int64, parts ...Part) string {
 		}
 		used += cells[i]
 	}
+	// Parts that make up the whole fill the bar: rounding down must not leave
+	// a cell of track that reads as a part of its own.
+	var sum int64
+	for _, p := range parts {
+		sum += max(0, p.Value)
+	}
+	if sum >= total && used < w && len(parts) > 0 {
+		cells[len(parts)-1] += w - used
+		used = w
+	}
 	// Rounding can overshoot; take the excess from the largest part.
 	for used > w {
 		big := 0

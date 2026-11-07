@@ -14,7 +14,7 @@ win_tmp=$(wslpath "$(cmd.exe /d /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')")
 dir="$win_tmp/wsl-shrinker-tests"
 mkdir -p "$dir"
 failed=0
-for pkg in $(go list ./...); do
+for pkg in $(go list ./cmd/... ./internal/...); do
   name=$(basename "$pkg")
   exe="$dir/$name.test.exe"
   out="$dir/$name.out"

@@ -117,7 +117,7 @@ var ErrCheck = errors.New("not started")
 // then the person's own pre-stop scripts, then a sync. It prints the ids of
 // the containers it stopped, to start them again afterwards.
 const stopScript = `ids=""
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && ! docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
   ids=$(docker ps -q)
   [ -n "$ids" ] && docker stop $ids >/dev/null
 fi
@@ -191,6 +191,11 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	// From here on the run goes to its end even when the caller cancels:
 	// a distribution stopped and not started again, or containers left
 	// stopped, is worse than a run that takes another minute.
+	// A run cancelled before this point has changed nothing but what was
+	// cleaned: it stops here, rather than stop a distribution.
+	if err := ctx.Err(); err != nil {
+		return fail(StepStop, fmt.Errorf("cancelled before the distribution was stopped: %w", err))
+	}
 	ctx = context.WithoutCancel(ctx)
 	var restartIDs []string
 	switch {
@@ -200,7 +205,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		say(StepStop, Skipped, "not running")
 	default:
 		say(StepStop, Running, "")
-		out, err := sys.Run(ctx, d.Distro, "root", stopScript)
+		out, err := sys.Run(within(ctx, stopLimit), d.Distro, "root", stopScript)
 		if err != nil {
 			return fail(StepStop, err)
 		}
@@ -237,7 +242,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	t0 := time.Now()
 	var err error
 	if d.Distro != "" {
-		err = sys.Compact(ctx, d.Distro)
+		err = sys.Compact(within(ctx, compactLimit), d.Distro)
 	} else {
 		err = env.CompactFile(d.Path)
 	}
@@ -245,7 +250,15 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		// The distribution may already be stopped: bring it back as it was,
 		// with its containers, if it ran.
 		if d.Running && d.Distro != "" && !opt.StayStopped {
-			_, _ = restart(ctx, env, d.Distro, restartIDs, sleep)
+			// Report the compaction's failure first, then how the start went,
+			// so the screen shows both steps as they ended.
+			res = fail(StepCompact, err)
+			e, rerr := restart(ctx, env, d.Distro, restartIDs, sleep)
+			if rerr != nil {
+				e = Event{Step: StepRestart, Status: Failed, Detail: oneLine(rerr.Error())}
+			}
+			sayE(e)
+			return res
 		}
 		return fail(StepCompact, err)
 	}
@@ -369,7 +382,7 @@ func verify(env Env, before, after disks.Disk, opt Options, stored []bool) strin
 func restart(ctx context.Context, env Env, distro string, ids []string, sleep func(time.Duration)) (Event, error) {
 	sys := env.Disks.WSL
 	e := Event{Step: StepRestart, Status: Done, Detail: "running"}
-	if err := sys.Start(ctx, distro); err != nil {
+	if err := sys.Start(within(ctx, callLimit), distro); err != nil {
 		return e, err
 	}
 	// WSL has been seen to leave the root read-only after compacting until
@@ -379,9 +392,9 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		return e, err
 	}
 	if ro {
-		_ = sys.Terminate(ctx, distro)
+		_ = sys.Terminate(within(ctx, callLimit), distro)
 		sleep(2 * time.Second)
-		if err := sys.Start(ctx, distro); err != nil {
+		if err := sys.Start(within(ctx, callLimit), distro); err != nil {
 			return e, err
 		}
 		if ro, err = readOnly(ctx, env, distro); err != nil {
@@ -398,12 +411,12 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		// distribution: wait for it, up to a minute.
 		e.Count = len(ids)
 		for range 30 {
-			if out, err := sys.Run(ctx, distro, "root", "docker info >/dev/null 2>&1 && echo up"); err == nil && strings.Contains(out, "up") {
+			if out, err := sys.Run(within(ctx, callLimit), distro, "root", "docker info >/dev/null 2>&1 && echo up"); err == nil && strings.Contains(out, "up") {
 				break
 			}
 			sleep(2 * time.Second)
 		}
-		out, err := sys.Run(ctx, distro, "root", "docker start "+strings.Join(safeIDs(ids), " ")+" >/dev/null 2>&1 && echo ok || echo failed")
+		out, err := sys.Run(within(ctx, stopLimit), distro, "root", "docker start "+strings.Join(safeIDs(ids), " ")+" >/dev/null 2>&1 && echo ok || echo failed")
 		if err != nil || !strings.Contains(out, "ok") {
 			e.Status, e.NotRestarted = Warned, len(ids)
 			e.Detail += fmt.Sprintf(", %d containers not started again", len(ids))
@@ -433,6 +446,26 @@ func storedBlocks(env Env, path string) []bool {
 	return out
 }
 
+// Limits on the calls made once a distribution is stopped, so that one that
+// never answers cannot hold a run forever (the screen keeps Ctrl+C from
+// leaving it half done): a quick call, the stop with its containers' own
+// timeouts and the hooks', and the compaction of a very large disk.
+const (
+	callLimit    = 2 * time.Minute
+	stopLimit    = 15 * time.Minute
+	compactLimit = 6 * time.Hour
+)
+
+// within gives a call a deadline. The context it derives from is never
+// cancelled by the caller after the stop, so only the deadline ends a call.
+func within(ctx context.Context, d time.Duration) context.Context {
+	c, cancel := context.WithTimeout(ctx, d)
+	// The deadline's timer is released when it fires; holding no cancel
+	// function past this call is what a fire-and-forget deadline needs.
+	_ = cancel
+	return c
+}
+
 // reclaimOf is a disk's estimated gain, zero when unknown.
 func reclaimOf(d disks.Disk) int64 {
 	if d.Estimate == nil {
@@ -443,7 +476,7 @@ func reclaimOf(d disks.Disk) int64 {
 
 // readOnly reports whether the distribution's root is mounted read-only.
 func readOnly(ctx context.Context, env Env, distro string) (bool, error) {
-	out, err := env.Disks.WSL.Run(ctx, distro, "root", `awk '$2=="/"{print $4}' /proc/mounts | tail -1`)
+	out, err := env.Disks.WSL.Run(within(ctx, callLimit), distro, "root", `awk '$2=="/"{print $4}' /proc/mounts | tail -1`)
 	if err != nil {
 		return false, err
 	}

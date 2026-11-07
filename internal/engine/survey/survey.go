@@ -64,6 +64,9 @@ type Result struct {
 	// Containers counts the containers running now, which a shrink stops
 	// and starts again.
 	Containers int
+	// DockerDesktop is set when the docker command here is Docker Desktop's
+	// integration: its images are on Docker Desktop's own disk.
+	DockerDesktop bool
 }
 
 // cache is one known cache under a home directory.
@@ -110,7 +113,12 @@ func script() string {
 	b.WriteString("done\n")
 	// Docker: what the build cache holds, and every image with the space only
 	// it holds and the containers using it. Sizes as Docker prints them.
-	b.WriteString(`if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+	// Docker Desktop's WSL integration puts its own docker command here: its
+	// images live on Docker Desktop's disk, not this one, so they are not
+	// offered (and nothing here stops its containers).
+	b.WriteString(`if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
+  echo "docker|desktop"
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "docker|on"
   echo "containers|$(docker ps -q | wc -l)"
   docker system df --format '{{.Type}}|{{.Reclaimable}}' 2>/dev/null | sed 's/^/df|/'
@@ -138,6 +146,7 @@ func parse(out string) Result {
 	// Images `docker image prune` removes: unnamed and not the parent of
 	// another. Unnamed parents are listed too, but prune leaves them.
 	dangling := map[string]bool{}
+	seenImage := map[string]bool{}
 	for line := range strings.SplitSeq(strings.ReplaceAll(out, "\r", ""), "\n") {
 		f := strings.Split(strings.TrimSpace(line), "|")
 		switch {
@@ -149,6 +158,8 @@ func parse(out string) Result {
 			r.add(system(f[1], f[2], kib(f[3])))
 		case f[0] == "home" && len(f) == 4:
 			r.add(home(f[1], f[2], kib(f[3])))
+		case f[0] == "docker" && len(f) == 2 && f[1] == "desktop":
+			r.DockerDesktop = true
 		case f[0] == "docker":
 			r.Docker = true
 		case f[0] == "containers" && len(f) == 2:
@@ -159,7 +170,12 @@ func parse(out string) Result {
 			r.add(Item{ID: "docker-build-cache", What: "docker-build-cache", Label: "Docker build cache", Bytes: n,
 				Kind: KindCache, Command: "docker builder prune --all --force"})
 		case f[0] == "img" && len(f) == 6:
-			r.add(image(f[1:]))
+			// One item per image: a Docker that lists an image once per tag
+			// would otherwise count and offer it twice.
+			if it := image(f[1:]); !seenImage[it.ID] {
+				seenImage[it.ID] = true
+				r.add(it)
+			}
 		case f[0] == "dangling" && len(f) == 2:
 			dangling[strings.TrimPrefix(strings.TrimSpace(f[1]), "sha256:")[:min(12, len(strings.TrimPrefix(strings.TrimSpace(f[1]), "sha256:")))]] = true
 		}
@@ -233,9 +249,12 @@ func image(f []string) Item {
 	name, size, since, inuse := f[1], f[2], f[3], strings.TrimSpace(f[4]) != "0"
 	it := Item{ID: "image:" + id, What: "image", Label: name, Bytes: dockerSize(size), Kind: KindImage, InUse: inuse, Note: since}
 	// An image a container uses is shown but cannot be selected: Docker
-	// would refuse, and the container needs it.
+	// would refuse, and the container needs it. Docker lists an image once
+	// even when it has several tags, and removing it by id fails then, so
+	// every tag of that id is removed, which removes the image.
 	if !inuse && validImageID(id) {
-		it.Command = "docker image rm " + id
+		it.Command = "docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | " +
+			"awk '$2 ~ /^sha256:" + id + "/ {print $1}' | xargs -r docker image rm"
 	}
 	return it
 }
@@ -247,8 +266,10 @@ func image(f []string) Item {
 // folder itself stays for its tool.
 func removeContents(path string) string {
 	q := quote(path)
-	return "p=" + q + "; if [ \"$(readlink -f \"$p\")\" = \"$p\" ] && [ \"$(stat -c %d \"$p\")\" = \"$(stat -c %d /)\" ]; " +
-		"then find \"$p\" -xdev -mindepth 1 -delete; else echo \"skipped $p: moved or linked\"; false; fi"
+	// It goes into the folder first and checks where it is from inside, so
+	// a link swapped in on the way after the check cannot move the removal.
+	return "p=" + q + "; if cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$(stat -c %d /)\" ]; " +
+		"then find . -xdev -mindepth 1 -delete; else echo \"skipped $p: moved or linked\"; false; fi"
 }
 
 // safePath accepts only absolute paths under /root or /home made of plain
@@ -316,8 +337,9 @@ func Clean(ctx context.Context, sys wsl.System, distro string, items []Item) (st
 		if it.Command == "" {
 			continue
 		}
-		// One line per item; a failure is reported and the next goes on.
-		fmt.Fprintf(&b, "echo '== %s'; %s 2>&1 || echo 'failed: %s'\n", it.ID, it.Command, it.What)
+		// One line per item, each in a subshell of its own (a command may
+		// change directory); a failure is reported and the next goes on.
+		fmt.Fprintf(&b, "echo '== %s'; ( %s ) 2>&1 || echo 'failed: %s'\n", it.ID, it.Command, it.What)
 	}
 	if b.Len() == 0 {
 		return "", nil

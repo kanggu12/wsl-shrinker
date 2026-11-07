@@ -43,14 +43,14 @@ the distribution, the run goes to its end: Ctrl+C does not leave a distribution 
 | `↑` `↓` | select a disk |
 | `space` | mark a disk, to shrink several in one run |
 | `s` or `⏎` | shrink the marked disks, or the selected one |
-| `c` | choose what to remove inside the selected running distribution |
+| `c` | choose what to remove inside the selected running distribution; also in the confirm box |
 | `r` | read the disks again |
 | `h` | past runs |
 | `?` | help |
 | `q` | quit |
 
-In the clean list: `space` chooses an item, `a` every cache (nothing that needs a download or holds history), `n` none,
-`⏎` continues to the shrink.
+In the clean list, grouped by what removing costs: `space` chooses an item, `a` every cache (nothing that needs a
+download or holds history), `n` none, `PgUp` `PgDn` `Home` `End` move by pages, `⏎` continues to the shrink.
 
 ## Exit codes
 

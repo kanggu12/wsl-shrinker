@@ -76,7 +76,7 @@ func TestParse(t *testing.T) {
 	if it := byID["docker-dangling"]; it.Bytes != 500_000_000 || it.Command != "docker image prune --force" {
 		t.Fatalf("dangling: %+v", it)
 	}
-	if it := byID["image:ba9876543210"]; it.Bytes != 1_100_000_000 || it.Command != "docker image rm ba9876543210" || it.Note != "2 months ago" {
+	if it := byID["image:ba9876543210"]; it.Bytes != 1_100_000_000 || !strings.Contains(it.Command, "/^sha256:ba9876543210/") || !strings.HasSuffix(it.Command, "xargs -r docker image rm") || it.Note != "2 months ago" {
 		t.Fatalf("node: %+v", it)
 	}
 	if _, ok := byID["image:0123456789ab"]; ok {
@@ -174,6 +174,23 @@ func TestRemoveContentsStaysWhereItWasListed(t *testing.T) {
 	}
 }
 
+func TestDockerDesktopIntegrationIsLeftAlone(t *testing.T) {
+	// Docker Desktop's integration answers docker here: its images are on
+	// its own disk, so none is offered for this one.
+	r := parse("docker|desktop\nimg|sha256:ba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedc|node:20|1.1GB|now|0\n")
+	if !r.DockerDesktop || r.Docker {
+		t.Fatalf("%+v", r)
+	}
+	// The script prints no image lines then: the branch with them is the
+	// one for an engine of this distribution's own.
+	s := script()
+	if !strings.Contains(s, `grep -q 'Docker Desktop'; then
+  echo "docker|desktop"
+elif`) {
+		t.Fatalf("script:\n%s", s)
+	}
+}
+
 func TestDockerSize(t *testing.T) {
 	for in, want := range map[string]int64{"0B": 0, "512MB": 512e6, "1.23GB": 1.23e9, "12.5kB": 12500, "2TB": 2e12, "junk": 0} {
 		if got := dockerSize(in); got != want {
@@ -234,7 +251,7 @@ func TestClean(t *testing.T) {
 	}
 	// Items without a command are skipped; each command reports a failure
 	// without stopping the rest.
-	if !strings.Contains(got, "apt-get clean 2>&1 || echo 'failed: apt'") || strings.Contains(got, "== x") {
+	if !strings.Contains(got, "( apt-get clean ) 2>&1 || echo 'failed: apt'") || strings.Contains(got, "== x") {
 		t.Fatalf("script:\n%s", got)
 	}
 	// A stopped distribution is not started to clean it.

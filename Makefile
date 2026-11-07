@@ -17,20 +17,23 @@ fmt:
 	@out=$$(gofmt -l cmd internal); if [ -n "$$out" ]; then echo "not gofmt'ed:"; echo "$$out"; exit 1; fi
 
 # The Windows code is vetted too: it builds only there.
+# Only the project's packages: work tools in an ignored scratch/ stay out.
+PKGS := ./cmd/... ./internal/...
+
 vet:
-	go vet ./...
-	GOOS=windows go vet ./...
+	go vet $(PKGS)
+	GOOS=windows go vet $(PKGS)
 
 # staticcheck is built for this machine once, then run for both systems:
 # `go run` with GOOS=windows would build it as a Windows program.
 lint:
 	go install $(STATICCHECK)
-	$$(go env GOPATH)/bin/staticcheck ./...
-	GOOS=windows $$(go env GOPATH)/bin/staticcheck ./...
+	$$(go env GOPATH)/bin/staticcheck $(PKGS)
+	GOOS=windows $$(go env GOPATH)/bin/staticcheck $(PKGS)
 	shellcheck scripts/*.sh
 
 test:
-	go test -race -count=1 ./...
+	go test -race -count=1 $(PKGS)
 
 ## fuzz: every fuzz target for FUZZTIME each (default 30s); failures land in testdata/fuzz
 FUZZTIME ?= 30s

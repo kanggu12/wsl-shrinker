@@ -38,6 +38,13 @@ there and does not start the distribution. Do not use it until you know why: att
 it (`wsl --mount --vhd <file> --bare`, as administrator), check it from another distribution with
 `sudo e2fsck -fn /dev/sdX` (`lsblk` names it), and open an issue with `wsl-shrinker history --json`.
 
+## The window closed during a run
+
+Closing the window, or the terminal it runs in, ends wsl-shrinker, but not what WSL is doing: a compaction that had
+started finishes on its own. What wsl-shrinker would have done after it does not happen: the distribution is not
+started again, and its containers stay stopped. `wsl -d <distro>` starts it; containers with a restart policy come back
+with Docker. `wsl-shrinker history` has no line for that run.
+
 ## A new window opened
 
 Started from a terminal inside the distribution being shrunk, the run moves to a new window: stopping the

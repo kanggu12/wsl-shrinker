@@ -6,6 +6,39 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-08
+
+### Changed
+
+- The clean list is grouped by what removing costs (caches, downloads, Docker images, logs), each group with its size,
+  and says which rows of a long list are on screen. `PgUp`, `PgDn`, `Home` and `End` move through it.
+- The details of the selected disk show as many findings as fit, and a short window leaves a section out rather than
+  show its heading alone.
+- A run's screen says in a sentence what the running step does; a failed run says whether the disk changed and whether
+  the distribution runs; a run with a warning says to look at it.
+- The confirm box says when nothing was chosen to clean inside, and how to choose.
+- Docker Desktop's disk in use shows in blue, with what it gives back once Docker Desktop is closed, and is not counted
+  as worth shrinking until then.
+- With no disk, or when the disks cannot be listed, only the keys that do something are shown; a long error shows
+  whole. Docker's "5 weeks ago" is said in Korean on a Korean screen.
+
+### Fixed
+
+- Spinners turn and passing messages go away on their own, without a key press.
+- Moving up in a long clean list no longer jumps.
+- In a distribution where docker is Docker Desktop's WSL integration, its images and build cache are no longer offered
+  for cleaning (they are on Docker Desktop's own disk), and its containers are no longer stopped.
+- `c` in the confirm box opens the clean list, as the box says; the box counts what was chosen in the space that comes
+  back, and says how many containers stop only when it knows.
+- A run of several disks shows each disk's outcome; a disk compacted before a later step failed is said to be shrunk,
+  and is no longer left marked.
+- The screen no longer stops on: a reload while a distribution was being looked at, a clean list that became shorter or
+  empty, a confirm box whose disk became blocked, or a run started while a run moved to a new window was getting ready.
+- Ctrl+C before a disk is stopped ends the run there; once it is stopped, every call to WSL has a deadline, so one that
+  never answers cannot hold the run forever.
+- An image with several tags is removed with all its tags; Docker refused to remove it by id.
+- Emptying a cache checks its folder from inside it, so a link put in its way after the check cannot move the removal.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added
@@ -25,5 +58,6 @@ that only fixes raises the patch number. Each release's section here is its rele
 - Commands for scripts: `list`, `inside`, `shrink`, `history`, `doctor` and `config`, with `--json` where it applies.
 - Started from inside WSL, it continues in a new window when it shrinks the distribution its terminal runs in.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kanggu12/wsl-shrinker/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.1.0

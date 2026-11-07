@@ -19,6 +19,10 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if s == "ctrl+c" && !(m.mode == modeRun && m.run != nil && !m.run.done) {
 		return m, tea.Quit
 	}
+	// While a run asked for on the command line gets ready, only q works.
+	if m.preparing && s != "q" {
+		return m, nil
+	}
 	switch m.mode {
 	case modeHelp, modeHistory:
 		if s == "q" {
@@ -106,21 +110,38 @@ func (m model) openClean() (tea.Model, tea.Cmd) {
 
 // keyClean moves through the clean list and toggles items.
 func (m model) keyClean(s string) (tea.Model, tea.Cmd) {
-	items := m.surveys[m.pickFor].r.Items
+	items := m.cleanItems()
+	// Nothing left to choose from (a look inside came back empty).
+	if len(items) == 0 {
+		m.mode = modeMain
+		return m, nil
+	}
+	last := len(items) - 1
+	m.pickSel = min(max(m.pickSel, 0), last)
+	page := max(1, m.cleanVisible()-1)
 	switch s {
 	case "esc", "q":
 		m.mode = modeMain
+		return m, nil
 	case "up", "k":
 		m.pickSel = max(m.pickSel-1, 0)
 	case "down", "j":
-		m.pickSel = min(m.pickSel+1, len(items)-1)
+		m.pickSel = min(m.pickSel+1, last)
+	case "pgup":
+		m.pickSel = max(m.pickSel-page, 0)
+	case "pgdown":
+		m.pickSel = min(m.pickSel+page, last)
+	case "home", "g":
+		m.pickSel = 0
+	case "end", "G":
+		m.pickSel = last
 	case "space":
 		k := pickKey(m.pickFor, items[m.pickSel].ID)
 		m.picked[k] = !m.picked[k]
 		if !m.picked[k] {
 			delete(m.picked, k)
 		}
-		m.pickSel = min(m.pickSel+1, len(items)-1)
+		m.pickSel = min(m.pickSel+1, last)
 	case "a":
 		// Every cache, nothing that needs a download or holds history.
 		for _, it := range items {
@@ -143,6 +164,7 @@ func (m model) keyClean(s string) (tea.Model, tea.Cmd) {
 		}
 		return m.openConfirm()
 	}
+	m.scrollClean()
 	return m, nil
 }
 
@@ -162,8 +184,20 @@ func (m model) openConfirm() (tea.Model, tea.Cmd) {
 // keyConfirm answers the question.
 func (m model) keyConfirm(s string) (tea.Model, tea.Cmd) {
 	switch s {
+	case "c":
+		// Choose what to remove inside first, as the box offers.
+		m.mode = modeMain
+		return m.openClean()
 	case "enter", "y":
 		q := m.queueFor()
+		// The disks may have become blocked while the box was open.
+		if len(q) == 0 {
+			m.mode = modeMain
+			if d, ok := m.selected(); ok {
+				m.say(m.blocked(d), ui.CatSafe)
+			}
+			return m, nil
+		}
 		clean := map[string][]survey.Item{}
 		for _, d := range q {
 			if d.Distro != "" && d.Running {

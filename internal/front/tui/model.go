@@ -127,8 +127,11 @@ type model struct {
 	toastCat   ui.Category
 	toastUntil time.Time
 
-	// pending is a run asked for by the options, started after the first load.
-	pending *Options
+	// pending is a run asked for by the options, started after the first
+	// load; preparing is set while that run looks inside first, when keys
+	// that would start another run are ignored.
+	pending   *Options
+	preparing bool
 }
 
 // newModel builds the screen for a backend.
@@ -164,7 +167,7 @@ func Run(ctx context.Context, b Backend, opt Options) error {
 // Init loads the disks and WSL's version, and asks the terminal for its
 // background so the colors suit it.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.loadDisks(), m.loadInfo())
+	return tea.Batch(tea.RequestBackgroundColor, m.loadDisks(), m.loadInfo(), frameTick())
 }
 
 // loadDisks reads the disks in the background.
@@ -226,19 +229,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 		if m.pending != nil && m.err == nil {
 			p := m.pending
-			m.pending = nil
+			m.pending, m.preparing = nil, true
 			return m, m.prepareRun(*p)
+		}
+		// A look inside starts from the disk list only: under an open clean
+		// list a new answer would change the rows being chosen from.
+		if m.mode != modeMain {
+			return m, nil
 		}
 		return m, m.surveySelected()
 	case autoRunMsg:
+		m.preparing = false
 		if msg.err != nil {
 			m.say(msg.err.Error(), ui.CatBad)
 			return m, nil
 		}
 		return m.startRun(msg.queue, msg.clean)
 	case surveyMsg:
+		// A reload may have dropped the state this answer was for.
 		s := m.surveys[msg.distro]
+		if s == nil {
+			s = &surveyState{}
+			m.surveys[msg.distro] = s
+		}
 		s.loading, s.r, s.err, s.at = false, msg.r, msg.err, time.Now()
+		// The clean list follows what was found: a cursor past its end goes
+		// to the last item, and an empty list closes.
+		if m.mode == modeClean && m.pickFor == msg.distro {
+			if n := len(m.cleanItems()); n == 0 {
+				m.mode = modeMain
+			} else {
+				m.pickSel = min(m.pickSel, n-1)
+				m.scrollClean()
+			}
+		}
 		return m, nil
 	case eventMsg:
 		if m.run != nil {
@@ -252,12 +276,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		return m.finishDisk(shrink.Result(msg))
 	case frameMsg:
+		// The clock keeps going for the whole session: spinners turn while
+		// something loads, a run's times count up, passing messages expire.
 		m.now = time.Time(msg)
 		m.spin++
-		if m.mode == modeRun && m.run != nil && !m.run.done {
-			return m, frameTick()
-		}
-		return m, nil
+		return m, frameTick()
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -320,6 +343,11 @@ func (m *model) say(text string, c ui.Category) {
 // startRun begins a run of the queue: the engine runs in the background and
 // its events come back through a channel, one message at a time.
 func (m model) startRun(queue []disks.Disk, clean map[string][]survey.Item) (tea.Model, tea.Cmd) {
+	// One run at a time, and never one of nothing.
+	if len(queue) == 0 || m.run != nil && !m.run.done {
+		m.mode = modeMain
+		return m, nil
+	}
 	m.mode = modeRun
 	m.run = &runState{queue: queue, clean: clean, events: make(chan tea.Msg, 64)}
 	return m, tea.Batch(m.startDisk(), frameTick())
@@ -356,7 +384,9 @@ func (m model) finishDisk(res shrink.Result) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	r.results = append(r.results, res)
-	if res.Err == "" {
+	// A disk that was compacted is done with, even when a later step went
+	// wrong: marked again, it would be shrunk a second time.
+	if e, ok := r.steps[shrink.StepCompact]; res.Err == "" || ok && e.Status == shrink.Done {
 		delete(m.marked, res.Disk)
 	}
 	// A failure stops the queue: the next disk can wait for a look.
@@ -403,6 +433,77 @@ func (m model) blocked(d disks.Disk) string {
 		return i18n.T("toast.nocompact")
 	}
 	return ""
+}
+
+// kindOrder is the order of the groups in the clean list: what is rebuilt
+// on its own first, history last.
+var kindOrder = []survey.Kind{survey.KindCache, survey.KindDownload, survey.KindImage, survey.KindLog}
+
+// cleanItems returns the clean list's items in group order, largest first
+// within a group. The cursor (pickSel) is an index into this order.
+func (m model) cleanItems() []survey.Item {
+	s := m.surveys[m.pickFor]
+	if s == nil {
+		return nil
+	}
+	var out []survey.Item
+	for _, k := range kindOrder {
+		for _, it := range s.r.Items {
+			if it.Kind == k {
+				out = append(out, it)
+			}
+		}
+	}
+	return out
+}
+
+// cleanRow is one line of the clean list: a blank line between groups
+// (item -2), a group's header (item -1) or an item, by its index in
+// cleanItems.
+type cleanRow struct {
+	kind survey.Kind
+	item int
+}
+
+// cleanRows lays out the clean list: each group's header, then its items.
+func (m model) cleanRows(items []survey.Item) []cleanRow {
+	var rows []cleanRow
+	for i, it := range items {
+		if i == 0 || items[i-1].Kind != it.Kind {
+			if i > 0 {
+				rows = append(rows, cleanRow{kind: it.Kind, item: -2})
+			}
+			rows = append(rows, cleanRow{kind: it.Kind, item: -1})
+		}
+		rows = append(rows, cleanRow{kind: it.Kind, item: i})
+	}
+	return rows
+}
+
+// cleanVisible is how many list rows fit under the clean list's title.
+func (m model) cleanVisible() int { return max(1, m.bodyHeight()-4) }
+
+// scrollClean keeps the cursor's row, and its group's header when it fits,
+// on screen.
+func (m *model) scrollClean() {
+	rows := m.cleanRows(m.cleanItems())
+	at := slices.IndexFunc(rows, func(r cleanRow) bool { return r.item == m.pickSel })
+	if at < 0 {
+		return
+	}
+	// Show the header above the first item of a group with it.
+	want := at
+	if at > 0 && rows[at-1].item < 0 {
+		want = at - 1
+	}
+	visible := m.cleanVisible()
+	if want < m.pickTop {
+		m.pickTop = want
+	}
+	if at >= m.pickTop+visible {
+		m.pickTop = at - visible + 1
+	}
+	m.pickTop = max(0, min(m.pickTop, len(rows)-visible))
 }
 
 // pickKey names one item of one distribution.

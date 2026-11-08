@@ -6,6 +6,24 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-08
+
+### Added
+
+- A run that starts containers again says how long they run. WSL stops a distribution once no terminal or other
+  program from Windows runs in it, 15 seconds later by default (`instanceIdleTimeout` in `.wslconfig`), and Docker and
+  its containers with it; the compaction closes the terminals that kept the distribution running, so after a run it
+  stops again unless something else runs in it. The note follows the result on the screen, where it shows whole or
+  not at all, and in `wsl-shrinker shrink`, and the JSON counts the containers in `containers_started`.
+  Troubleshooting says what brings them back.
+
+### Changed
+
+- CI shrinks the throwaway distribution on a real WSL 2 with Docker in it, two containers running and one stopped:
+  the running ones must be stopped and started again, the stopped one left alone. It then compacts copies of that disk
+  where Docker Desktop keeps its disk, where Docker's settings move it, and as a file from `extra_disks`, each held
+  against its estimate.
+
 ## [0.1.0] - 2026-11-08
 
 The first public release.
@@ -46,5 +64,6 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.1.0

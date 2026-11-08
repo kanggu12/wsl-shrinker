@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -150,9 +151,9 @@ func (m model) runView() string {
 			"   "+ui.Fit(i18n.T("run.before"), 10)+before+"  "+units.Bytes(e.FileSize),
 			"   "+ui.Fit(label, 10)+after+"  "+units.Bytes(afterSize), "")
 	}
-	// The outcome, once there is one.
+	// The outcome, once there is one, in the rows the steps left.
 	if r.done {
-		body = append(body, m.outcome()...)
+		body = append(body, m.outcome(m.bodyHeight()-len(body))...)
 	}
 	keys := m.keyBar([][2]string{{"⏎", i18n.T("key.back")}, {"q", i18n.T("key.quit")}})
 	status := " " + ui.Fg(t.Muted).Render(i18n.T("run.wait"))
@@ -242,17 +243,25 @@ func (m model) resultFor(name string) *shrink.Result {
 	return nil
 }
 
-// outcome sums up a finished run.
-func (m model) outcome() (lines []string) {
+// outcome sums up a finished run in at most room rows.
+func (m model) outcome(room int) (lines []string) {
 	t := m.th
-	// The history is the record a bug report starts from: a run it could
-	// not keep says so, under whatever else is said.
+	// Where the note on restarted containers goes: under the line that sums
+	// the run up.
+	at := 0
 	defer func() {
+		// The history is the record a bug report starts from: a run it
+		// could not keep says so, under whatever else is said.
 		for _, res := range m.run.results {
 			if n := res.Notes["history"]; n != "" {
 				lines = append(lines, m.wrap(i18n.T("run.nohistory", oneLine(n)), " ", ui.Fg(t.Cat[ui.CatWarn]))...)
-				return
+				break
 			}
+		}
+		// The note goes in whole or not at all: in a window too short for
+		// it, a sentence cut in the middle would say less than none.
+		if notes := m.idleNotes(); len(notes) > 0 && len(lines)+len(notes) <= room {
+			lines = slices.Insert(lines, at, notes...)
 		}
 	}()
 	// What the disks that went through gave back; a disk that failed says
@@ -276,6 +285,7 @@ func (m model) outcome() (lines []string) {
 		state := m.failureState(failed)
 		// The title says it was not shrunk; here is what that leaves.
 		lines = append(m.perDisk(), m.wrap(state, " ", ui.Fg(t.Ink))...)
+		at = len(lines)
 		lines = append(lines, " "+ui.Fg(t.Muted).Render(i18n.T("run.next")))
 		if freed > 0 {
 			lines = append(lines, " "+i18n.T("run.partial", units.Bytes(freed)))
@@ -283,12 +293,26 @@ func (m model) outcome() (lines []string) {
 		return lines
 	}
 	lines = append(m.perDisk(), " "+ui.Fg(t.Cat[ui.CatDone]).Bold(true).Render(i18n.T("run.freed", units.Bytes(freed), elapsed(took))))
+	at = len(lines)
 	// A step that warned is worth a second look.
 	for _, res := range m.run.results {
 		for _, e := range res.Events {
 			if e.Status == shrink.Warned {
 				return append(lines, " "+ui.Fg(t.Cat[ui.CatWarn]).Render(i18n.T("run.warned")))
 			}
+		}
+	}
+	return lines
+}
+
+// idleNotes says, under a run, how long the containers it started again
+// run: as long as WSL keeps their distribution running, which it stops
+// once nothing from Windows runs in it (shrink.IdleNote). One note for
+// each disk whose run started containers again, in the muted color.
+func (m model) idleNotes() (lines []string) {
+	for _, res := range m.run.results {
+		if res.Left == shrink.LeftRunning && res.ContainersStarted > 0 {
+			lines = append(lines, m.wrap(i18n.T("run.idle", res.Disk), " ", ui.Fg(m.th.Muted))...)
 		}
 	}
 	return lines

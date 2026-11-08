@@ -143,6 +143,12 @@ func (d *Demo) Shrink(_ context.Context, disk disks.Disk, opt shrink.Options, em
 	} else {
 		emit(shrink.Event{Step: shrink.StepRestart, Status: shrink.Skipped, At: time.Now()})
 	}
+	// Left as the engine leaves it: a distribution that ran runs again,
+	// with the three containers it stopped, so the screen says what it
+	// says after a real run.
+	if disk.Running {
+		res.Left, res.ContainersStarted = shrink.LeftRunning, 3
+	}
 	after := disk.File
 	after.OnDisk = disk.Estimate.FileSize - freed
 	res.File, res.Freed, res.Took = &after, freed, took

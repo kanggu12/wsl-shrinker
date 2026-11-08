@@ -266,7 +266,11 @@ func shrinkCmd(p *apps) *cobra.Command {
 			}
 			var results []shrink.Result
 			failed := false
+			// The distribution of the disk run last, for the note a failed
+			// run that still started its containers again ends with.
+			lastDistro := ""
 			for _, d := range queue {
+				lastDistro = d.Distro
 				// Ctrl+C between disks ends the run before the next one.
 				if ctx.Err() != nil {
 					failed = true
@@ -294,6 +298,11 @@ func shrinkCmd(p *apps) *cobra.Command {
 				}
 				if !asJSON {
 					fmt.Fprintf(out, "  %s\n", l.gain(fmt.Sprintf("freed %s in %s", units.Bytes(res.Freed), res.Took.Round(time.Second))))
+					// The containers started again run only while WSL keeps
+					// the distribution running.
+					if s := idleNote(l, res, d.Distro); s != "" {
+						fmt.Fprintf(out, "  %s\n", s)
+					}
 				}
 			}
 			if asJSON {
@@ -316,6 +325,11 @@ func shrinkCmd(p *apps) *cobra.Command {
 						}
 						fmt.Fprintf(out, "  %s\n", s)
 					}
+					// Running again with its containers, as after a run that
+					// went through: they last as long as WSL keeps it running.
+					if s := idleNote(l, last, lastDistro); s != "" {
+						fmt.Fprintf(out, "  %s\n", s)
+					}
 				}
 				err := fmt.Errorf("%s: %s", last.Disk, last.Err)
 				// A distribution left not running is more than a failure:
@@ -332,6 +346,16 @@ func shrinkCmd(p *apps) *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the results as JSON")
 	cmd.Flags().StringArrayVar(&clean, "clean", nil, "NAME=ID,ID: remove these items inside NAME first")
 	return cmd
+}
+
+// idleNote is the line under a run that started containers again: they
+// run only while WSL keeps their distribution running (shrink.IdleNote).
+// It is "" for any other run, and for a disk that is not a distribution.
+func idleNote(l look, r shrink.Result, distro string) string {
+	if r.Left != shrink.LeftRunning || r.ContainersStarted == 0 || distro == "" {
+		return ""
+	}
+	return l.muted("note: " + shrink.IdleNote(distro))
 }
 
 // cleanChoices resolves --clean NAME=ID,ID against a fresh look inside each

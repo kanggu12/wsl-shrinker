@@ -131,7 +131,7 @@ files and ext4 filesystems the tests build, the steps of a shrink on a fake WSL,
 | The command line | `front/cli` | both modes, the look of a mistake in a terminal and piped, setup's flags |
 | The launcher | `cmd/wsl-shrinker` | where it runs, the processor and Windows build checks, with fake programs and no `cmd.exe` |
 | Windows | `scripts/test-windows.sh`, CI | every package again as a Windows program; the screen and setup in a pseudoconsole; on Windows Server 2022 and 2025 and Windows 11 on Arm |
-| A real WSL | CI | a throwaway Alpine distribution on Windows Server 2025's WSL 2, half a GiB freed inside, estimated, shrunk and read again, what came back held against the estimate; a WSL 1 one on Server 2022's built-in WSL, which must not be listed |
+| A real WSL | CI | a throwaway Alpine distribution on Windows Server 2025's WSL 2 with Docker in it, two containers running and one stopped, half a GiB freed inside, estimated, shrunk while it runs and read again, what came back held against the estimate and the containers against what ran; copies of its disk where Docker Desktop keeps its disk, where Docker's settings move it, and from `extra_disks`, compacted through Windows' virtual disk API and held against their estimates; a WSL 1 one on Server 2022's built-in WSL, which must not be listed |
 | Installers and packages | CI, release | `install.ps1` in Windows PowerShell 5.1 and PowerShell 7 and on ARM64, installed, run and removed; the Scoop manifest; the demo image |
 
 No test opens a window: `winapi.Reopen` refuses inside a test binary, and the launcher's tests replace what it reaches

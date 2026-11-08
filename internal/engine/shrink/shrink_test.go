@@ -121,6 +121,22 @@ func TestRunningDistribution(t *testing.T) {
 	if last := r.Events[len(r.Events)-1]; !strings.Contains(last.Detail, "2 containers started again") {
 		t.Fatalf("restart: %+v", last)
 	}
+	// The result counts them, for the note the fronts put under the run.
+	if r.Left != LeftRunning || r.ContainersStarted != 2 || r.ContainersNotStarted != 0 {
+		t.Fatalf("left %q, started %d, not started %d", r.Left, r.ContainersStarted, r.ContainersNotStarted)
+	}
+}
+
+func TestTheNoteSaysWSLStopsItAgainWhenNothingRunsInIt(t *testing.T) {
+	// What the fronts say under a run that started containers again: the
+	// distribution by name, why it stops, after how long, the setting, and
+	// what keeps the containers running or brings them back.
+	n := IdleNote("Dev")
+	for _, want := range []string{"WSL stops Dev again", "no terminal or other program from Windows", "15 seconds", "instanceIdleTimeout in .wslconfig", "a terminal open in it keeps them running", "restart policy"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("no %q in %q", want, n)
+		}
+	}
 }
 
 func TestCleanRunsChosenItemsOnly(t *testing.T) {

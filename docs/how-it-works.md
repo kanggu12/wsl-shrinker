@@ -92,7 +92,15 @@ e2fsck to see first.
 **Start again** checks the root is mounted read-write. When it is not, the distribution is stopped and started once
 more; if it stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, since it stops every
 distribution. Containers come back with `docker start`, one at a time, on the ids that were running before the stop;
-one that does not start is counted, and a container that was already stopped stays stopped.
+one that does not start is counted, and a container that was already stopped stays stopped. Docker may still be
+starting with the distribution (systemd, or a `[boot]` command in `/etc/wsl.conf`): the run waits for it, up to a minute.
+
+How long they run then is WSL's to say. WSL stops a distribution once no terminal or other program from Windows runs
+in it, after `instanceIdleTimeout` in `.wslconfig` (15 seconds by default; `-1` turns it off), and everything inside
+stops with it: Docker, its containers, systemd's services. The compaction closed the terminals that kept the
+distribution running, so unless something else from Windows runs in it, it stops again a little after the run, and
+the run says so under its result. A terminal open in it keeps the containers running; those with a restart policy
+(`unless-stopped`, `always`) start again with Docker the next time the distribution starts.
 
 After a failed stop, a failed compaction, or a disk that could not be opened to verify it, the distribution and the
 containers that were stopped are started again before the run reports. Only a disk that does not read as before after

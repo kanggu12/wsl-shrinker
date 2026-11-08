@@ -125,6 +125,9 @@ func settledLike(d disks.Disk, res shrink.Result) shrink.Result {
 		res.Left = shrink.LeftDown
 	default:
 		res.Left, res.ContainersNotStarted = shrink.LeftRunning, restart.NotRestarted
+		// Those that ran before, less those that did not start, as the
+		// engine counts them.
+		res.ContainersStarted = restart.Count - restart.NotRestarted
 	}
 	return res
 }
@@ -456,6 +459,38 @@ func TestRunGoingOnElsewhereHoldsShrinkingBack(t *testing.T) {
 	}
 	if m := playKeys(t, b, []string{"s"}); m.mode != modeMain || !strings.Contains(m.toast, "finish Debian") {
 		t.Fatalf("mode %v, toast %q", m.mode, m.toast)
+	}
+}
+
+func TestARunThatStartedContainersSaysHowLongTheyRun(t *testing.T) {
+	// Under a run that started containers again, in either language: WSL
+	// stops the distribution once nothing from Windows runs in it, and the
+	// containers with it. A run that started none says nothing of it.
+	for lang, want := range map[i18n.Lang]string{
+		i18n.English: "WSL stops Ubuntu-24.04 again once no terminal or other program from Windows runs in it, 15 seconds later by default (instanceIdleTimeout in .wslconfig)",
+		i18n.Korean:  "Windows에서 Ubuntu-24.04 배포판에 연 터미널이나 프로그램이 하나도 없으면 WSL이 기본 15초 뒤 배포판을 다시 멈추고",
+	} {
+		i18n.Set(lang)
+		out := joined(screen(demo(), 120, 30, "c", "space", "down", "space", "enter", "enter"))
+		if !strings.Contains(out, want) {
+			t.Errorf("%s: no note under the run:\n%s", lang, out)
+		}
+	}
+	i18n.Set(i18n.English)
+	// In a window too short for all of it, none of it: never a sentence
+	// cut in the middle.
+	for _, size := range [][2]int{{60, 16}, {60, 18}, {60, 20}, {70, 18}, {80, 20}, {80, 24}, {120, 30}} {
+		out := joined(screen(demo(), size[0], size[1], "c", "space", "down", "space", "enter", "enter"))
+		if strings.Contains(out, "WSL stops") != strings.Contains(out, "start again with it next time.") {
+			t.Errorf("%dx%d: the note is cut:\n%s", size[0], size[1], out)
+		}
+	}
+	if out := joined(screen(demo(), 80, 24, "c", "space", "down", "space", "enter", "enter")); !strings.Contains(out, "next time.") {
+		t.Errorf("80x24 has room for the note, and it is not there:\n%s", out)
+	}
+	// Debian, stopped before, starts no containers: no note.
+	if out := joined(screen(demo(), 120, 30, "down", "down", "s", "enter")); strings.Contains(out, "WSL stops") || !strings.Contains(out, "Gave back") {
+		t.Errorf("a run that started no containers has the note, or did not end:\n%s", out)
 	}
 }
 

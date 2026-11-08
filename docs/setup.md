@@ -41,7 +41,7 @@ These environment variables, set before it runs, change what it does:
 
 | Variable | |
 |:---|:---|
-| `WSL_SHRINKER_VERSION` | the release to install, like `v0.1.0` (default: the latest) |
+| `WSL_SHRINKER_VERSION` | the release to install, like `v0.2.0` (default: the latest) |
 | `WSL_SHRINKER_BIN_DIR` | where the program goes (default: `%LOCALAPPDATA%\Programs\wsl-shrinker`) |
 | `WSL_SHRINKER_ZIP` | a zip already downloaded, installed as it is: see [without internet access](#without-internet-access) |
 | `WSL_SHRINKER_BASE_URL` | where releases are downloaded from, for a mirror |
@@ -81,13 +81,13 @@ Put both files from `dist/` in one folder on your PATH. A build from a commit sa
 Every zip is listed in the release's `checksums.txt` with its SHA-256; the one-line install checks it for you:
 
 ```powershell
-(Get-FileHash .\wsl-shrinker_0.1.0_windows_amd64.zip -Algorithm SHA256).Hash
+(Get-FileHash .\wsl-shrinker_0.2.0_windows_amd64.zip -Algorithm SHA256).Hash
 ```
 
 The zips also carry build provenance, which GitHub signs: with the [GitHub CLI](https://cli.github.com),
 
 ```sh
-gh attestation verify wsl-shrinker_0.1.0_windows_amd64.zip -R kanggu12/wsl-shrinker
+gh attestation verify wsl-shrinker_0.2.0_windows_amd64.zip -R kanggu12/wsl-shrinker
 ```
 
 shows that the zip was built by this repository's release workflow from the tagged commit.
@@ -98,7 +98,7 @@ Download the zip for the PC's processor and `checksums.txt` on a machine that ha
 `install.ps1`, check the zip, then install from it:
 
 ```powershell
-$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.1.0_windows_amd64.zip'
+$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.2.0_windows_amd64.zip'
 & ([scriptblock]::Create((Get-Content D:\install.ps1 -Raw)))
 Remove-Item Env:WSL_SHRINKER_ZIP
 ```
@@ -125,9 +125,12 @@ is set too; a run that was cut off keeps its journal either way, for `wsl-shrink
 
 ## Versions
 
-CI runs wsl-shrinker on every change on Windows Server 2025, where it imports a throwaway distribution and shrinks it
-with WSL 2 for real; on Windows Server 2022, with the WSL built into Windows; and on Windows 11 on Arm, with the arm64
-build. Windows 10 has no runner of its own; it runs the same code as Server 2022.
+CI runs wsl-shrinker on every change on Windows Server 2025, where it imports a throwaway distribution with Docker and
+running containers in it and shrinks it with WSL 2 for real, then compacts copies of its disk where Docker Desktop
+keeps its disk, where Docker's settings move it, and as a file from `extra_disks`; on Windows Server 2022, with the WSL
+built into Windows; and on Windows 11 on Arm, with the arm64 build. Windows 10 has no runner of its own; it runs the
+same code as Server 2022. Docker Desktop itself does not run on these runners: its disk is a copy put where Docker
+Desktop keeps it.
 
 ### Windows
 

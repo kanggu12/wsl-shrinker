@@ -275,6 +275,23 @@ type Result struct {
 	// ContainersNotStarted counts the containers that ran before and did
 	// not start again.
 	ContainersNotStarted int `json:"containers_not_started,omitempty"`
+	// ContainersStarted counts the containers that ran before and were
+	// started again. They run as long as WSL keeps the distribution
+	// running, which IdleNote says more of.
+	ContainersStarted int `json:"containers_started,omitempty"`
+}
+
+// IdleNote says, for a distribution that runs again with the containers a
+// run started, how long that lasts. WSL stops a distribution once no
+// terminal or other program from Windows runs in it, after its
+// instanceIdleTimeout, 15 seconds unless .wslconfig sets it; the containers
+// and services inside stop with it, whatever their restart policy. The
+// compaction closed the terminals that kept it running before, so the
+// fronts say this wherever they say the containers started again.
+func IdleNote(distro string) string {
+	return "WSL stops " + distro + " again once no terminal or other program from Windows runs in it, " +
+		"15 seconds later by default (instanceIdleTimeout in .wslconfig), and its containers with it: " +
+		"a terminal open in it keeps them running, and those with a restart policy start again with it next time"
 }
 
 // MarshalJSON writes the result with took_seconds.
@@ -400,6 +417,9 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 			if err != nil {
 				e = Event{Step: StepRestart, Status: Failed, Detail: oneLine(err.Error())}
 				res.Left = LeftDown
+			} else {
+				// Those that ran before, less those that did not start.
+				res.ContainersStarted = e.Count - e.NotRestarted
 			}
 			sayE(e)
 		}
@@ -620,6 +640,8 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	// recorded as down.
 	settled = true
 	res.Left, res.ContainersNotStarted = LeftRunning, e.NotRestarted
+	// Those that ran before, less those that did not start.
+	res.ContainersStarted = e.Count - e.NotRestarted
 	res.Took = time.Since(start)
 	sayE(e)
 	return res

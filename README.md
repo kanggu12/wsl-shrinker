@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.1.0" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.2.0" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <a href="https://github.com/kanggu12/wsl-shrinker/pkgs/container/wsl-shrinker-demo"><img alt="Demo image" src="docs/assets/badges/demo.svg"></a>
   <img alt="Runs on Windows 10 and 11, x64 and ARM64, with WSL 2" src="docs/assets/badges/runs-on.svg">
@@ -31,7 +31,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-dark.gif">
-  <img alt="The wsl-shrinker screen on a PC with five WSL disks. Ubuntu-24.04 is selected: it gives back about 64 GB, and inside it the Docker build cache, Go modules and other caches and downloads are listed. Docker Desktop's disk shows as in use. In Ubuntu-24.04 two items are chosen, the shrink is confirmed, and the run goes through check, clean, stop, compact, verify and start again." src="docs/assets/demo-light.gif">
+  <img alt="The wsl-shrinker screen on a PC with five WSL disks. Ubuntu-24.04 is selected: it gives back about 64 GB, and inside it the Docker build cache, Go modules and other caches and downloads are listed. Docker Desktop's disk shows as in use. In Ubuntu-24.04 two items are chosen, the shrink is confirmed, and the run goes through check, clean, stop, compact, verify and start again, then says that WSL stops the distribution again, and its containers with it, once nothing from Windows runs in it." src="docs/assets/demo-light.gif">
 </picture>
 
 A WSL 2 distribution keeps its files in a virtual disk, `ext4.vhdx`, that grows as Linux writes and never shrinks on its
@@ -80,7 +80,8 @@ The installer and the first start open a short wizard, a page per choice, each s
   journal, Docker's build cache and unused images are listed with what each frees, and you pick. Docker volumes and
   containers are never removed: the code that would do it does not exist.
 - **Containers stop properly.** Each with its own stop timeout, then your scripts in `/etc/wsl-shrinker/pre-stop.d/`,
-  so a database flushes before its distribution stops; afterwards, the ones that were running start again.
+  so a database flushes before its distribution stops; afterwards, the ones that were running start again. CI runs
+  this on a real WSL 2 with Docker inside.
 - **It checks the result.** The disk is read again after the compaction. One that does not read as before stays
   stopped, and the run says why.
 - **A closed window is not a lost run.** Each run keeps a journal, and the next start finishes one that was cut off.
@@ -110,7 +111,7 @@ settings, is compacted without a trim: only its blocks of zeros go, and its esti
 | **Stop** | Containers with their own stop timeouts, then your scripts in `/etc/wsl-shrinker/pre-stop.d/`. |
 | **Compact** | WSL's own `wsl --manage --compact`, which trims the filesystem first. Docker Desktop's disk and files from the settings, which WSL does not register, go through Windows' virtual disk API, which drops only blocks of zeros. |
 | **Verify** | The disk is read again: the filesystem must read without errors and hold what it held, less what you removed. |
-| **Start again** | If it was running: writable (WSL has been seen to leave the root read-only after compacting; a second start clears it), with the containers that were running, and only those. A failed step brings it back too, unless the disk does not read as before. |
+| **Start again** | If it was running: writable (WSL has been seen to leave the root read-only after compacting; a second start clears it), with the containers that were running, and only those. A failed step brings it back too, unless the disk does not read as before. WSL stops a distribution again once no terminal or other program from Windows runs in it, 15 seconds later by default, and the containers with it: the run says so under its result. |
 
 Started from a terminal inside the distribution being shrunk, the run continues in a new window, since stopping the
 distribution closes the terminal. [How it works](docs/how-it-works.md) has every check.

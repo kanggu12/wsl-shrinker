@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.3.0" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.4.0" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <img alt="Windows 10 and 11, WSL 2" src="docs/assets/badges/runs-on.svg">
 </p>

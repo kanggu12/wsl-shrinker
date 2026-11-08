@@ -6,6 +6,8 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
 ### Changed
 
 - Setup is a wizard: a page for each choice, with the steps on a rail beside it and a bar of how far along, and a last
@@ -195,5 +197,6 @@ them follows.
 - Commands for scripts: `list`, `inside`, `shrink`, `history`, `doctor` and `config`, with `--json` where it applies.
 - Started from inside WSL, it continues in a new window when it shrinks the distribution its terminal runs in.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kanggu12/wsl-shrinker/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.3.0

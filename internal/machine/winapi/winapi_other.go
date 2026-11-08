@@ -66,8 +66,5 @@ func RestoreConsole() {}
 // its own choosing.
 func ClassicConsole() bool { return false }
 
-// OldConsoleHost is false off Windows: no Windows console draws there.
-func OldConsoleHost() bool { return false }
-
 // ConsoleEastAsian is false off Windows, which has no console code page.
 func ConsoleEastAsian() bool { return false }

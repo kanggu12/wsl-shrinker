@@ -39,8 +39,7 @@ The first public release.
   later run points at.
 - Windows 10, 11 and Server 2022 and 2025, on x64 and ARM64, with WSL as Windows built it in or as `wsl --update`
   installs it. The Windows console's own window, whose fonts lack `✓`, `✗`, `⏎` and `↻`, gets plain marks, each as
-  wide as its mark, and the word Enter; on an East Asian code page, all ASCII. So does a terminal on the console host
-  of Windows 10 and Server 2022, which measures `✓` and `✗` two cells wide. `WSL_SHRINKER_SYMBOLS` chooses for any
+  wide as its mark, and the word Enter; on an East Asian code page, all ASCII. `WSL_SHRINKER_SYMBOLS` chooses for any
   terminal.
 - A one-line install for Windows PowerShell 5.1 and PowerShell 7 that checks the download against the release's
   checksums, adds the program to the user's PATH and opens setup; the same script removes it again. Each release

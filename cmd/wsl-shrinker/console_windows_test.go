@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,8 +14,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 )
 
 // TestMain lets this test binary stand in for the program: started with
@@ -104,20 +103,14 @@ func TestAnErrorInAConsoleSaysWhatToDo(t *testing.T) {
 	if code := c.wait(t, 30*time.Second); code != 2 {
 		t.Fatalf("exit %d; it drew:\n%s", code, c.text())
 	}
-	// The cross is ✗, or x where the console host measures ✗ two cells
-	// wide (Windows 10 and Server 2022) and the marks go plain.
-	cross := "✗"
-	if winapi.OldConsoleHost() {
-		cross = "x"
-	}
-	c.waitFor(t, cross+" shrink takes the names of the disks", 5*time.Second)
+	c.waitFor(t, "✗ shrink takes the names of the disks", 5*time.Second)
 	c.waitFor(t, "→ see wsl-shrinker list", 5*time.Second)
 	// In color: the console was asked to read escape sequences.
 	c.mu.Lock()
 	raw := string(c.drawn)
 	c.mu.Unlock()
 	// The console redraws in its own sequences: red, maybe a move, the cross.
-	if !regexp.MustCompile(`\x1b\[(31|91)m(\x1b\[[0-9;?]*[A-Za-z])*` + cross).MatchString(raw) {
+	if !regexp.MustCompile(`\x1b\[(31|91)m(\x1b\[[0-9;?]*[A-Za-z])*✗`).MatchString(raw) {
 		t.Fatalf("no red cross in %q", raw)
 	}
 }
@@ -210,11 +203,32 @@ func startConsole(t *testing.T, cols, rows int, cmdline string) *console {
 // vt matches the escape sequences a screen is drawn with.
 var vt = regexp.MustCompile(`\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>78]`)
 
-// text is what was drawn so far, without its escape sequences.
+// cuf moves the cursor right by its count of cells, 1 when it has none. A
+// console host may send it in place of spaces it would draw over blank
+// cells, as Windows Server 2022's does where Windows 11's sends the spaces.
+var cuf = regexp.MustCompile(`\x1b\[([0-9]*)C`)
+
+// text is what was drawn so far, without its escape sequences: a move to
+// the right reads as the spaces it skips, as a screen shows it.
 func (c *console) text() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return vt.ReplaceAllString(string(c.drawn), "")
+	s := cuf.ReplaceAllStringFunc(string(c.drawn), func(m string) string {
+		n, err := strconv.Atoi(m[2 : len(m)-1])
+		if err != nil || n < 1 {
+			n = 1
+		}
+		return strings.Repeat(" ", n)
+	})
+	return vt.ReplaceAllString(s, "")
+}
+
+// tail is the last bytes drawn, escape sequences and all, for a failure to
+// show what the console host really sent.
+func (c *console) tail() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.drawn[max(0, len(c.drawn)-600):])
 }
 
 // size is how many bytes were drawn so far.
@@ -232,7 +246,7 @@ func (c *console) waitFor(t *testing.T, want string, limit time.Duration) {
 			return
 		}
 	}
-	t.Fatalf("%q never showed; it drew:\n%s", want, c.text())
+	t.Fatalf("%q never showed; it drew:\n%s\nthe last bytes it sent: %q", want, c.text(), c.tail())
 }
 
 // waitForGrowth waits until more than from bytes were drawn.

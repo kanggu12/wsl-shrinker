@@ -288,6 +288,19 @@ func ClassicConsole() bool {
 	return windows.IsWindowVisible(windows.HWND(h))
 }
 
+// OldConsoleHost reports whether the console host drawing this process's
+// output is the one Windows 10 and Windows Server 2022 ship, rather than
+// the one in Windows 11 and later or the one Windows Terminal brings along:
+// it measures ✓ and ✗ two cells wide, which pushes the rest of their line
+// one cell along. Other terminals on those systems run through it too.
+func OldConsoleHost() bool {
+	if os.Getenv("WT_SESSION") != "" {
+		return false
+	}
+	// Windows 11 starts at build 22000; Windows Server 2022 is 20348.
+	return windows.RtlGetVersion().BuildNumber < 22000
+}
+
 // ConsoleEastAsian reports whether the console writes in an East Asian code
 // page (Japanese 932, Simplified Chinese 936, Korean 949, Traditional
 // Chinese 950), where the console host draws characters Unicode leaves

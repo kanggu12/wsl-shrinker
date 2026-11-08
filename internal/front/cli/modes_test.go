@@ -452,17 +452,19 @@ func TestTheMarksSuitTheConsole(t *testing.T) {
 	// own window gets plain marks, all ASCII on an East Asian code page, and
 	// any other terminal the marks themselves.
 	for _, c := range []struct {
-		setting            string
-		classic, eastAsian bool
-		want               ui.MarkSet
+		setting                     string
+		classic, eastAsian, oldHost bool
+		want                        ui.MarkSet
 	}{
-		{"", false, false, ui.MarksUnicode}, {"", false, true, ui.MarksUnicode},
-		{"", true, false, ui.MarksPlain}, {"", true, true, ui.MarksASCII},
-		{"plain", false, false, ui.MarksPlain}, {"ascii", false, false, ui.MarksASCII},
-		{"unicode", true, true, ui.MarksUnicode}, {"something else", true, false, ui.MarksPlain},
+		{"", false, false, false, ui.MarksUnicode}, {"", false, true, false, ui.MarksUnicode},
+		{"", true, false, false, ui.MarksPlain}, {"", true, true, false, ui.MarksASCII},
+		// The console host of Windows 10 and Server 2022, behind another terminal.
+		{"", false, false, true, ui.MarksPlain}, {"", true, true, true, ui.MarksASCII},
+		{"plain", false, false, false, ui.MarksPlain}, {"ascii", false, false, false, ui.MarksASCII},
+		{"unicode", true, true, true, ui.MarksUnicode}, {"something else", true, false, false, ui.MarksPlain},
 	} {
-		if got := markSet(c.setting, c.classic, c.eastAsian); got != c.want {
-			t.Errorf("%q, classic %v, East Asian %v: %d", c.setting, c.classic, c.eastAsian, got)
+		if got := markSet(c.setting, c.classic, c.eastAsian, c.oldHost); got != c.want {
+			t.Errorf("%q, classic %v, East Asian %v, old host %v: %d", c.setting, c.classic, c.eastAsian, c.oldHost, got)
 		}
 	}
 	// Inside WSL, a terminal that says nothing of itself is taken for the

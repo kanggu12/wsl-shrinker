@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 )
 
 // TestMain lets this test binary stand in for the program: started with
@@ -102,14 +104,20 @@ func TestAnErrorInAConsoleSaysWhatToDo(t *testing.T) {
 	if code := c.wait(t, 30*time.Second); code != 2 {
 		t.Fatalf("exit %d; it drew:\n%s", code, c.text())
 	}
-	c.waitFor(t, "✗ shrink takes the names of the disks", 5*time.Second)
+	// The cross is ✗, or x where the console host measures ✗ two cells
+	// wide (Windows 10 and Server 2022) and the marks go plain.
+	cross := "✗"
+	if winapi.OldConsoleHost() {
+		cross = "x"
+	}
+	c.waitFor(t, cross+" shrink takes the names of the disks", 5*time.Second)
 	c.waitFor(t, "→ see wsl-shrinker list", 5*time.Second)
 	// In color: the console was asked to read escape sequences.
 	c.mu.Lock()
 	raw := string(c.drawn)
 	c.mu.Unlock()
 	// The console redraws in its own sequences: red, maybe a move, the cross.
-	if !regexp.MustCompile(`\x1b\[(31|91)m(\x1b\[[0-9;?]*[A-Za-z])*✗`).MatchString(raw) {
+	if !regexp.MustCompile(`\x1b\[(31|91)m(\x1b\[[0-9;?]*[A-Za-z])*` + cross).MatchString(raw) {
 		t.Fatalf("no red cross in %q", raw)
 	}
 }

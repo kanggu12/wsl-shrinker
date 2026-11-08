@@ -181,7 +181,9 @@ the default on Windows 11, finds a font for each. The Windows console's own wind
 draws with one font only, and its fonts (Consolas, Lucida Console, and the Korean console fonts) lack most of them.
 There wsl-shrinker draws plain ones by itself: `v`, `x`, `~` and a turning line, each as wide as the mark it stands
 for, and the word `Enter` for `⏎`. On a Japanese, Chinese or Korean code page that console also draws arrows, dots
-and lines two cells wide, which would push the screen off its lines, so there every one of them is plain ASCII.
+and lines two cells wide, which would push the screen off its lines, so there every one of them is plain ASCII. The
+console host of Windows 10 and Windows Server 2022, which other terminals there run through too, measures `✓` and `✗`
+two cells wide: outside Windows Terminal, which brings its own, those get the plain marks as well.
 
 `WSL_SHRINKER_SYMBOLS` chooses for any terminal: `plain`, `ascii`, or `unicode` for the marks themselves. Inside WSL a
 terminal that does not say what it is (no `WT_SESSION`, `TERM_PROGRAM`, `TMUX`, `ZELLIJ` or SSH) is taken for the

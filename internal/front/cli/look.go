@@ -19,9 +19,11 @@ import (
 // markSet decides the marks for this run. WSL_SHRINKER_SYMBOLS (unicode,
 // plain or ascii), when set, says. Otherwise the Windows console's own window
 // gets plain marks, since its fonts lack the others, and all ASCII on an East
-// Asian code page, where it draws ambiguous characters two cells wide; any
-// other terminal gets the marks themselves.
-func markSet(setting string, classic, eastAsian bool) ui.MarkSet {
+// Asian code page, where it draws ambiguous characters two cells wide; a
+// terminal on the console host of Windows 10 and Server 2022, which measures
+// ✓ and ✗ two cells wide, gets plain marks too; any other terminal gets the
+// marks themselves.
+func markSet(setting string, classic, eastAsian, oldHost bool) ui.MarkSet {
 	switch setting {
 	case "unicode":
 		return ui.MarksUnicode
@@ -33,7 +35,7 @@ func markSet(setting string, classic, eastAsian bool) ui.MarkSet {
 	switch {
 	case classic && eastAsian:
 		return ui.MarksASCII
-	case classic:
+	case classic, oldHost:
 		return ui.MarksPlain
 	}
 	return ui.MarksUnicode
@@ -61,7 +63,7 @@ func consoleInWSL(getenv func(string) string) bool {
 // in the commands, for the terminal it runs in. main calls it first.
 func SetMarks() {
 	classic := winapi.ClassicConsole() || (stdoutIsTerminal() && consoleInWSL(os.Getenv))
-	ui.SetMarks(markSet(os.Getenv("WSL_SHRINKER_SYMBOLS"), classic, winapi.ConsoleEastAsian()))
+	ui.SetMarks(markSet(os.Getenv("WSL_SHRINKER_SYMBOLS"), classic, winapi.ConsoleEastAsian(), winapi.OldConsoleHost()))
 	// Every text the screen measures takes them before it is measured.
 	i18n.SetRewrite(ui.Words)
 }

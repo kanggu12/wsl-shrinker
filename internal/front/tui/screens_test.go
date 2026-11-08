@@ -467,8 +467,8 @@ func TestARunThatStartedContainersSaysHowLongTheyRun(t *testing.T) {
 	// stops the distribution once nothing from Windows runs in it, and the
 	// containers with it. A run that started none says nothing of it.
 	for lang, want := range map[i18n.Lang]string{
-		i18n.English: "WSL stops Ubuntu-24.04 again once no terminal or other program from Windows runs in it, 15 seconds later by default (instanceIdleTimeout in .wslconfig)",
-		i18n.Korean:  "Windows에서 Ubuntu-24.04 배포판에 연 터미널이나 프로그램이 하나도 없으면 WSL이 기본 15초 뒤 배포판을 다시 멈추고",
+		i18n.English: "With no terminal open in Ubuntu-24.04, WSL stops it in about 15 seconds (instanceIdleTimeout), and its containers with it. Keep one open to keep them running.",
+		i18n.Korean:  "Ubuntu-24.04 터미널이 하나도 열려 있지 않으면 WSL이 약 15초 뒤(instanceIdleTimeout) 배포판과 컨테이너를 멈춥니다. 계속 켜 두려면 터미널을 하나 열어 두세요.",
 	} {
 		i18n.Set(lang)
 		out := joined(screen(demo(), 120, 30, "c", "space", "down", "space", "enter", "enter"))
@@ -481,15 +481,15 @@ func TestARunThatStartedContainersSaysHowLongTheyRun(t *testing.T) {
 	// cut in the middle.
 	for _, size := range [][2]int{{60, 16}, {60, 18}, {60, 20}, {70, 18}, {80, 20}, {80, 24}, {120, 30}} {
 		out := joined(screen(demo(), size[0], size[1], "c", "space", "down", "space", "enter", "enter"))
-		if strings.Contains(out, "WSL stops") != strings.Contains(out, "start again with it next time.") {
+		if strings.Contains(out, "With no terminal open") != strings.Contains(out, "Keep one open to keep them running.") {
 			t.Errorf("%dx%d: the note is cut:\n%s", size[0], size[1], out)
 		}
 	}
-	if out := joined(screen(demo(), 80, 24, "c", "space", "down", "space", "enter", "enter")); !strings.Contains(out, "next time.") {
+	if out := joined(screen(demo(), 80, 24, "c", "space", "down", "space", "enter", "enter")); !strings.Contains(out, "Keep one open to keep them running.") {
 		t.Errorf("80x24 has room for the note, and it is not there:\n%s", out)
 	}
 	// Debian, stopped before, starts no containers: no note.
-	if out := joined(screen(demo(), 120, 30, "down", "down", "s", "enter")); strings.Contains(out, "WSL stops") || !strings.Contains(out, "Gave back") {
+	if out := joined(screen(demo(), 120, 30, "down", "down", "s", "enter")); strings.Contains(out, "With no terminal open") || !strings.Contains(out, "Gave back") {
 		t.Errorf("a run that started no containers has the note, or did not end:\n%s", out)
 	}
 }
@@ -503,7 +503,7 @@ func TestRefusedCheckSpeaksTheScreensLanguage(t *testing.T) {
 		{Step: shrink.StepCheck, Status: shrink.Failed, Detail: "the disk is protected in the settings", Code: string(shrink.BlockProtected)},
 	}}
 	out := joined(screen(b, 120, 30, "s", "enter"))
-	if !strings.Contains(out, "설정에서 보호됩니다") || strings.Contains(out, "is protected in the settings") {
+	if !strings.Contains(out, "설정에서 보호하고 있어 줄이지 않습니다") || strings.Contains(out, "is protected in the settings") {
 		t.Fatalf("\n%s", out)
 	}
 }

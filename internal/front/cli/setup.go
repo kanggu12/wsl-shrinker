@@ -271,6 +271,8 @@ func exists(path string) bool {
 // demoSetup is the setup screen on the made-up PC, for its pictures.
 func demoSetup() tui.SetupStart {
 	ds, _ := tui.NewDemo().Disks(context.Background())
-	return tui.SetupStart{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, Protect: []string{"Work"}, Disks: ds,
+	// A first start: no settings file yet, so the defaults, with no disk
+	// protected; esc keeps exactly what the first page lists.
+	return tui.SetupStart{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, Disks: ds,
 		AutoLanguage: i18n.Current(), Path: `C:\Users\ann\AppData\Roaming\wsl-shrinker\config.toml`, First: true}
 }

@@ -1,0 +1,188 @@
+name: wsl
+
+# A real shrink on a real WSL 2, called by CI on every change and by the
+# weekly canary on WSL's newest pre-release.
+on:
+  workflow_call:
+    inputs:
+      pre-release:
+        description: update WSL to its newest pre-release first
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  shrink:
+    # A real shrink on a real WSL 2: Windows Server 2025's runners carry the
+    # WSL package and run WSL 2 distributions. A throwaway Alpine
+    # distribution gets Docker, started with it by a boot command, two
+    # containers left running and one stopped, and half a GiB written and
+    # deleted inside. wsl-shrinker reads it, shrinks it with wsl --manage
+    # --compact while it runs, and what came back is held against the
+    # estimate, the containers against what ran. Copies of its disk then
+    # stand in for Docker Desktop's, where Docker keeps it and where its
+    # settings move it, and for a file the settings name: Windows' virtual
+    # disk API compacts those, held against their estimates too.
+    name: a real shrink on WSL 2${{ inputs.pre-release && ' (WSL pre-release)' || '' }}
+    runs-on: windows-2025
+    # WSL 2 has been seen to hang while it starts on these runners; only the
+    # job's own limit ends that.
+    timeout-minutes: 30
+    env:
+      ROOTFS: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz
+      ROOTFS_SHA256: cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+      # The canary's: WSL's newest pre-release, what the next WSL release
+      # will be, from GitHub, as the runner has no Store.
+      - name: WSL's newest pre-release
+        if: inputs.pre-release
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $env:WSL_UTF8 = '1'
+          wsl.exe --version
+          wsl.exe --update --pre-release --web-download
+          if ($LASTEXITCODE -ne 0) { "wsl --update --pre-release exited $LASTEXITCODE"; exit 1 }
+          wsl.exe --version
+      - name: a throwaway distribution with Docker, two containers running, half a GiB freed inside
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          # WSL stops a distribution 15 seconds after nothing from Windows
+          # runs in it; here it is to run from one step to the next, as a
+          # terminal open in it keeps it running. The runner's WSL is its
+          # own: the setting goes in its .wslconfig, read when WSL starts. A
+          # process started to hold it open would hold the step's output
+          # open too, and the step would not end.
+          Set-Content -Path (Join-Path $env:USERPROFILE '.wslconfig') -Value "[general]`ninstanceIdleTimeout=-1"
+          wsl.exe --shutdown
+          wsl.exe --version
+          $tar = Join-Path $env:RUNNER_TEMP 'alpine.tar.gz'
+          Invoke-WebRequest $env:ROOTFS -OutFile $tar
+          if ((Get-FileHash $tar -Algorithm SHA256).Hash -ne $env:ROOTFS_SHA256) { 'not the root file system expected'; exit 1 }
+          wsl.exe --import wss-ci (Join-Path $env:RUNNER_TEMP 'wss-ci') $tar --version 2
+          if ($LASTEXITCODE -ne 0) { "wsl --import exited $LASTEXITCODE"; exit 1 }
+          # Docker starts with the distribution, from a boot command as people
+          # set it up without systemd, in a network namespace of its own:
+          # every WSL 2 distribution shares one network, and this Docker
+          # leaves the others' alone. Its containers need none. \042 is the
+          # double quote, which the command line to wsl.exe would not keep.
+          wsl.exe -d wss-ci -u root -- sh -c 'apk add --no-cache docker >/dev/null && printf ''[boot]\ncommand = \042PATH=/usr/sbin:/usr/bin:/sbin:/bin unshare --net -- dockerd --bridge=none --iptables=false --ip6tables=false --ip-forward=false --userland-proxy=false >/var/log/dockerd.log 2>&1 &\042\n'' >/etc/wsl.conf'
+          if ($LASTEXITCODE -ne 0) { "installing Docker exited $LASTEXITCODE"; exit 1 }
+          # Stopped and started again, Docker starts with it.
+          wsl.exe --terminate wss-ci
+          $up = $false
+          foreach ($i in 1..60) {
+            if ((wsl.exe -d wss-ci -u root -- sh -c 'docker info >/dev/null 2>&1 && echo up') -match 'up') { $up = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $up) { wsl.exe -d wss-ci -u root -- cat /var/log/dockerd.log; 'Docker did not start'; exit 1 }
+          # Two containers running, one with a restart policy, and one stopped
+          # by hand; the image is the root file system, so no registry.
+          $image = (wsl.exe -d wss-ci -u root -- wslpath -a ($tar -replace '\\', '/')) -join ''
+          wsl.exe -d wss-ci -u root -- sh -c "docker import $image wss-img >/dev/null && docker run -d --network none --name keep wss-img sleep 100000 >/dev/null && docker run -d --network none --restart unless-stopped --name keep-policy wss-img sleep 100000 >/dev/null && docker run -d --network none --name was-stopped wss-img sleep 100000 >/dev/null && docker stop -t 1 was-stopped >/dev/null"
+          if ($LASTEXITCODE -ne 0) { "starting the containers exited $LASTEXITCODE"; exit 1 }
+          # Written and deleted: blocks the filesystem freed, still stored.
+          wsl.exe -d wss-ci -u root -- sh -c 'dd if=/dev/urandom of=/big bs=1M count=512 2>/dev/null && sync && rm /big && sync'
+          if ($LASTEXITCODE -ne 0) { "writing inside exited $LASTEXITCODE"; exit 1 }
+          # Still running 20 seconds on, past WSL's default 15: the setting
+          # holds, and the next step finds it running however long its
+          # build takes.
+          Start-Sleep -Seconds 20
+          $running = ((wsl.exe --list --running --quiet) -join "`n") -replace "`0", ''
+          if ($running -notmatch '(?m)^wss-ci\s*$') { $running; 'wss-ci stopped: instanceIdleTimeout=-1 did not hold'; exit 1 }
+          exit 0
+      - name: shrink it with its containers running, and check against the estimate
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          go build -o wss.exe ./cmd/wsl-shrinker
+          $env:APPDATA = $env:LOCALAPPDATA = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'state')).FullName
+          ./wss.exe doctor
+          if ($LASTEXITCODE -ne 0) { 'doctor found something missing'; exit 1 }
+          $d = (./wss.exe list --json | ConvertFrom-Json).disks | Where-Object name -eq 'wss-ci'
+          if (-not $d -or -not $d.estimate) { 'wss-ci was not read'; exit 1 }
+          if (-not $d.running) { 'wss-ci does not run: there would be no containers to stop'; exit 1 }
+          $want = [int64]$d.estimate.reclaim_bytes
+          "estimate: $want bytes back"
+          if ($want -lt 256MB) { 'the freed half GiB is not in the estimate'; exit 1 }
+          $out = ./wss.exe shrink wss-ci --yes --json
+          if ($LASTEXITCODE -ne 0) { $out; "shrink exited $LASTEXITCODE"; exit 1 }
+          # Docker has no reason to start the container without a policy:
+          # it runs only if the run started it.
+          $ps = wsl.exe -d wss-ci -u root -- docker ps -a --format '{{.Names}} {{.State}}'
+          $ps
+          $r = ($out | ConvertFrom-Json).results[0]
+          "freed $($r.freed_bytes), left $($r.left), containers started again: $($r.containers_started)"
+          if (-not $r.compacted) { 'not compacted'; exit 1 }
+          if ($r.left -ne 'running') { "left $($r.left), not running"; exit 1 }
+          # The two that ran were stopped, not the one stopped by hand, and
+          # both started again; that one is still stopped.
+          $stop = $r.events | Where-Object { $_.step -eq 'stop' -and $_.status -eq 'done' } | Select-Object -First 1
+          if (@($stop.containers).Count -ne 2) { "the stop step stopped $(@($stop.containers).Count) containers, not the 2 running"; exit 1 }
+          if ($r.containers_started -ne 2 -or $r.containers_not_started) { 'the 2 containers were not started again'; exit 1 }
+          foreach ($line in 'keep running', 'keep-policy running', 'was-stopped exited') {
+            if ($ps -notcontains $line) { "no '$line' in docker ps -a"; exit 1 }
+          }
+          # What came back is the estimate, give or take what the stop and
+          # the journal wrote in between.
+          if ([math]::Abs([int64]$r.freed_bytes - $want) -gt 64MB) { "freed $($r.freed_bytes), estimated $want"; exit 1 }
+          # Read again, the disk has next to nothing left to give.
+          $after = (./wss.exe list --json | ConvertFrom-Json).disks | Where-Object name -eq 'wss-ci'
+          "after: $($after.estimate.reclaim_bytes) bytes back"
+          if ([int64]$after.estimate.reclaim_bytes -gt 64MB) { 'the shrink left space behind'; exit 1 }
+          $runs = ./wss.exe history --json | ConvertFrom-Json
+          if (@($runs.runs).Count -ne 1) { 'the run is not in the history'; exit 1 }
+          exit 0
+      - name: copies of its disk as Docker Desktop's and a file from the settings, compacted from Windows
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $state = Join-Path $env:RUNNER_TEMP 'state'
+          $env:APPDATA = $env:LOCALAPPDATA = $state
+          # Free blocks that still hold data, as on a disk nothing trims:
+          # written and deleted with discard off.
+          wsl.exe -d wss-ci -u root -- sh -c 'mount -o remount,nodiscard / && dd if=/dev/urandom of=/r bs=1M count=128 2>/dev/null && sync && rm /r && sync'
+          if ($LASTEXITCODE -ne 0) { "writing inside exited $LASTEXITCODE"; exit 1 }
+          wsl.exe --terminate wss-ci
+          # Where Docker Desktop keeps its disk, where its settings move it,
+          # and a file the settings name.
+          $vhdx = Join-Path $env:RUNNER_TEMP 'wss-ci\ext4.vhdx'
+          $default = (New-Item -ItemType Directory -Force -Path (Join-Path $state 'Docker\wsl\disk')).FullName
+          $moved = (New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'moved\disk')).Parent.FullName
+          $extra = (New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'extra')).FullName
+          Copy-Item $vhdx (Join-Path $default 'docker_data.vhdx')
+          Copy-Item $vhdx (Join-Path $moved 'disk\docker_data.vhdx')
+          Copy-Item $vhdx (Join-Path $extra 'data.vhdx')
+          # Docker's settings file, with the byte order mark it may have.
+          [IO.File]::WriteAllText((Join-Path $state 'Docker\settings-store.json'), (@{ CustomWslDistroDir = $moved } | ConvertTo-Json), [Text.UTF8Encoding]::new($true))
+          $null = New-Item -ItemType Directory -Force -Path (Join-Path $state 'wsl-shrinker')
+          "extra_disks = ['$(Join-Path $extra 'data.vhdx')']" | Set-Content -Path (Join-Path $state 'wsl-shrinker\config.toml')
+          $all = (./wss.exe list --json | ConvertFrom-Json).disks
+          foreach ($w in @(@('Docker Desktop data', 'docker', $moved), @('docker_data.vhdx', 'docker', $default), @('data.vhdx', 'file', $extra))) {
+            $d = $all | Where-Object name -eq $w[0]
+            if (-not $d -or $d.kind -ne $w[1] -or -not $d.path.StartsWith($w[2], [StringComparison]::OrdinalIgnoreCase)) { $all | ConvertTo-Json -Depth 6; "$($w[0]) is not listed as a $($w[1]) disk in $($w[2])"; exit 1 }
+            if (-not $d.estimate) { "$($w[0]) was not read"; exit 1 }
+          }
+          $out = ./wss.exe shrink 'Docker Desktop data' docker_data.vhdx data.vhdx --yes --json
+          if ($LASTEXITCODE -ne 0) { $out; "shrink exited $LASTEXITCODE"; exit 1 }
+          foreach ($r in ($out | ConvertFrom-Json).results) {
+            $want = [int64]$r.before.reclaim_bytes
+            "$($r.disk): estimate $want, freed $($r.freed_bytes), only with a trim $($r.before.trimmable_bytes)"
+            if (-not $r.compacted -or $r.left -ne 'file') { "$($r.disk) was not compacted as a file"; exit 1 }
+            # Windows' compaction keeps blocks that hold data: the freed
+            # random ones stay, counted apart, and the estimate is the rest.
+            if ([int64]$r.before.trimmable_bytes -lt 64MB) { "$($r.disk): the freed blocks with data are not counted apart"; exit 1 }
+            if ([math]::Abs([int64]$r.freed_bytes - $want) -gt 16MB) { "$($r.disk): freed $($r.freed_bytes), estimated $want"; exit 1 }
+          }
+          exit 0
+      - name: remove the distribution
+        if: always()
+        shell: pwsh
+        run: wsl.exe --unregister wss-ci

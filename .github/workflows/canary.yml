@@ -1,0 +1,21 @@
+name: canary
+
+# An early warning, once a week: the real shrink on WSL's newest pre-release
+# (wsl --update --pre-release), which is what the next WSL release will be.
+# wsl-shrinker reads WSL's registry and disks and runs its commands, so a
+# change there shows up here before people meet it. A failure here blocks
+# nothing; it says what to look at.
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wsl:
+    name: WSL pre-release
+    uses: ./.github/workflows/wsl.yml
+    with:
+      pre-release: true

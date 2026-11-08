@@ -3,7 +3,7 @@
 #   irm https://github.com/kanggu12/wsl-shrinker/releases/latest/download/install.ps1 | iex
 #
 # Settings, all optional, as environment variables:
-#   WSL_SHRINKER_VERSION   release to install, like v0.2.0 (default: the latest)
+#   WSL_SHRINKER_VERSION   release to install, like v0.2.1 (default: the latest)
 #   WSL_SHRINKER_BIN_DIR   where it goes (default: %LOCALAPPDATA%\Programs\wsl-shrinker)
 #   WSL_SHRINKER_BASE_URL  where releases are downloaded from (mirrors, tests)
 #   WSL_SHRINKER_ZIP       a zip already downloaded, installed as it is (tests)

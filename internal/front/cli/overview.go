@@ -122,7 +122,12 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 			}
 		}
 		state := stateWords(d)
-		if d.Running || (d.Kind != disks.KindDistro && d.File.Held) {
+		switch {
+		case shrink.Block(block) == shrink.BlockProtected:
+			// Said in words, not by its pink alone, which a narrow table
+			// keeps when the note column goes.
+			state = l.safe(i18n.T("state.protected"))
+		case d.Running || (d.Kind != disks.KindDistro && d.File.Held):
 			state = l.live(state)
 		}
 		if d.Estimate == nil {

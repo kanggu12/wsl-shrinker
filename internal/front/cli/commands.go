@@ -348,11 +348,12 @@ func shrinkCmd(p *apps) *cobra.Command {
 	return cmd
 }
 
-// idleNote is the line under a run that started containers again: they
-// run only while WSL keeps their distribution running (shrink.IdleNote).
-// It is "" for any other run, and for a disk that is not a distribution.
+// idleNote is the line under a run that started its distribution and
+// containers again: they run only while WSL keeps the distribution running
+// (shrink.IdleNote). It is "" for any other run: one whose distribution
+// never stopped, or a disk that is not a distribution.
 func idleNote(l look, r shrink.Result, distro string) string {
-	if r.Left != shrink.LeftRunning || r.ContainersStarted == 0 || distro == "" {
+	if r.Left != shrink.LeftRunning || !shrink.Idle(r.DistroStarted, r.ContainersStarted) || distro == "" {
 		return ""
 	}
 	return l.muted("note: " + shrink.IdleNote(distro))

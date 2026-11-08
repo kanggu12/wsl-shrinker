@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -650,6 +652,14 @@ func TestPlainMarksLeaveEveryLineItsWidth(t *testing.T) {
 					}
 					if strings.ContainsAny(l, bad) {
 						t.Errorf("%v set %d %s: a swapped mark left: %q", lang, set, f.name, l)
+					}
+					// All ASCII but for the words in Korean: a list of the
+					// marks to look for missed the lines of a box once.
+					if set == ui.MarksASCII {
+						if i := strings.IndexFunc(l, func(r rune) bool { return r >= 0x80 && !unicode.Is(unicode.Hangul, r) }); i >= 0 {
+							r, _ := utf8.DecodeRuneInString(l[i:])
+							t.Errorf("%v %s: %q (%U) is not ASCII: %q", lang, f.name, string(r), r, l)
+						}
 					}
 					if w := ansi.StringWidth(l); w != ansi.StringWidth(strings.Split(ansi.Strip(f.text), "\n")[0]) {
 						t.Errorf("%v set %d %s: %d cells: %q", lang, set, f.name, w, l)

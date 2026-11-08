@@ -6,6 +6,31 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-08
+
+### Fixed
+
+- The note under a run that started containers again comes only when the run started the distribution itself again: a
+  stop step that failed never stopped it, and its terminals kept it running. `recover` gives the same note on a line of
+  its own, and the JSON says `distro_started`. The note is shorter too: with no terminal open in the distribution, WSL
+  stops it in about 15 seconds, and its containers with it.
+- In a window too short for everything, a finished run keeps the sentence that sums it up and drops the before and
+  after bars first. The header counts what a run gave back as soon as it ends.
+- On an East Asian code page, where the marks are ASCII, a box's lines and corners were left as they were and drawn two
+  cells wide; they are now `-`, `|` and `+`. A step done is `+` (it was `v`, which read as the arrow down), a step
+  waiting is `.`, apart from `-` for one skipped, and an arrow in a sentence is `->`.
+- A protected disk says so in its state column, on the screen and in the CLI table, not by its color alone.
+- Help wraps what a key does instead of cutting it. Setup's last page shows where the settings go only when the whole
+  path fits. The demo opens setup as a first start, with no disk protected yet, as a first start has.
+- Wording: the disk first in the recent runs ("Debian freed 20.0 GB"), "item 1 of 11" for a single item, the help's
+  keys for choosing what to remove, and in Korean the compaction's description, the protected disk's message, the end
+  of a run of several disks and setup's last step.
+
+### Changed
+
+- CI checks that the setting keeping its throwaway distribution running holds, and a weekly canary runs the real shrink
+  on WSL's newest pre-release.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
@@ -64,6 +89,7 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.1.0

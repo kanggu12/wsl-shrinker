@@ -47,7 +47,7 @@ Docker Desktop holds its data disk while it runs. Quit it from its tray icon, th
 
 ## Containers stopped a little after a shrink
 
-The run started them again, then WSL stopped their distribution: it does that once no terminal or other program from
+The run (or `recover`) started them again, then WSL stopped their distribution: it does that once no terminal or other program from
 Windows runs in it, 15 seconds later by default, and the compaction had closed the terminals that kept it running.
 Open a terminal in the distribution and the containers with a restart policy (`unless-stopped`, `always`) start with
 Docker; start the others with `docker start`. To keep a distribution running with nothing open in it, set

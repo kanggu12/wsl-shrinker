@@ -131,7 +131,7 @@ files and ext4 filesystems the tests build, the steps of a shrink on a fake WSL,
 | The command line | `front/cli` | both modes, the look of a mistake in a terminal and piped, setup's flags |
 | The launcher | `cmd/wsl-shrinker` | where it runs, the processor and Windows build checks, with fake programs and no `cmd.exe` |
 | Windows | `scripts/test-windows.sh`, CI | every package again as a Windows program; the screen and setup in a pseudoconsole; on Windows Server 2022 and 2025 and Windows 11 on Arm |
-| A real WSL | CI | a throwaway Alpine distribution on Windows Server 2025's WSL 2 with Docker in it, two containers running and one stopped, half a GiB freed inside, estimated, shrunk while it runs and read again, what came back held against the estimate and the containers against what ran; copies of its disk where Docker Desktop keeps its disk, where Docker's settings move it, and from `extra_disks`, compacted through Windows' virtual disk API and held against their estimates; a WSL 1 one on Server 2022's built-in WSL, which must not be listed |
+| A real WSL | CI | a throwaway Alpine distribution on Windows Server 2025's WSL 2 with Docker in it, two containers running and one stopped, half a GiB freed inside, estimated, shrunk while it runs and read again, what came back held against the estimate and the containers against what ran; copies of its disk where Docker Desktop keeps its disk, where Docker's settings move it, and from `extra_disks`, compacted through Windows' virtual disk API and held against their estimates, also weekly on WSL's newest pre-release (`.github/workflows/canary.yml`); a WSL 1 one on Server 2022's built-in WSL, which must not be listed |
 | Installers and packages | CI, release | `install.ps1` in Windows PowerShell 5.1 and PowerShell 7 and on ARM64, installed, run and removed; the Scoop manifest; the demo image |
 
 No test opens a window: `winapi.Reopen` refuses inside a test binary, and the launcher's tests replace what it reaches
@@ -146,9 +146,13 @@ Windows through. [Contributing](../.github/CONTRIBUTING.md#run-the-tests) has th
 patch, runner image or WSL release shows up before a release does. It runs `make check`, fuzzing for a short while and
 `govulncheck` for Linux and Windows; builds the release zips and the demo image from the commit, and runs the image;
 runs the tests and the program itself on Windows Server 2022 and 2025 and on Windows 11 on Arm, each with the WSL it
-has; shrinks a throwaway distribution on Server 2025's WSL 2 for real; and installs the zip it built with `install.ps1`
-in Windows PowerShell 5.1 and PowerShell 7 and on ARM64, runs it, and removes it again. Windows 10 has no hosted
-runner; it runs the same code as Server 2022.
+has; shrinks a throwaway distribution on Server 2025's WSL 2 for real (`.github/workflows/wsl.yml`); and installs the
+zip it built with `install.ps1` in Windows PowerShell 5.1 and PowerShell 7 and on ARM64, runs it, and removes it again.
+Windows 10 has no hosted runner; it runs the same code as Server 2022.
+
+**The canary** (`.github/workflows/canary.yml`) runs that real shrink every Monday on WSL's newest pre-release
+(`wsl --update --pre-release`), which is what the next WSL release will be: a change in WSL's commands, its registry or
+its disks shows up there before people meet it. A failure there blocks nothing.
 
 **A release** is a `vX.Y.Z` tag on a commit whose `CHANGELOG.md` has a `## [X.Y.Z]` section, with the README's badge
 naming it. `.github/workflows/release.yml` runs all of CI on the tagged commit, then `scripts/dist.sh` builds the zips,

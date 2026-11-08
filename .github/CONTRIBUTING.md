@@ -120,6 +120,15 @@ get build provenance, and the demo image goes to `ghcr.io`; last, `.github/workf
 published release as people do. `scripts/dist.sh` builds only from a work tree that matches its commit, since the zips
 carry that commit's name.
 
+### A WSL release
+
+The weekly canary (`.github/workflows/canary.yml`) runs the real shrink of `.github/workflows/wsl.yml` on WSL's newest
+pre-release, so a WSL release that changes its commands, its registry or its disks usually shows up there first. It
+can be started by hand from the Actions tab too. A failure there blocks nothing: it says what to look at, and the fix
+goes out as any other.
+
+### Version numbers never used
+
 v0.3.0, v0.4.0 and v0.4.1 can never be released. v0.3.0 and v0.4.0 were published before the version numbers started
 over at v0.1.0, and the Go module proxy keeps them; `go.mod` retracts them, and v0.4.1 is tagged only to carry that list
 to the proxy, which reads retractions from the highest version it has. The release workflow ignores the three tags.

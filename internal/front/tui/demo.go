@@ -147,7 +147,7 @@ func (d *Demo) Shrink(_ context.Context, disk disks.Disk, opt shrink.Options, em
 	// with the three containers it stopped, so the screen says what it
 	// says after a real run.
 	if disk.Running {
-		res.Left, res.ContainersStarted = shrink.LeftRunning, 3
+		res.Left, res.ContainersStarted, res.DistroStarted = shrink.LeftRunning, 3, true
 	}
 	after := disk.File
 	after.OnDisk = disk.Estimate.FileSize - freed
@@ -160,6 +160,8 @@ func (d *Demo) Shrink(_ context.Context, disk disks.Disk, opt shrink.Options, em
 			e.FileSize, e.Reclaim = after.OnDisk, 0
 			e.After = after.OnDisk
 			d.list[i].Estimate = &e
+			// The estimate read again, as the engine's result carries it.
+			res.After = &e
 		}
 	}
 	pause(300)

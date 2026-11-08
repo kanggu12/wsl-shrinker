@@ -318,7 +318,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.say(oneLine(msg.err.Error()), ui.CatBad)
 		} else {
-			m.say(msg.said, ui.CatDone)
+			// A line, as every toast: what was started again. A note the
+			// command line adds under it does not fit one.
+			said, _, _ := strings.Cut(msg.said, "\n")
+			m.say(said, ui.CatDone)
 		}
 		m.loading = true
 		return m, m.loadDisks()
@@ -498,6 +501,19 @@ func (m model) finishDisk(res shrink.Result) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	r.results = append(r.results, res)
+	// The disk as the run left it, at once: the header counts it so before
+	// the disks are read again.
+	if res.After != nil {
+		m.list = slices.Clone(m.list)
+		for i := range m.list {
+			if m.list[i].Name == res.Disk {
+				m.list[i].Estimate = res.After
+				if res.File != nil {
+					m.list[i].File = *res.File
+				}
+			}
+		}
+	}
 	// A disk that was compacted is done with, even when a later step went
 	// wrong: marked again, it would be shrunk a second time.
 	if res.Err == "" || res.Compacted {

@@ -97,6 +97,11 @@ func TestStopFailureStartsContainersAgain(t *testing.T) {
 	if e, ok := lastEvent(r, StepRestart); !ok || e.Status == Failed {
 		t.Fatalf("restart: %+v", e)
 	}
+	// The distribution never stopped, and its terminals with it: it keeps
+	// running as before, so no note on WSL stopping it is due.
+	if r.ContainersStarted == 0 || r.DistroStarted || Idle(r.DistroStarted, r.ContainersStarted) {
+		t.Fatalf("started %d containers, distribution started %v: the note would be said", r.ContainersStarted, r.DistroStarted)
+	}
 }
 
 func TestVerifyThatCannotOpenTheFileStartsTheDistributionAgain(t *testing.T) {

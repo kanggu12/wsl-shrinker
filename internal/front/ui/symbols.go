@@ -37,12 +37,19 @@ func Plain() bool { return set != MarksUnicode }
 // becomes a word, put in before anything is measured (Words); in a screen
 // already laid out it becomes one cell too (Marks), as a last resort.
 var (
-	// lacking are the marks the console's own fonts have no glyph for.
-	lacking = []string{"✓", "v", "✗", "x", "↻", "~",
+	// lacking are the marks the console's own fonts have no glyph for. A
+	// step done is +, not v: v reads as a word, and as the arrow down.
+	lacking = []string{"✓", "+", "✗", "x", "↻", "~",
 		"⠋", "|", "⠙", "/", "⠹", "-", "⠸", "\\", "⠼", "|", "⠴", "/", "⠦", "-", "⠧", "\\", "⠇", "|", "⠏", "/"}
-	// wide are the characters an East Asian console draws two cells wide.
-	wide = []string{"▪", "#", "·", "-", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
-		"│", "|", "╰", "`", "●", "*", "•", "*", "›", ">"}
+	// wide are the characters an East Asian console draws two cells wide:
+	// marks, arrows and the lines of a box, whose corners become +. A step
+	// waiting is ., apart from - for one skipped.
+	wide = []string{"▪", "#", "·", ".", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
+		"│", "|", "─", "-", "╭", "+", "╮", "+", "╰", "+", "╯", "+", "┌", "+", "┐", "+", "└", "+", "┘", "+",
+		"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+", "═", "=", "║", "|", "●", "*", "•", "*", "›", ">"}
+	// arrows are the arrows in words not measured yet, two cells each, so
+	// "312 GB → 248 GB" does not read as "greater than".
+	arrows = []string{"→", "->", "←", "<-"}
 	// laidOut and unmeasured are the swaps for each set: for a screen
 	// already laid out, and for words not measured yet.
 	laidOut = map[MarkSet]*strings.Replacer{
@@ -51,7 +58,8 @@ var (
 	}
 	unmeasured = map[MarkSet]*strings.Replacer{
 		MarksPlain: strings.NewReplacer(append([]string{"⏎", "Enter"}, lacking...)...),
-		MarksASCII: strings.NewReplacer(append(append([]string{"⏎", "Enter"}, lacking...), wide...)...),
+		// The arrows go first: a pair that comes earlier wins.
+		MarksASCII: strings.NewReplacer(append(append(append([]string{"⏎", "Enter"}, arrows...), lacking...), wide...)...),
 	}
 )
 

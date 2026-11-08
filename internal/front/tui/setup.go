@@ -541,11 +541,12 @@ func (m setupModel) card(w, h int) []string {
 		text(0, i18n.T("setup.q.ready"), bold)
 		add(0, "")
 		add(0, m.summary(inner)...)
-		add(0, "")
 		// Where they go, the path on a line of its own, so a long one
-		// breaks no sentence.
-		text(0, i18n.T("setup.saves"), muted)
-		text(0, m.start.Path, lipgloss.NewStyle().Foreground(t.Ink))
+		// breaks no sentence. Saying where goes whole or not at all: in a
+		// window too short for the path, "writes them to" alone says less.
+		add(1, "")
+		text(1, i18n.T("setup.saves"), muted)
+		text(1, m.start.Path, lipgloss.NewStyle().Foreground(t.Ink))
 	}
 	// A page taller than the room loses its extras, the last part first;
 	// then its bottom, the question and the choice coming first.
@@ -753,7 +754,8 @@ func (m setupModel) summary(w int) []string {
 	}
 	var out []string
 	for i, v := range values {
-		out = append(out, " "+ui.Fg(t.Mark).Render(ui.Block)+" "+ui.Fg(t.Muted).Render(ui.Fit(i18n.T("setup.row."+setupSteps[i]), labelW))+
+		// A grey dot: a list, with no meaning for a color to carry.
+		out = append(out, " "+ui.Fg(t.Muted).Render(ui.Block)+" "+ui.Fg(t.Muted).Render(ui.Fit(i18n.T("setup.row."+setupSteps[i]), labelW))+
 			"   "+lipgloss.NewStyle().Foreground(t.Ink).Bold(true).Render(ui.Fit(v, max(4, w-labelW-7))))
 	}
 	return out

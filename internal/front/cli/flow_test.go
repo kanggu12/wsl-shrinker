@@ -81,8 +81,8 @@ func TestShrinkFromStartToEnd(t *testing.T) {
 	}
 	// Under the run, after what it freed: the container it started again
 	// runs as long as WSL keeps Dev running.
-	if i, j := strings.Index(out, "  freed "), strings.Index(out, "  note: WSL stops Dev again once no terminal"); j < 0 || j < i {
-		t.Errorf("no note about WSL stopping Dev again under the run:\n%s", out)
+	if i, j := strings.Index(out, "  freed "), strings.Index(out, "  note: with no terminal open in Dev, WSL stops it"); j < 0 || j < i {
+		t.Errorf("no note about WSL stopping Dev under the run:\n%s", out)
 	}
 	// WSL compacted it and started it again; the container came back.
 	calls := strings.Join(fake.CallList(), " ")

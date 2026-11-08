@@ -493,13 +493,13 @@ func TestTheMarksSuitTheConsole(t *testing.T) {
 	t.Cleanup(func() { ui.SetMarks(ui.MarksUnicode) })
 	ui.SetMarks(ui.MarksPlain)
 	colored, plainText := look{on: true}, look{}
-	if got := ansi.Strip(colored.done("saved")); got != "v saved" {
+	if got := ansi.Strip(colored.done("saved")); got != "+ saved" {
 		t.Errorf("%q", got)
 	}
 	if got := ansi.Strip(colored.bad("✗") + " " + colored.muted("→ fix")); got != "x → fix" {
 		t.Errorf("%q", got)
 	}
-	if got := plainText.gain("✓"); got != "v" {
+	if got := plainText.gain("✓"); got != "+" {
 		t.Errorf("no colors: %q", got)
 	}
 }

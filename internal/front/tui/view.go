@@ -250,7 +250,7 @@ type columns struct {
 func tableColumns(w int) columns {
 	c := columns{state: true, file: true, after: true, bar: true}
 	// The state column fits its longest word in the language in use.
-	for _, k := range []string{"col.state", "state.running", "state.stopped", "state.inuse", "state.file"} {
+	for _, k := range []string{"col.state", "state.running", "state.stopped", "state.inuse", "state.file", "state.protected"} {
 		c.stateW = max(c.stateW, lipgloss.Width(i18n.T(k)))
 	}
 	for {
@@ -351,6 +351,10 @@ func (m model) table(w, rows int) []string {
 func (m model) stateWord(d disks.Disk) string {
 	t := m.th
 	switch {
+	case m.b.Protected(d.Name):
+		// Said in words, not by its pink alone: it is never shrunk, whatever
+		// else it is.
+		return ui.Fg(t.Cat[ui.CatSafe]).Render(i18n.T("state.protected"))
 	case d.Distro == "" && d.File.Held:
 		// Docker Desktop's disk, or a file from the settings another program
 		// has open.
@@ -377,7 +381,8 @@ func (m model) recent(w, h int) []string {
 		if e.Err != "" {
 			what = ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("recent.failed", e.Disk))
 		} else {
-			what = ui.Fg(t.Cat[ui.CatDone]).Render(i18n.T("recent.freed", units.Bytes(e.Freed))) + " " + e.Disk +
+			// The disk first, then what it gave back: "Debian freed 20.0 GB".
+			what = e.Disk + " " + ui.Fg(t.Cat[ui.CatDone]).Render(i18n.T("recent.freed", units.Bytes(e.Freed))) +
 				ui.Fg(t.Muted).Render(" · "+units.Bytes(e.Before)+" → "+units.Bytes(e.After))
 		}
 		lines = append(lines, ui.Fit(" "+when+"  "+what, w))

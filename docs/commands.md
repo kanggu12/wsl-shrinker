@@ -107,10 +107,13 @@ errors), a `--clean` id not found inside the distribution, or a run of another w
 before anything runs. `--clean` can be given more than once; an id named twice is removed once. Each step prints one
 line: its name (`check`, `clean`, `stop`, `compact`, `verify`, `restart`, the same names as in the JSON), how it ended,
 and what it found or did. A failure stops the disks after it, and a line says how it left the disk: compacted or
-not, and whether its distribution runs; the exit code is then 1, or 3 when a distribution was left not running. A run
-that started containers again ends with a note: WSL stops the distribution again once nothing from Windows runs in it,
-and them with it (see [Troubleshooting](troubleshooting.md#containers-stopped-a-little-after-a-shrink)). In the JSON,
-`containers_started` and `containers_not_started` count them.
+not, and whether its distribution runs; the exit code is then 1, or 3 when a distribution was left not running. When a run
+started a distribution and its containers again, a note under that disk's result says WSL stops the distribution once
+no terminal is open in it, and the containers with it (see
+[Troubleshooting](troubleshooting.md#containers-stopped-a-little-after-a-shrink)); a stop step that failed leaves the
+distribution running, and no note. `recover` adds the same note. In the JSON, `distro_started` says the run started the
+distribution again, and `containers_started` and `containers_not_started` count the containers; a value that is false
+or 0 is left out.
 
 Run from a terminal inside a distribution it shrinks, it cannot stay: stopping the distribution closes the terminal.
 The run then continues on the screen in a new window. The command waits for that window to start, then ends with code

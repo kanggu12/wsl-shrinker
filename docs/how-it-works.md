@@ -99,7 +99,8 @@ How long they run then is WSL's to say. WSL stops a distribution once no termina
 in it, after `instanceIdleTimeout` in `.wslconfig` (15 seconds by default; `-1` turns it off), and everything inside
 stops with it: Docker, its containers, systemd's services. The compaction closed the terminals that kept the
 distribution running, so unless something else from Windows runs in it, it stops again a little after the run, and
-the run says so under its result. A terminal open in it keeps the containers running; those with a restart policy
+the run says so under its result. A stop step that failed never stopped the distribution: its terminals still run, and
+nothing is said. A terminal open in it keeps the containers running; those with a restart policy
 (`unless-stopped`, `always`) start again with Docker the next time the distribution starts.
 
 After a failed stop, a failed compaction, or a disk that could not be opened to verify it, the distribution and the

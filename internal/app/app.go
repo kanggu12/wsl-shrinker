@@ -223,6 +223,11 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 			return "", err
 		}
 		msg = e.Disk + ": " + ev.Detail
+		// Started again with its containers, it runs as long as WSL keeps it
+		// running: a second line says so. The screen shows the first line.
+		if shrink.Idle(ev.DistroStarted, ev.Count-ev.NotRestarted) {
+			msg += "\nnote: " + shrink.IdleNote(e.Distro)
+		}
 	}
 	if err := a.Journal.End(); err != nil {
 		return "", err

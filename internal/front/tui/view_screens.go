@@ -130,6 +130,7 @@ func (m model) runView() string {
 	// Before and after, on one scale, as the block map draws a disk: before,
 	// the data that stays in slate and what goes back in teal; after, the
 	// data alone, the expected size until the measured one is known.
+	var bars []string
 	if e := d.Estimate; e != nil {
 		// What the chosen items free comes off the data that stays, as the
 		// question before the run counted it.
@@ -147,13 +148,22 @@ func (m model) runView() string {
 			afterSize, label = res.File.OnDisk, i18n.T("run.after")
 		}
 		after := t.Bar(bw, e.FileSize, ui.Part{Value: afterSize, Color: t.Stays})
-		body = append(body,
-			"   "+ui.Fit(i18n.T("run.before"), 10)+before+"  "+units.Bytes(e.FileSize),
-			"   "+ui.Fit(label, 10)+after+"  "+units.Bytes(afterSize), "")
+		bars = []string{
+			"   " + ui.Fit(i18n.T("run.before"), 10) + before + "  " + units.Bytes(e.FileSize),
+			"   " + ui.Fit(label, 10) + after + "  " + units.Bytes(afterSize), ""}
 	}
-	// The outcome, once there is one, in the rows the steps left.
+	// The outcome, once there is one, in the rows the steps left. What the
+	// run came to matters more than the bars: in a window too short for all
+	// of it, the bars go first.
 	if r.done {
-		body = append(body, m.outcome(m.bodyHeight()-len(body))...)
+		room := m.bodyHeight() - len(body)
+		out := m.outcome(room - len(bars))
+		if all := m.outcome(room); len(bars) > 0 && (len(all) > len(out) || len(out) > room-len(bars)) {
+			bars, out = nil, all
+		}
+		body = append(append(body, bars...), out...)
+	} else {
+		body = append(body, bars...)
 	}
 	keys := m.keyBar([][2]string{{"⏎", i18n.T("key.back")}, {"q", i18n.T("key.quit")}})
 	status := " " + ui.Fg(t.Muted).Render(i18n.T("run.wait"))
@@ -311,7 +321,7 @@ func (m model) outcome(room int) (lines []string) {
 // each disk whose run started containers again, in the muted color.
 func (m model) idleNotes() (lines []string) {
 	for _, res := range m.run.results {
-		if res.Left == shrink.LeftRunning && res.ContainersStarted > 0 {
+		if res.Left == shrink.LeftRunning && shrink.Idle(res.DistroStarted, res.ContainersStarted) {
 			lines = append(lines, m.wrap(i18n.T("run.idle", res.Disk), " ", ui.Fg(m.th.Muted))...)
 		}
 	}
@@ -451,7 +461,12 @@ func (m model) cleanView() string {
 			}
 		}
 		if first >= 0 {
-			status += " · " + i18n.T("clean.position", first+1, last+1, len(items))
+			if first == last {
+				// One item shows: its place, not a range of one.
+				status += " · " + i18n.T("clean.position.one", first+1, len(items))
+			} else {
+				status += " · " + i18n.T("clean.position", first+1, last+1, len(items))
+			}
 		}
 	}
 	keys := m.keyBar([][2]string{{"space", i18n.T("key.choose")}, {"a", i18n.T("key.caches")}, {"n", i18n.T("key.none")},
@@ -578,7 +593,9 @@ func (m model) helpLines() []string {
 		w = max(w, lipgloss.Width(ui.Words(k[0])))
 	}
 	for _, k := range keys {
-		body = append(body, "  "+t.KeyCap(ui.Fit(ui.Words(k[0]), w), "")+" "+i18n.T(k[1]))
+		// What a key does wraps under its own words, never cut.
+		lead := "  " + t.KeyCap(ui.Fit(ui.Words(k[0]), w), "") + " "
+		body = append(body, m.wrapHang(i18n.T(k[1]), m.width, lead, strings.Repeat(" ", lipgloss.Width(lead)), lipgloss.NewStyle())...)
 	}
 	body = append(body, "")
 	body = append(body, m.wrap(i18n.T("help.cleankeys"), "  ", ui.Fg(t.Muted))...)

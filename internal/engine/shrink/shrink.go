@@ -76,9 +76,13 @@ type Event struct {
 	Took time.Duration `json:"-"`
 	// SecondStart is set when the root came back writable only after a
 	// second start; NotRestarted counts containers that did not start.
-	SecondStart  bool      `json:"second_start"`
-	NotRestarted int       `json:"not_restarted"`
-	At           time.Time `json:"at"`
+	SecondStart  bool `json:"second_start"`
+	NotRestarted int  `json:"not_restarted"`
+	// DistroStarted is set on a restart that started the distribution,
+	// which had stopped (the compaction stops it); one still running when
+	// the step began keeps what kept it running.
+	DistroStarted bool      `json:"distro_started,omitempty"`
+	At            time.Time `json:"at"`
 	// Containers are the ids the stop step stopped, on its last event: what
 	// a run cut off after it must start again.
 	Containers []string `json:"containers,omitempty"`
@@ -108,23 +112,24 @@ func (e blockError) Error() string { return e.msg }
 // eventJSON is an Event as JSON: its duration in seconds, as everywhere in
 // this program's JSON.
 type eventJSON struct {
-	Step         Step      `json:"step"`
-	Status       Status    `json:"status"`
-	Detail       string    `json:"detail"`
-	Bytes        int64     `json:"bytes"`
-	Count        int       `json:"count"`
-	Hooks        int       `json:"hooks"`
-	TookSeconds  float64   `json:"took_seconds"`
-	SecondStart  bool      `json:"second_start"`
-	NotRestarted int       `json:"not_restarted"`
-	At           time.Time `json:"at"`
-	Containers   []string  `json:"containers,omitempty"`
-	Code         string    `json:"code,omitempty"`
+	Step          Step      `json:"step"`
+	Status        Status    `json:"status"`
+	Detail        string    `json:"detail"`
+	Bytes         int64     `json:"bytes"`
+	Count         int       `json:"count"`
+	Hooks         int       `json:"hooks"`
+	TookSeconds   float64   `json:"took_seconds"`
+	SecondStart   bool      `json:"second_start"`
+	NotRestarted  int       `json:"not_restarted"`
+	DistroStarted bool      `json:"distro_started,omitempty"`
+	At            time.Time `json:"at"`
+	Containers    []string  `json:"containers,omitempty"`
+	Code          string    `json:"code,omitempty"`
 }
 
 // MarshalJSON writes the event with took_seconds.
 func (e Event) MarshalJSON() ([]byte, error) {
-	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.At, e.Containers, e.Code})
+	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.DistroStarted, e.At, e.Containers, e.Code})
 }
 
 // UnmarshalJSON reads what MarshalJSON writes.
@@ -133,7 +138,7 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &j); err != nil {
 		return err
 	}
-	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.At, j.Containers, j.Code}
+	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.DistroStarted, j.At, j.Containers, j.Code}
 	return nil
 }
 
@@ -279,19 +284,25 @@ type Result struct {
 	// started again. They run as long as WSL keeps the distribution
 	// running, which IdleNote says more of.
 	ContainersStarted int `json:"containers_started,omitempty"`
+	// DistroStarted: the run started the distribution again after it had
+	// stopped, so what kept it running before, a terminal open in it, is
+	// gone. With ContainersStarted, the fronts say what IdleNote says.
+	DistroStarted bool `json:"distro_started,omitempty"`
 }
 
-// IdleNote says, for a distribution that runs again with the containers a
-// run started, how long that lasts. WSL stops a distribution once no
+// Idle reports whether the note on WSL's idle stop goes with a start of a
+// distribution: one that had stopped, with containers started again.
+func Idle(distroStarted bool, started int) bool { return distroStarted && started > 0 }
+
+// IdleNote says, for a distribution started again with containers a run or
+// a recovery started, how long they run. WSL stops a distribution once no
 // terminal or other program from Windows runs in it, after its
-// instanceIdleTimeout, 15 seconds unless .wslconfig sets it; the containers
-// and services inside stop with it, whatever their restart policy. The
-// compaction closed the terminals that kept it running before, so the
-// fronts say this wherever they say the containers started again.
+// instanceIdleTimeout (15 seconds unless .wslconfig sets it), and what runs
+// inside stops with it. The command line says it under a run and a
+// recovery, the screen under a run.
 func IdleNote(distro string) string {
-	return "WSL stops " + distro + " again once no terminal or other program from Windows runs in it, " +
-		"15 seconds later by default (instanceIdleTimeout in .wslconfig), and its containers with it: " +
-		"a terminal open in it keeps them running, and those with a restart policy start again with it next time"
+	return "with no terminal open in " + distro + ", WSL stops it in about 15 seconds " +
+		"(instanceIdleTimeout in .wslconfig), and its containers with it; keep one open to keep them running"
 }
 
 // MarshalJSON writes the result with took_seconds.
@@ -418,8 +429,9 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 				e = Event{Step: StepRestart, Status: Failed, Detail: oneLine(err.Error())}
 				res.Left = LeftDown
 			} else {
-				// Those that ran before, less those that did not start.
-				res.ContainersStarted = e.Count - e.NotRestarted
+				// Those that ran before, less those that did not start, and
+				// whether the distribution itself had stopped.
+				res.ContainersStarted, res.DistroStarted = e.Count-e.NotRestarted, e.DistroStarted
 			}
 			sayE(e)
 		}
@@ -640,8 +652,9 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	// recorded as down.
 	settled = true
 	res.Left, res.ContainersNotStarted = LeftRunning, e.NotRestarted
-	// Those that ran before, less those that did not start.
-	res.ContainersStarted = e.Count - e.NotRestarted
+	// Those that ran before, less those that did not start, and whether the
+	// distribution itself had stopped.
+	res.ContainersStarted, res.DistroStarted = e.Count-e.NotRestarted, e.DistroStarted
 	res.Took = time.Since(start)
 	sayE(e)
 	return res
@@ -837,6 +850,11 @@ func verify(env Env, d disks.Disk, opt Options, base baseline) verdict {
 func restart(ctx context.Context, env Env, distro string, ids []string, sleep func(time.Duration)) (Event, error) {
 	sys := env.Disks.WSL
 	e := Event{Step: StepRestart, Status: Done, Detail: "running"}
+	// Whether the distribution stopped: the compaction stops it, a stop step
+	// that failed first does not. One this step starts again has lost what
+	// kept it running, a terminal open in it, and WSL stops it again once
+	// nothing from Windows runs in it (IdleNote).
+	e.DistroStarted = !runningNow(ctx, sys, distro)
 	if err := sys.Start(within(ctx, callLimit), distro); err != nil {
 		return e, err
 	}
@@ -894,6 +912,22 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		}
 	}
 	return e, nil
+}
+
+// runningNow reports whether WSL lists distro as running. A WSL that does
+// not answer counts as stopped: the note this decides then errs towards
+// being said.
+func runningNow(ctx context.Context, sys wsl.System, distro string) bool {
+	ds, err := sys.Distros(within(ctx, callLimit))
+	if err != nil {
+		return false
+	}
+	for _, d := range ds {
+		if strings.EqualFold(d.Name, distro) {
+			return d.Running
+		}
+	}
+	return false
 }
 
 // startScript starts each container on its own and prints "started|id" or

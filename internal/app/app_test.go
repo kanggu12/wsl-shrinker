@@ -90,6 +90,22 @@ func TestAStopCutOffStartsItsContainersAgain(t *testing.T) {
 	if !started {
 		t.Fatalf("containers left stopped: %s; scripts %q", said, scripts)
 	}
+	// It still ran when recover started its containers: one line. Stopped,
+	// as a run cut off in its compaction leaves it, recover starts it, and a
+	// second line says how long the containers then run.
+	if strings.Contains(said, "\n") {
+		t.Fatalf("a distribution that kept running gets the note: %q", said)
+	}
+	fake.List[0].Running = false
+	if err := a.Journal.Begin(during); err != nil {
+		t.Fatal(err)
+	}
+	if said, err = a.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if first, note, _ := strings.Cut(said, "\n"); !strings.HasPrefix(first, "Dev: running") || !strings.HasPrefix(note, "note: with no terminal open in Dev, WSL stops it") {
+		t.Fatalf("recover of a stopped distribution said %q", said)
+	}
 }
 
 func TestJournalFollowsTheRunAndGoesWithIt(t *testing.T) {

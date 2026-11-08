@@ -6,6 +6,14 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-09
+
+### Changed
+
+- The README and every guide say the same in fewer words: shorter sentences and table cells, nothing left out.
+- The `v0.4.1` tag is gone from the repository. It only carried `go.mod`'s retraction of v0.3.0 and v0.4.0 to the Go
+  module proxy, which keeps it: `go install` still takes the newest release, and the three stay retracted.
+
 ## [0.2.1] - 2026-11-08
 
 ### Fixed
@@ -89,7 +97,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.1.0

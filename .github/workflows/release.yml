@@ -2,10 +2,10 @@ name: Release
 
 on:
   push:
-    # A version tag publishes a release. v0.3.0 and v0.4.0 were published
-    # before the version numbers started over at v0.1.0, and v0.4.1 is tagged
-    # only to carry go.mod's retraction of them to the Go module proxy: a tag
-    # with one of the three publishes nothing.
+    # A version tag publishes a release. The Go module proxy keeps v0.3.0,
+    # v0.4.0 and v0.4.1 from before the version numbers started over at
+    # v0.1.0, and go.mod retracts them: a tag with one of the three publishes
+    # nothing.
     tags: ["v*", "!v0.3.0", "!v0.4.0", "!v0.4.1"]
 
 permissions:

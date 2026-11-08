@@ -17,22 +17,23 @@ Installing, and running it from inside WSL:
 
 ## "WSL answers wsl --version"
 
-`doctor` failing this check means the WSL that answers is the one built into older Windows 10, which has no
-`--version`, or no WSL at all. `wsl --update` replaces the built-in one with the current WSL; with no WSL,
-`wsl --install` in an administrator PowerShell installs it, after a restart. wsl-shrinker lists and reads the disks
-either way, and shrinks a distribution once the current WSL is there.
+`doctor` fails this check under the WSL built into older Windows 10, which has no `--version`, or with no WSL at all.
+`wsl --update` replaces the built-in one with the current WSL; with no WSL, `wsl --install` in an administrator
+PowerShell installs it, after a restart. wsl-shrinker lists and reads the disks either way, and shrinks a distribution
+once the current WSL is there.
 
 ## "this WSL cannot compact"
 
-Shrinking a distribution uses `wsl --manage <distro> --compact`, which WSL has from 3.0.1 on (2.9.8 as a
-pre-release). `wsl --update` installs it, on Windows 10 version 2004 and later. Docker Desktop's disk does not need it.
+Shrinking a distribution uses `wsl --manage <distro> --compact`, in WSL 3.0.1 and later (2.9.8 as a pre-release).
+`wsl --update` installs it on Windows 10 version 2004 and later. Docker Desktop's disk and files from `extra_disks`
+do not need it.
 
 ## A disk gave back less than its estimate
 
-- **It was read while running.** The estimate of a running distribution can be off by the last few seconds of
-  writes, and the stop step writes a little too. A difference of more than a few hundred MB is worth an issue.
-- **Something wrote between the estimate and the shrink.** The estimate is taken when the screen reads the disks;
-  `r` reads them again.
+- **It was read while running.** A running distribution's estimate can miss the last few seconds of writes, and the
+  stop step writes a little too. A difference of more than a few hundred MB is worth an issue.
+- **Something wrote between the estimate and the shrink.** The estimate is taken when the screen reads the disks; `r`
+  reads them again.
 - **The file is sparse.** A sparse disk (`wsl --manage <distro> --set-sparse true`) already gives space back on its
   own; the screen marks it.
 
@@ -47,43 +48,44 @@ Docker Desktop holds its data disk while it runs. Quit it from its tray icon, th
 
 ## Containers stopped a little after a shrink
 
-The run (or `recover`) started them again, then WSL stopped their distribution: it does that once no terminal or other program from
-Windows runs in it, 15 seconds later by default, and the compaction had closed the terminals that kept it running.
-Open a terminal in the distribution and the containers with a restart policy (`unless-stopped`, `always`) start with
-Docker; start the others with `docker start`. To keep a distribution running with nothing open in it, set
+The run (or `recover`) started them again, then WSL stopped their distribution. WSL does that once no terminal or other
+program from Windows runs in it, 15 seconds later by default. The compaction had closed the terminals that kept it
+running. Open a terminal in it: the containers with a restart policy (`unless-stopped`, `always`) start with Docker;
+start the others with `docker start`. To keep a distribution running with nothing open in it, set
 `instanceIdleTimeout=-1` under `[general]` in `%UserProfile%\.wslconfig` and run `wsl --shutdown` once.
 
 ## "the root filesystem stays read-only"
 
-After compacting, WSL has been seen to leave a distribution's root mounted read-only. wsl-shrinker stops and starts the
-distribution once more; when that is not enough, `wsl --shutdown` restarts WSL and clears it. It stops every running
-distribution, so wsl-shrinker leaves it to you.
+After compacting, WSL can leave a distribution's root mounted read-only. wsl-shrinker stops and starts the distribution
+once more. If that is not enough, `wsl --shutdown` restarts WSL and clears it. It stops every running distribution, so
+wsl-shrinker leaves it to you.
 
 ## "the filesystem records errors"
 
 The kernel noted errors in the disk's filesystem before any shrink, and wsl-shrinker leaves the disk alone until e2fsck
-has checked it. Stop the distribution (`wsl --terminate <distro>`; for Docker Desktop's disk, quit Docker Desktop),
-attach the disk without mounting it (`wsl --mount --vhd <file> --bare`, as administrator), run `sudo e2fsck -f /dev/sdX`
-from another distribution (`lsblk` names it), then detach it with `wsl --unmount <file>`.
+has checked it. Stop the distribution (`wsl --terminate <distro>`; for Docker Desktop's disk, quit Docker Desktop).
+Attach the disk without mounting it (`wsl --mount --vhd <file> --bare`, as administrator). Run
+`sudo e2fsck -f /dev/sdX` from another distribution (`lsblk` names it), then detach the disk with
+`wsl --unmount <file>`.
 
 ## "more went than was cleaned"
 
-After compacting, the disk does not read as before: the filesystem uses noticeably less than before, beyond what you
-chose to clean, blocks it uses are no longer stored, or it records new errors. wsl-shrinker stops there and leaves the
-distribution stopped. Do not use it until you know why: attach the disk to WSL without mounting it
+After compacting, the disk does not read as before: the filesystem uses noticeably less, beyond what you chose to
+clean; blocks it uses are no longer stored; or it records new errors. wsl-shrinker stops there and leaves the
+distribution stopped. Do not use it until you know why. Attach the disk to WSL without mounting it
 (`wsl --mount --vhd <file> --bare`, as administrator), check it from another distribution with
 `sudo e2fsck -fn /dev/sdX` (`lsblk` names it), and open an issue with `wsl-shrinker history --json`.
 
-When the file only could not be opened again ("cannot be opened after compacting"), nothing says the disk changed: the
-distribution is started again, and `r` on the screen reads the disk again once the program that had it lets go.
+If the file only could not be opened again ("cannot be opened after compacting"), nothing says the disk changed. The
+distribution is started again, and `r` on the screen rereads the disk once the program that had it lets go.
 
 ## The window closed during a run
 
-Closing the window, or the terminal it runs in, ends wsl-shrinker, but not what WSL is doing: a compaction that had
-started finishes on its own. What wsl-shrinker would have done after it waits in its journal: the next time it starts,
-the screen says "The run of … was cut off" and `R` starts the distribution again with the containers it stopped, as
-does `wsl-shrinker recover`. If WSL is still compacting, it says so; try again when it is done. `wsl-shrinker doctor`
-reports such a run too, and no other run starts before it is finished. `wsl-shrinker history` has no line for it.
+Closing the window, or the terminal it runs in, ends wsl-shrinker but not what WSL is doing: a compaction that had
+started finishes on its own. What wsl-shrinker would have done next waits in its journal. On its next start, the screen
+says "The run of … was cut off", and `R` (or `wsl-shrinker recover`) starts the distribution again with the containers
+it stopped. If WSL is still compacting, it says so; try again when it is done. `wsl-shrinker doctor` reports such a run
+too. `wsl-shrinker history` has no line for it.
 
 ## "another run is not finished"
 
@@ -92,10 +94,10 @@ waits to be finished (`wsl-shrinker recover`, or `R` on the screen).
 
 ## A new window opened
 
-Started from a terminal inside the distribution being shrunk, the run moves to a new window: stopping the
-distribution closes the terminal it runs in. Shrinking another distribution, or starting `wsl-shrinker` from
-PowerShell, stays in the terminal. `wsl-shrinker.exe` typed in WSL, rather than `wsl-shrinker`, cannot tell which
-distribution it runs in, so it moves a shrink of any running distribution to a new window.
+Started from a terminal inside the distribution being shrunk, the run moves to a new window: stopping the distribution
+closes the terminal it runs in. Shrinking another distribution, or starting `wsl-shrinker` from PowerShell, stays in
+the terminal. `wsl-shrinker.exe` typed in WSL, rather than `wsl-shrinker`, cannot tell which distribution it runs in,
+so it moves a shrink of any running distribution to a new window.
 
 ## "the new window did not start"
 
@@ -105,26 +107,24 @@ shrink from PowerShell, where it stays in the terminal.
 ## The install stops
 
 - **"could not download"**: the PC cannot reach github.com. Download the zip for your processor, `checksums.txt` and
-  `install.ps1` elsewhere, then install from them with the saved script, as
-  [Setup](setup.md#without-internet-access) shows.
-- **"Method invocation is supported only on core types in this language mode"**: the PC runs PowerShell in
-  ConstrainedLanguage mode, as company PCs under AppLocker or Windows Defender Application Control do, which refuses
-  the .NET calls the script makes, from its first line on. Install from the zip by hand ([Setup](setup.md#by-hand)).
-- **"running scripts is disabled on this system"**: this comes from running a saved `install.ps1` as a file. The
-  one-line install (`irm ... | iex`) runs no file and is not stopped by the execution policy; or run the file with
+  `install.ps1` elsewhere, then install from them with the saved script ([Setup](setup.md#without-internet-access)).
+- **"Method invocation is supported only on core types in this language mode"**: PowerShell runs in ConstrainedLanguage
+  mode, as on company PCs under AppLocker or Windows Defender Application Control, and refuses the script's .NET calls
+  from its first line on. Install from the zip by hand ([Setup](setup.md#by-hand)).
+- **"running scripts is disabled on this system"**: a saved `install.ps1` was run as a file. The one-line install
+  (`irm ... | iex`) runs no file and is not stopped by the execution policy; or run the file with
   `powershell -ExecutionPolicy Bypass -File install.ps1`.
-- **"is in use; close wsl-shrinker"**: a wsl-shrinker still runs, in another terminal or a window a run moved to.
-  Close it, then run the install again. Nothing was replaced.
+- **"is in use; close wsl-shrinker"**: a wsl-shrinker still runs, in another terminal or a window a run moved to. Close
+  it, then run the install again. Nothing was replaced.
 
 ## `wsl-shrinker` is not found inside WSL
 
-WSL takes Windows' PATH into each distribution, and the install folder is on it. A distribution with
+WSL takes Windows' PATH, which holds the install folder, into each distribution. A distribution with
 `appendWindowsPath=false` under `[interop]` in `/etc/wsl.conf` takes none of it: run the launcher by its full path,
 `/mnt/c/Users/<you>/AppData/Local/Programs/wsl-shrinker/wsl-shrinker` (with Scoop,
 `/mnt/c/Users/<you>/scoop/apps/wsl-shrinker/current/wsl-shrinker`), or link it into your own PATH once:
 `ln -s "/mnt/c/Users/<you>/AppData/Local/Programs/wsl-shrinker/wsl-shrinker" ~/.local/bin/`. A terminal opened before
-the install has the old PATH: open a new one, and in WSL, run `wsl --shutdown` in Windows first if it still is not
-found.
+the install has the old PATH: open a new one. In WSL, if it is still not found, run `wsl --shutdown` in Windows first.
 
 ## "could not start wsl-shrinker.exe"
 
@@ -134,16 +134,16 @@ again. wsl-shrinker needs that: the disks are Windows' to read and to compact.
 
 ## "Windows protected your PC"
 
-SmartScreen says this the first time a program downloaded with a browser runs, when the program is not signed by a
-publisher it knows. The one-line install and Scoop download without the browser's mark, so it does not appear there.
-For a zip downloaded by hand, check it first (`checksums.txt`, or `gh attestation verify <zip> -R kanggu12/wsl-shrinker`),
-then choose More info, then Run anyway, or clear the mark before extracting: `Unblock-File <zip>`.
+SmartScreen says this the first time a program downloaded with a browser runs, unless a publisher it knows signed it.
+The one-line install and Scoop download without the browser's mark, so it does not appear there. For a zip downloaded
+by hand, check it first (`checksums.txt`, or `gh attestation verify <zip> -R kanggu12/wsl-shrinker`). Then choose More
+info, then Run anyway, or clear the mark before extracting: `Unblock-File <zip>`.
 
 ## Boxes where marks should be
 
 The terminal's font has no `✓`, `✗`, `⏎` or `↻`. wsl-shrinker draws plain marks by itself in the Windows console's own
-window, and guesses that window inside WSL; elsewhere, a terminal with a font of its own can still lack them.
-`WSL_SHRINKER_SYMBOLS=plain` draws `v`, `x`, `Enter` and `~` in any terminal. Lines that run past their place, with
+window, and guesses that window inside WSL. Elsewhere, a terminal with a font of its own can still lack them.
+`WSL_SHRINKER_SYMBOLS=plain` draws `+`, `x`, `Enter` and `~` in any terminal. Lines that run past their place, with
 arrows and dots that look wide, are a console on a Korean, Japanese or Chinese code page drawing them two cells wide:
 `WSL_SHRINKER_SYMBOLS=ascii` draws every mark in ASCII. Windows Terminal has fonts for every mark and draws each one
 cell wide ([Setup](setup.md#terminals)).

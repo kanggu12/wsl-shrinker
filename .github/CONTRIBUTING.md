@@ -1,13 +1,12 @@
 # Contributing to wsl-shrinker
 
 wsl-shrinker changes disk files people cannot lose, so a change comes with a test showing it still refuses what it
-should. Almost all of it can be worked on without touching a real disk: the readers are tested on VHDX files and ext4
-filesystems the tests build, the steps of a shrink on a fake WSL, and the screen on a made-up PC (`--demo`).
+should. Almost no work needs a real disk: the readers are tested on VHDX files and ext4 filesystems the tests build, a
+shrink's steps on a fake WSL, and the screen on a made-up PC (`--demo`).
 
 ## How the pieces fit
 
-The code under `internal/` sits in layers; an import goes down them, never up, and `internal/layers_test.go` fails
-when one goes up.
+The code under `internal/` sits in layers. Imports go down, never up; `internal/layers_test.go` fails when one goes up.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/layers-dark.svg">
@@ -18,17 +17,16 @@ when one goes up.
 |:---|:---|:---|
 | front | `cli`, `tui`, `ui`, `i18n` | the command line, the screen, colors and words |
 | app | `app`, `app/remote` | puts the rest together for this PC; the screen's backend from WSL, over `wsl-shrinker.exe` |
-| engine | `disks`, `estimate`, `survey`, `shrink`, `history`, `journal` | finding disks, what a shrink gives back, looking inside, the steps of a shrink, past runs, the run in progress |
+| engine | `disks`, `estimate`, `survey`, `shrink`, `history`, `journal` | finding disks, what a shrink gives back, looking inside, a shrink's steps, past runs, the run in progress |
 | settings | `config` | `config.toml` |
 | machine | `vhdx`, `ext4`, `wsl`, `winapi` | reading disk files, talking to WSL and Windows |
 | core | `units`, `version` | sizes as Windows shows them, with no I/O; the build's version |
 
-`machine/vhdx` and `machine/ext4` only read, and refuse what they do not fully understand rather than guess. Every
-command run inside a distribution is built in `engine/survey` (cleaning) or `engine/shrink` (stopping and starting);
-nothing else builds one. Whether a disk can be shrunk now is decided once, by `shrink.Preflight`: the run's check, the
-screen, `doctor` and `shrink` all ask it. How a run left its distribution is decided once too, at the end of
-`shrink.Run`, and the result says it (`Left`); the fronts read that rather than the steps.
-[Internals](../docs/internals.md) has what runs where and the reasons behind each part, and
+`machine/vhdx` and `machine/ext4` only read, and refuse what they do not fully understand rather than guess. Only
+`engine/survey` (cleaning) and `engine/shrink` (stopping and starting) build commands to run inside a distribution.
+`shrink.Preflight` alone decides whether a disk can be shrunk now: the run's check, the screen, `doctor` and `shrink`
+all ask it. The end of `shrink.Run` alone decides how a run left its distribution, in the result's `Left`; the fronts
+read that, not the steps. [Internals](../docs/internals.md) has what runs where and why, and
 [how it works](../docs/how-it-works.md) what a shrink does.
 
 ## Build and try it
@@ -44,8 +42,8 @@ dist/wsl-shrinker.exe list        # reads only
 go run ./cmd/wsl-shrinker --demo  # the screen on a made-up PC, on any system
 ```
 
-`list`, `inside`, `doctor` and the screen change nothing until you confirm a shrink. To try a shrink, make a
-throwaway distribution and shrink only that one:
+`list`, `inside`, `doctor` and the screen change nothing until you confirm a shrink. To try a shrink, shrink only a
+throwaway distribution:
 
 ```sh
 docker export "$(docker create alpine:3 true)" -o /tmp/alpine.tar
@@ -64,27 +62,27 @@ make vuln           # govulncheck, for Linux and Windows
 make demo           # the demo image from the work tree, opened in this terminal
 ```
 
-The screen has a test that renders every view at widths from 40 to 200 columns, in English and Korean, and fails if
-any line is not exactly the screen's width. `--snapshot 120x30 --keys "c space enter"` prints one frame of the demo
-for a look, `setup --snapshot 100x30` the setup screen, and `--snapshot 100x24 --cli` CLI mode's disks.
+A screen test renders every view at widths from 40 to 200 columns, in English and Korean, and fails if any line is not
+exactly the screen's width. `--snapshot 120x30 --keys "c space enter"` prints one frame of the demo,
+`setup --snapshot 100x30` the setup screen, and `--snapshot 100x24 --cli` CLI mode's disks.
 
-A few tests hold the parts that are hardest to see go wrong:
+A few tests hold what is hardest to see go wrong:
 
 - `TestRecoveryMatrix` (engine/shrink): for every point a run can fail at, on every kind of disk, whether the
-  distribution and its containers run afterwards. A change to how failures are handled must keep its table.
-- `TestScreenInAConsole` (cmd/wsl-shrinker, Windows): the program in a pseudoconsole, the headless console a terminal
-  tab is made of, so no window opens: the screen draws, redraws for a new size, and `q` ends it. Beside it, setup takes
-  keys there and writes its file, and a mistake reads in color with what to do.
+  distribution and its containers run afterwards. A change to failure handling must keep its table.
+- `TestScreenInAConsole` (cmd/wsl-shrinker, Windows): the program in a pseudoconsole, the headless console behind a
+  terminal tab, so no window opens. The screen draws, redraws on resize, and `q` ends it. Beside it, setup takes keys
+  there and writes its file, and a mistake shows in color with what to do.
 - `recorded_test.go` (machine/wsl): wsl.exe's own output, recorded once with made-up distribution names, through the
   parsing. Record a new wsl.exe's output there when its format changes.
 
-No test opens a window: `winapi.Reopen` refuses inside a test binary, and a test that runs a whole command sets the
-App's `TerminalIn`, since a test binary started from WSL looks started from inside a distribution. A command line test
-that needs a terminal replaces `stdinIsTerminal` and `stdoutIsTerminal` in the cli package, and the screens it would
-open, `openScreen` and `openSetup`. The launcher's tests replace what it reaches Windows through (`locate`, `execve`,
-`openRemote`, `runChild`, `exit`), the PC's processor and its Windows build (`hostMachine`, `windowsBuild`, so no test
-starts `cmd.exe`), and give it only fake programs without the execute bit: a real one built for another processor
-would put Windows' dialog on the desktop.
+No test opens a window. `winapi.Reopen` refuses inside a test binary. A test that runs a whole command sets the App's
+`TerminalIn`, since a test binary started from WSL looks started from inside a distribution. A test in the cli package
+that needs a terminal replaces `stdinIsTerminal` and `stdoutIsTerminal`, and the screens it would open (`openScreen`,
+`openSetup`). The launcher's tests replace what it reaches Windows through (`locate`, `execve`, `openRemote`,
+`runChild`, `exit`) and the PC's processor and Windows build (`hostMachine`, `windowsBuild`), so no test starts
+`cmd.exe`. They give it only fake programs without the execute bit: a real one built for another processor would put
+Windows' dialog on the desktop.
 
 ## Make a change
 
@@ -97,8 +95,8 @@ would put Windows' dialog on the desktop.
 
 ## Style
 
-Comments say why a line is there, nearly line by line; docs and comments are in English. A commit says what changed
-for the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleased]` for anything they would notice.
+Comments say why a line is there, nearly line by line. Docs and comments are in English. A commit says what changed for
+the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleased]` for anything they would notice.
 
 ## Releases
 
@@ -108,30 +106,29 @@ for the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleas
 </picture>
 
 A release is a `## [X.Y.Z] - date` section in `CHANGELOG.md` with its link at the bottom, `make badges`, a commit, and
-an annotated `vX.Y.Z` tag on it once CI is green. Versions follow [semantic versioning](https://semver.org/): a release
-that adds something raises the minor number (0.2.0), one that only fixes raises the patch number (0.1.1). Before 1.0 a
-minor release may also change how something works, and its notes say what. The section is the release's notes:
-`.github/workflows/release.yml` refuses a tag without one, and `internal/changelog_test.go` checks the file's shape and
-that the README's badge names the newest release. A tag with a hyphen (`v0.2.0-rc.1`) goes out as a pre-release, with
-a section of its own.
+an annotated `vX.Y.Z` tag on it once CI is green. Versions follow [semantic versioning](https://semver.org/): additions
+raise the minor number (0.2.0), fixes alone raise the patch number (0.1.1). Before 1.0 a minor release may also change
+how something works; its notes say what. The section becomes the release notes: `.github/workflows/release.yml`
+refuses a tag without one, and `internal/changelog_test.go` checks the file's shape and that the README's badge names
+the newest release. A tag with a hyphen (`v0.2.0-rc.1`) goes out as a pre-release, with a section of its own.
 
-The workflow runs all of CI, then `scripts/dist.sh` builds the zips, `checksums.txt` and the Scoop manifest, the zips
-get build provenance, and the demo image goes to `ghcr.io`; last, `.github/workflows/installers.yml` installs the
+The workflow runs all of CI. Then `scripts/dist.sh` builds the zips, `checksums.txt` and the Scoop manifest, the zips
+get build provenance, and the demo image goes to `ghcr.io`. Last, `.github/workflows/installers.yml` installs the
 published release as people do. `scripts/dist.sh` builds only from a work tree that matches its commit, since the zips
 carry that commit's name.
 
 ### A WSL release
 
 The weekly canary (`.github/workflows/canary.yml`) runs the real shrink of `.github/workflows/wsl.yml` on WSL's newest
-pre-release, so a WSL release that changes its commands, its registry or its disks usually shows up there first. It
-can be started by hand from the Actions tab too. A failure there blocks nothing: it says what to look at, and the fix
-goes out as any other.
+pre-release, so a WSL release that changes its commands, registry or disks usually shows up there first. It can also be
+started by hand from the Actions tab. A failure there blocks nothing: it says what to look at, and the fix goes out as
+any other.
 
 ### Version numbers never used
 
 v0.3.0, v0.4.0 and v0.4.1 can never be released. v0.3.0 and v0.4.0 were published before the version numbers started
-over at v0.1.0, and the Go module proxy keeps them; `go.mod` retracts them, and v0.4.1 is tagged only to carry that list
-to the proxy, which reads retractions from the highest version it has. The release workflow ignores the three tags.
+over at v0.1.0. v0.4.1 carried `go.mod`'s retraction of them to the Go module proxy, which keeps all three though their
+tags are gone. The release workflow ignores the three numbers, and every later `go.mod` keeps the retraction.
 
 ## Report a problem
 

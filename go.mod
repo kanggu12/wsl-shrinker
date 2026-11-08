@@ -8,8 +8,9 @@ go 1.26.0
 toolchain go1.26.10
 
 // The first versions published were numbered past where the releases now
-// start; v0.4.1 exists only to carry this list to the module proxy, which
-// reads retractions from the highest version it has.
+// start. v0.4.1 carried this list to the module proxy, which keeps all
+// three and reads retractions from the highest version it has; every later
+// version keeps the list, for the day one is numbered past v0.4.1.
 retract (
 	v0.4.1 // Carries these retractions only.
 	v0.4.0 // Published before the version numbers started over at v0.1.0.

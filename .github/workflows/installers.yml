@@ -1,0 +1,148 @@
+name: installers
+
+# The installers as people run them, from a published release: install.ps1
+# in PowerShell 7 and in Windows PowerShell 5.1, on x64 and on ARM64, where it
+# must pick the arm64 zip by itself; the Scoop manifest; and the demo image.
+# Each installs, runs the program, and removes it again.
+# A release made by the release workflow does not start other workflows, so
+# that workflow calls this one once the release is out.
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: release to install, like v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  pwsh:
+    name: install.ps1 in PowerShell 7
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      # A release is installed the way the README says, through "latest";
+      # a pre-release, which "latest" skips, by its own address.
+      - name: install, run, remove
+        shell: pwsh
+        env:
+          WANT: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          if ($env:WANT -match '-') {
+            $env:WSL_SHRINKER_VERSION = $env:WANT
+            $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WANT/install.ps1"
+          } else {
+            $env:SCRIPT = "https://github.com/$env:REPO/releases/latest/download/install.ps1"
+          }
+          $env:WSL_SHRINKER_VERSION_WANTED = $env:WANT
+          irm $env:SCRIPT | iex
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
+          $v = & (Join-Path $dir 'wsl-shrinker.exe') version
+          $v
+          if ($v -notmatch ('^wsl-shrinker ' + [regex]::Escape($env:WSL_SHRINKER_VERSION_WANTED) + ' ')) { 'not the release asked for'; exit 1 }
+          if (-not (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'not on PATH'; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          irm $env:SCRIPT | iex
+          if (Test-Path $dir) { 'the folder is still there'; exit 1 }
+          if ((([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'still on PATH'; exit 1 }
+          # The flag is one-shot: the script cleared it.
+          if ($env:WSL_SHRINKER_UNINSTALL) { 'the uninstall flag is still set'; exit 1 }
+          exit 0
+
+  powershell:
+    name: install.ps1 in Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: install, run, remove
+        shell: powershell
+        env:
+          WSL_SHRINKER_VERSION: ${{ inputs.version }}
+          SCRIPT: https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}/install.ps1
+        run: |
+          irm $env:SCRIPT | iex
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
+          $v = & (Join-Path $dir 'wsl-shrinker.exe') version
+          $v
+          if ($v -notmatch ('^wsl-shrinker ' + [regex]::Escape($env:WSL_SHRINKER_VERSION) + ' ')) { 'not the release asked for'; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          irm $env:SCRIPT | iex
+          if (Test-Path $dir) { 'the folder is still there'; exit 1 }
+          exit 0
+
+  arm64:
+    name: install.ps1 on Windows 11 on Arm
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    steps:
+      - name: install, check it is the arm64 build, remove
+        shell: powershell
+        env:
+          WSL_SHRINKER_VERSION: ${{ inputs.version }}
+          SCRIPT: https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}/install.ps1
+        run: |
+          irm $env:SCRIPT | iex
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker\wsl-shrinker.exe'
+          & $exe version
+          # The program's header names its processor: 0xAA64 is ARM64.
+          $b = [IO.File]::ReadAllBytes($exe)
+          $machine = [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3c) + 4)
+          if ($machine -ne 0xAA64) { 'installed a build for machine 0x{0:X4}, not ARM64' -f $machine; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          irm $env:SCRIPT | iex
+          if (Test-Path (Split-Path $exe)) { 'the folder is still there'; exit 1 }
+          exit 0
+
+  scoop:
+    name: the Scoop manifest
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: install with Scoop, run, remove
+        shell: pwsh
+        env:
+          MANIFEST: https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}/wsl-shrinker.json
+          VERSION: ${{ inputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          # The runner is an administrator, which Scoop refuses unless told.
+          iex "& {$(irm https://get.scoop.sh)} -RunAsAdmin"
+          $env:Path = (Join-Path $env:USERPROFILE 'scoop\shims') + ';' + $env:Path
+          scoop install $env:MANIFEST
+          if ($LASTEXITCODE -ne 0) { 'scoop install failed'; exit 1 }
+          $v = wsl-shrinker version
+          $v
+          if ($v -notmatch ('^wsl-shrinker ' + [regex]::Escape($env:VERSION) + ' ')) { 'not the release asked for'; exit 1 }
+          scoop uninstall wsl-shrinker
+          if ($LASTEXITCODE -ne 0) { 'scoop uninstall failed'; exit 1 }
+          exit 0
+
+  demo-image:
+    name: the demo image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: pull, run
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wsl-shrinker-demo:${VERSION#v}"
+          docker run --rm --read-only "$image" version | tee version.txt
+          grep -q "^wsl-shrinker $VERSION " version.txt
+          docker run --rm --read-only "$image" --demo --snapshot 100x30 | grep -q 'can be given back now'

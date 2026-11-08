@@ -1,11 +1,12 @@
 # Settings
 
 The settings file is `%APPDATA%\wsl-shrinker\config.toml`. Every key is optional. `wsl-shrinker setup` chooses the
-language, colors, mode, size worth shrinking and protected disks, on a screen or as flags (see
+language, colors, mode, size worth shrinking and protected disks, in a wizard or as flags (see
 [Commands](commands.md#setup)), and writes only the keys that changed, leaving the rest of the file, comments
-included, as it was; with no file yet it writes a whole commented file like the one below (here with example values). The first start and the installer
-open it. `wsl-shrinker config init` writes a file with every key at its default. A file that does not load stops
-wsl-shrinker with the reason and what to do, rather than running with settings you did not choose.
+included, as it was; with no file yet it writes a whole commented file like the one below (here with example values).
+The first start and the installer open setup. `extra_disks` has no question in setup: add it by hand.
+`wsl-shrinker config init` writes a file with every key at its default. A file that does not load stops wsl-shrinker
+with the reason and what to do, rather than running with settings you did not choose.
 
 ```toml
 # Language of the screen, setup and CLI mode's disks: "en", "ko", or "auto":
@@ -67,16 +68,14 @@ has 15 minutes; past that, the run ends there and starts the containers it stopp
 | `%LOCALAPPDATA%\wsl-shrinker\handoff-*` | an empty receipt a new window leaves for the terminal a run moved from, removed once seen, or at the next move |
 | `%LOCALAPPDATA%\wsl-shrinker\crash-*.txt` | each run's, empty while it runs and removed when it ends. After an error Go cannot recover from, it holds what Go printed, until a later run in a terminal says where it is, as that run ends, and renames it `...-shown.txt`. Ten of each wait at most. Inside WSL, the launcher keeps one the same way in `~/.cache/wsl-shrinker` while it draws the screen |
 
-## Install and remove
-
-The one-line install (README's quick start) takes these, as environment variables set before it runs:
+## Environment
 
 | Variable | |
 |:---|:---|
-| `WSL_SHRINKER_VERSION` | the release to install, like `v0.3.0` (default: the latest) |
-| `WSL_SHRINKER_BIN_DIR` | where the program goes (default: `%LOCALAPPDATA%\Programs\wsl-shrinker`) |
-| `WSL_SHRINKER_NO_SETUP` | `1`: no setup screen after a first install |
+| `WSL_SHRINKER_LANG` | `en` or `ko`: the language of the screen, setup and CLI mode's disks, before Windows' display language and after `--lang` and the settings |
+| `WSL_SHRINKER_SYMBOLS` | `plain`, `ascii` or `unicode`: the marks a terminal shows ([Setup](setup.md#terminals)); by default plain ones in the Windows console's own window, all ASCII there on an East Asian code page |
+| `WSL_SHRINKER_SCREEN` | `windows`: from inside WSL, the screen runs in `wsl-shrinker.exe` instead of the Linux terminal |
+| `NO_COLOR` | set: the commands print without colors, as they do piped |
 
-To remove wsl-shrinker, delete its folder (`%LOCALAPPDATA%\Programs\wsl-shrinker` unless you chose another), take
-that folder out of your user PATH (Settings, then "Edit environment variables for your account"), and delete
-`%APPDATA%\wsl-shrinker` and `%LOCALAPPDATA%\wsl-shrinker`, the files listed above.
+The install script takes its own ([Setup](setup.md#powershell-one-line)). Installing, upgrading and removing
+wsl-shrinker are in [Setup](setup.md#upgrade-and-remove).

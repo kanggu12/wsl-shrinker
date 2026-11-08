@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
+	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 )
 
@@ -442,5 +444,62 @@ func TestABugWhileAskingSaysWhereItWas(t *testing.T) {
 	// An answer is read as before.
 	if ok, err := ask(context.Background(), strings.NewReader("yes\n"), &out, "Shrink? [y/N] "); !ok || err != nil {
 		t.Fatalf("%v %v", ok, err)
+	}
+}
+
+func TestTheMarksSuitTheConsole(t *testing.T) {
+	// WSL_SHRINKER_SYMBOLS says, when set; otherwise the Windows console's
+	// own window gets plain marks, all ASCII on an East Asian code page, and
+	// any other terminal the marks themselves.
+	for _, c := range []struct {
+		setting            string
+		classic, eastAsian bool
+		want               ui.MarkSet
+	}{
+		{"", false, false, ui.MarksUnicode}, {"", false, true, ui.MarksUnicode},
+		{"", true, false, ui.MarksPlain}, {"", true, true, ui.MarksASCII},
+		{"plain", false, false, ui.MarksPlain}, {"ascii", false, false, ui.MarksASCII},
+		{"unicode", true, true, ui.MarksUnicode}, {"something else", true, false, ui.MarksPlain},
+	} {
+		if got := markSet(c.setting, c.classic, c.eastAsian); got != c.want {
+			t.Errorf("%q, classic %v, East Asian %v: %d", c.setting, c.classic, c.eastAsian, got)
+		}
+	}
+	// Inside WSL, a terminal that says nothing of itself is taken for the
+	// Windows console; one that says where it is, for that terminal.
+	env := func(vars ...string) func(string) string {
+		return func(k string) string {
+			for i := 0; i+1 < len(vars); i += 2 {
+				if vars[i] == k {
+					return vars[i+1]
+				}
+			}
+			return ""
+		}
+	}
+	// The guess is the Linux side's: the Windows program asks the console.
+	if got := consoleInWSL(env("WSL_DISTRO_NAME", "Dev")); got != (runtime.GOOS != "windows") {
+		t.Errorf("a bare WSL terminal taken for the console: %v, on %s", got, runtime.GOOS)
+	}
+	for _, v := range []string{"WT_SESSION", "TERM_PROGRAM", "TMUX", "ZELLIJ", "SSH_CONNECTION", "SSH_TTY"} {
+		if consoleInWSL(env("WSL_DISTRO_NAME", "Dev", v, "1")) {
+			t.Errorf("%s set, still taken for the console", v)
+		}
+	}
+	if consoleInWSL(env()) {
+		t.Error("outside WSL, taken for the console")
+	}
+	// A command's marks go plain with the screen's, with colors and without.
+	t.Cleanup(func() { ui.SetMarks(ui.MarksUnicode) })
+	ui.SetMarks(ui.MarksPlain)
+	colored, plainText := look{on: true}, look{}
+	if got := ansi.Strip(colored.done("saved")); got != "v saved" {
+		t.Errorf("%q", got)
+	}
+	if got := ansi.Strip(colored.bad("✗") + " " + colored.muted("→ fix")); got != "x → fix" {
+		t.Errorf("%q", got)
+	}
+	if got := plainText.gain("✓"); got != "v" {
+		t.Errorf("no colors: %q", got)
 	}
 }

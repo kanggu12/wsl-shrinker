@@ -1,0 +1,7 @@
+# The demo image needs the Go sources, go.mod, the license and the notices;
+# nothing else goes into the build context.
+.git
+.github
+dist
+scratch
+docs/assets

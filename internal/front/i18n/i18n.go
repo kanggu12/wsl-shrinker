@@ -55,6 +55,14 @@ func Set(l Lang) {
 // Current returns the language in use.
 func Current() Lang { return current }
 
+// rewrite is what every text goes through on its way out: the plain marks,
+// in a console whose font has none of the others (ui.Words). As it is, by
+// default.
+var rewrite = func(s string) string { return s }
+
+// SetRewrite sets what every text goes through on its way out.
+func SetRewrite(f func(string) string) { rewrite = f }
+
 // T returns the text for key in the current language, formatted with args.
 // A key missing from Korean falls back to English; a key missing from both
 // shows as itself, which the catalog test turns into a failure.
@@ -67,9 +75,9 @@ func T(key string, args ...any) string {
 		s = key
 	}
 	if len(args) == 0 {
-		return s
+		return rewrite(s)
 	}
-	return fmt.Sprintf(s, args...)
+	return rewrite(fmt.Sprintf(s, args...))
 }
 
 // TN is T for a count n: English has a ".one" form for n == 1.

@@ -117,6 +117,52 @@ func TestExtraDisksGetNamesOfTheirOwn(t *testing.T) {
 	}
 }
 
+func TestDockerDiskMovedInItsSettingsIsFound(t *testing.T) {
+	// Docker Desktop can move its data disk ("Disk image location"): its
+	// settings, written with a byte order mark by some releases, name the
+	// folder. The disk there is Docker's; one left in the default folder
+	// is listed too, under a name of its own.
+	appData, local, moved := t.TempDir(), t.TempDir(), t.TempDir()
+	disk := filepath.Join(moved, "disk", "docker_data.vhdx")
+	left := filepath.Join(local, `Docker\wsl\disk\docker_data.vhdx`)
+	for _, p := range []string{disk, left} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		vhdxtest.Write(t, p, vhdxtest.Spec{VirtualSize: 4 << 20})
+	}
+	settings, err := json.Marshal(map[string]any{"CustomWslDistroDir": moved, "AutoStart": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(appData, "Docker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appData, "Docker", "settings-store.json"), append([]byte("\xef\xbb\xbf"), settings...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := Env{WSL: &wsl.Fake{}, Stat: winapi.Stat, Open: OpenFile, LocalAppData: local, AppData: appData}
+	got, err := Find(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Path != disk || got[0].Name != "Docker Desktop data" || got[0].Kind != KindDocker {
+		t.Fatalf("%+v", got)
+	}
+	if got[1].Path != left || got[1].Name == got[0].Name || got[1].Kind != KindDocker {
+		t.Fatalf("the one left behind: %+v", got[1])
+	}
+	// Settings that do not name a folder, or cannot be read, change nothing.
+	for _, content := range []string{`{"AutoStart": true}`, `{`, ``, `{"CustomWslDistroDir": "DockerDesktopWSL"}`} {
+		if err := os.WriteFile(filepath.Join(appData, "Docker", "settings-store.json"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if p := movedDockerDisk(appData); p != "" {
+			t.Errorf("%q: %q", content, p)
+		}
+	}
+}
+
 func TestDockerDiskIsEstimatedWithoutATrim(t *testing.T) {
 	// Docker Desktop's disk is compacted by Windows without a trim: its
 	// estimate is the untrimmed one, while a distribution's is trimmed.

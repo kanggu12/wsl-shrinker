@@ -28,7 +28,8 @@ raises the schema's number.
 Flags for every command: `--lang en|ko`, the language of the screen, setup and CLI mode's disks (default: the settings,
 then `WSL_SHRINKER_LANG`, then Windows' display language); the other commands print English. For the screen:
 `--theme dark|light` (default: the settings, then ask the terminal), and `wsl-shrinker --demo`, a made-up PC where
-nothing real is read or changed.
+nothing real is read or changed. The environment variables that change how it looks are in
+[Settings](settings.md#environment).
 
 In a terminal, the commands mark how things went (`✓`, `✗`, `!`) in the terminal's own colors, with the meanings they
 have on the screen, and a mistake reads as what

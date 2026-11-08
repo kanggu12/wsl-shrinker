@@ -2,6 +2,20 @@ module github.com/kanggu12/wsl-shrinker
 
 go 1.26.0
 
+// The newest patch when this was written: it carries the standard library's
+// security fixes, so an older Go fetches it before building. CI and the
+// release build take the newest 1.26 patch whatever this says.
+toolchain go1.26.10
+
+// The first versions published were numbered past where the releases now
+// start; v0.4.1 exists only to carry this list to the module proxy, which
+// reads retractions from the highest version it has.
+retract (
+	v0.4.1 // Carries these retractions only.
+	v0.4.0 // Published before the version numbers started over at v0.1.0.
+	v0.3.0 // Published before the version numbers started over at v0.1.0.
+)
+
 require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6

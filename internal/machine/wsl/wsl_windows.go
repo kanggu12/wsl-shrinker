@@ -67,9 +67,13 @@ func (Real) Distros(ctx context.Context) ([]Distro, error) {
 		name, _, _ := k.GetStringValue("DistributionName")
 		base, _, _ := k.GetStringValue("BasePath")
 		file, _, _ := k.GetStringValue("VhdFileName")
+		// A missing Flags is WSL's default flags, which make WSL 1; one
+		// that is there but is not a number is noted as unread.
+		flags, _, ferr := k.GetIntegerValue("Flags")
 		ver, _, _ := k.GetIntegerValue("Version")
 		k.Close()
-		entries = append(entries, regEntry{id: id, name: name, base: base, file: file, version: int(ver)})
+		entries = append(entries, regEntry{id: id, name: name, base: base, file: file, flags: uint32(flags),
+			flagsUnread: ferr != nil && ferr != registry.ErrNotExist, version: uint32(ver)})
 	}
 	// Building the list and asking which run is the part tested off Windows.
 	return buildDistros(ctx, entries, def, wslExe)

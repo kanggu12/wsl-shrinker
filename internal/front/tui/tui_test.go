@@ -20,6 +20,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
+	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 )
 
 // demo returns the made-up PC without pauses.
@@ -593,6 +594,65 @@ func TestNoHeadingWithoutItsLines(t *testing.T) {
 				if head == "Space" || head == "Checks" || head == "Inside" {
 					if i+1 >= len(lines)-2 || strings.TrimSpace(lines[i+1]) == "" {
 						t.Fatalf("%dx%d: %q has nothing under it", w, h, head)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestPlainMarksLeaveEveryLineItsWidth(t *testing.T) {
+	// In the Windows console's own window the marks go plain, and all ASCII
+	// on an East Asian code page: no frame of the screen or of setup holds a
+	// character the set swaps, and every line still takes exactly the
+	// screen's width.
+	t.Cleanup(func() {
+		ui.SetMarks(ui.MarksUnicode)
+		i18n.SetRewrite(func(s string) string { return s })
+		i18n.Set(i18n.English)
+	})
+	i18n.SetRewrite(ui.Words)
+	type frame struct{ name, text string }
+	frames := func() []frame {
+		var out []frame
+		for _, keys := range [][]string{nil, {"?"}, {"c"}, {"s"}, {"enter", "enter"}, {"h"}} {
+			out = append(out, frame{fmt.Sprint(keys), Snapshot(demo(), 100, 30, true, keys, "")})
+		}
+		// A run caught at its compaction: the spinner turns.
+		out = append(out, frame{"running", Snapshot(demo(), 100, 30, true, []string{"enter", "enter"}, "compact")})
+		for step := 0; step <= 6; step++ {
+			out = append(out, frame{fmt.Sprintf("setup %d", step), SetupSnapshot(setupStart(true), 100, 26, true, slices.Repeat([]string{"enter"}, step))})
+		}
+		return out
+	}
+	lacking, ambiguous := "✓✗⏎↻⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "▪·…→←↑↓–—│╰●•›"
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		// The marks are there to swap: a sample without them proves nothing.
+		ui.SetMarks(ui.MarksUnicode)
+		all := ""
+		for _, f := range frames() {
+			all += f.text
+		}
+		for _, m := range "✓⏎▪…↑↓" {
+			if !strings.ContainsRune(all, m) {
+				t.Fatalf("%v: no %c in the frames to swap", lang, m)
+			}
+		}
+		for _, set := range []ui.MarkSet{ui.MarksPlain, ui.MarksASCII} {
+			ui.SetMarks(set)
+			for _, f := range frames() {
+				lines := strings.Split(ansi.Strip(f.text), "\n")
+				for _, l := range lines {
+					bad := lacking
+					if set == ui.MarksASCII {
+						bad += ambiguous
+					}
+					if strings.ContainsAny(l, bad) {
+						t.Errorf("%v set %d %s: a swapped mark left: %q", lang, set, f.name, l)
+					}
+					if w := ansi.StringWidth(l); w != ansi.StringWidth(strings.Split(ansi.Strip(f.text), "\n")[0]) {
+						t.Errorf("%v set %d %s: %d cells: %q", lang, set, f.name, w, l)
 					}
 				}
 			}

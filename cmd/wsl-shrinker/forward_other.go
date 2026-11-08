@@ -58,6 +58,9 @@ func forward() bool {
 	// The distribution's name, and the language chosen in this shell.
 	wslenv := appendWSLENV(os.Getenv("WSLENV"), "WSL_DISTRO_NAME/w")
 	wslenv = appendWSLENV(wslenv, "WSL_SHRINKER_LANG/w")
+	// So does the choice of plain marks, for a WSL that runs in the Windows
+	// console's own window.
+	wslenv = appendWSLENV(wslenv, "WSL_SHRINKER_SYMBOLS/w")
 	env := withWSLENV(os.Environ(), wslenv)
 	// The screen, asked for alone in a terminal, runs here, in this Linux
 	// terminal, and asks wsl-shrinker.exe for every answer through pipes:
@@ -73,7 +76,7 @@ func forward() bool {
 	// Replace this process: the terminal, the exit code and Ctrl+C all
 	// belong to the Windows program from here on.
 	err := execve(exe, append([]string{exe}, os.Args[1:]...), env)
-	cli.PrintError(os.Stderr, "could not start "+exe+": "+err.Error(), "")
+	cli.PrintError(os.Stderr, "could not start "+exe+": "+err.Error(), startHint(err))
 	exit(1)
 	return true
 }
@@ -231,8 +234,18 @@ func setupFirst(exe string, env []string, lang string) int {
 		// not the 255 an exit code of -1 would become.
 		return 1
 	}
-	cli.PrintError(os.Stderr, "could not start "+exe+": "+err.Error(), "")
+	cli.PrintError(os.Stderr, "could not start "+exe+": "+err.Error(), startHint(err))
 	return 1
+}
+
+// startHint says what to do when wsl-shrinker.exe could not be started. A
+// distribution with WSL's interop turned off runs no Windows program: the
+// kernel finds no handler for the file and says "exec format error".
+func startHint(err error) string {
+	if errors.Is(err, syscall.ENOEXEC) {
+		return "this distribution runs no Windows programs: set enabled=true under [interop] in /etc/wsl.conf, then run wsl --shutdown in Windows"
+	}
+	return ""
 }
 
 // answersAlone reports whether a command line asks only for help or the

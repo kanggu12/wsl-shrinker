@@ -1,9 +1,10 @@
 # Everyday tasks. CI runs `make check`.
 
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 VERSION ?= $(shell awk '/^## \[[0-9]/ { gsub(/[][]/, "", $$2); print $$2; exit }' CHANGELOG.md)
 
-.PHONY: build check fmt vet lint test fuzz test-windows dist notices badges clean
+.PHONY: build check fmt vet lint test vuln fuzz test-windows dist demo notices badges clean
 
 ## build: the Windows program and its WSL launcher, in dist/
 build:
@@ -35,6 +36,13 @@ lint:
 test:
 	go test -race -count=1 $(PKGS)
 
+## vuln: known vulnerabilities in the code paths the program reaches, for Linux and Windows
+# Built for this machine once, as staticcheck is, then run for both systems.
+vuln:
+	go install $(GOVULNCHECK)
+	$$(go env GOPATH)/bin/govulncheck $(PKGS)
+	GOOS=windows $$(go env GOPATH)/bin/govulncheck $(PKGS)
+
 ## fuzz: every fuzz target for FUZZTIME each (default 30s); failures land in testdata/fuzz
 FUZZTIME ?= 30s
 fuzz:
@@ -52,6 +60,11 @@ test-windows:
 dist:
 	scripts/dist.sh $(VERSION)
 
+## demo: the demo image from this work tree, opened in this terminal (needs Docker)
+demo:
+	docker build -f docker/demo.Dockerfile -t wsl-shrinker-demo .
+	docker run --rm -it wsl-shrinker-demo
+
 ## notices: docs/THIRD_PARTY_NOTICES.md from what the program is built from
 notices:
 	scripts/third-party-notices.sh
@@ -62,5 +75,5 @@ badges:
 
 # A dist run that failed halfway leaves its staging folders behind.
 clean:
-	rm -f dist/*.zip dist/checksums.txt dist/install.ps1 dist/wsl-shrinker.exe dist/wsl-shrinker
+	rm -f dist/*.zip dist/checksums.txt dist/install.ps1 dist/wsl-shrinker.json dist/wsl-shrinker.exe dist/wsl-shrinker
 	rm -rf dist/stage-amd64 dist/stage-arm64

@@ -94,7 +94,7 @@ type Distro struct {
 type Info struct {
 	// Version is the WSL package version, like "3.0.3.0".
 	Version string
-	// CanCompact is set when `wsl --manage` offers --compact (WSL 3.0.3 and
+	// CanCompact is set when `wsl --manage` offers --compact (WSL 3.0.1 and
 	// later), which this tool uses to compact a distribution's disk.
 	CanCompact bool
 }

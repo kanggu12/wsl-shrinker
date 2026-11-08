@@ -3,11 +3,14 @@
 package disks
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -61,6 +64,9 @@ type Env struct {
 	Open func(string) (ReaderAtCloser, int64, error)
 	// LocalAppData is the per-user folder Docker Desktop's disks are under.
 	LocalAppData string
+	// AppData is the per-user folder of settings, where Docker Desktop
+	// says where its disk was moved to.
+	AppData string
 	// Extra lists more VHDX files to look at, from the settings.
 	Extra []string
 }
@@ -90,6 +96,33 @@ func OpenFile(path string) (ReaderAtCloser, int64, error) {
 // one older releases used.
 var dockerDisks = []string{`Docker\wsl\disk\docker_data.vhdx`, `Docker\wsl\data\ext4.vhdx`}
 
+// movedDockerDisk is where Docker Desktop's data disk is when its settings
+// moved it (Resources, Advanced, "Disk image location"): the folder chosen
+// there, CustomWslDistroDir in %APPDATA%\Docker\settings-store.json, holds
+// it as disk\docker_data.vhdx. "" when the disk was not moved, or the file
+// does not say.
+func movedDockerDisk(appData string) string {
+	if appData == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(appData, "Docker", "settings-store.json"))
+	if err != nil {
+		return ""
+	}
+	// Some Docker Desktop releases wrote the file with a UTF-8 byte order
+	// mark, which the JSON reader does not take.
+	b = bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))
+	var s struct {
+		CustomWslDistroDir string
+	}
+	// A folder that is not a whole path would be looked for wherever this
+	// program runs, and could find a file that is not Docker's there.
+	if json.Unmarshal(b, &s) != nil || !filepath.IsAbs(s.CustomWslDistroDir) {
+		return ""
+	}
+	return filepath.Join(s.CustomWslDistroDir, "disk", "docker_data.vhdx")
+}
+
 // Find lists every disk with its estimate, the default distribution first,
 // then by how much each gives back.
 func Find(ctx context.Context, env Env) ([]Disk, error) {
@@ -107,17 +140,31 @@ func Find(ctx context.Context, env Env) ([]Disk, error) {
 		out = append(out, Disk{Name: d.Name, Kind: KindDistro, Distro: d.Name, Path: d.VHD, Default: d.Default, Running: d.Running})
 		seen[strings.ToLower(d.VHD)] = true
 	}
-	// Docker Desktop's data disk, when it exists and is not registered.
+	// Docker Desktop's data disks that exist and WSL does not register:
+	// where its settings moved the disk, then where it keeps disks by
+	// default. The first found is "Docker Desktop data"; another one, as a
+	// disk an older release left behind, is named after its file, so every
+	// name stays one disk's.
+	var docker []string
+	if p := movedDockerDisk(env.AppData); p != "" {
+		docker = append(docker, p)
+	}
 	if env.LocalAppData != "" {
 		for _, rel := range dockerDisks {
-			p := filepath.Join(env.LocalAppData, rel)
-			if seen[strings.ToLower(p)] {
-				continue
+			docker = append(docker, filepath.Join(env.LocalAppData, rel))
+		}
+	}
+	for _, p := range docker {
+		if seen[strings.ToLower(p)] {
+			continue
+		}
+		if _, err := env.Stat(p); err == nil {
+			name := "Docker Desktop data"
+			if slices.ContainsFunc(out, func(d Disk) bool { return d.Kind == KindDocker }) {
+				name = uniqueName(out, p)
 			}
-			if _, err := env.Stat(p); err == nil {
-				out = append(out, Disk{Name: "Docker Desktop data", Kind: KindDocker, Path: p})
-				seen[strings.ToLower(p)] = true
-			}
+			out = append(out, Disk{Name: name, Kind: KindDocker, Path: p})
+			seen[strings.ToLower(p)] = true
 		}
 	}
 	for _, p := range env.Extra {

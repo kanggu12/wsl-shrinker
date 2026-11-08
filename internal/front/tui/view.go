@@ -42,7 +42,8 @@ func (m model) View() tea.View {
 	default:
 		body = m.mainView()
 	}
-	v := tea.NewView(body)
+	// The marks a console's font may not have, swapped once all is laid out.
+	v := tea.NewView(ui.Marks(body))
 	v.AltScreen = true
 	v.WindowTitle = "wsl-shrinker"
 	return v

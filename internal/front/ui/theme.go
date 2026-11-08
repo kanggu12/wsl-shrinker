@@ -89,7 +89,8 @@ const Block = "▪"
 
 // KeyCap draws a key as a small raised cap followed by what it does.
 func (t Theme) KeyCap(key, label string) string {
-	k := lipgloss.NewStyle().Background(t.Key).Foreground(t.Ink).Bold(true).Padding(0, 1).Render(key)
+	// ⏎ is a word where the console has no font for it.
+	k := lipgloss.NewStyle().Background(t.Key).Foreground(t.Ink).Bold(true).Padding(0, 1).Render(Words(key))
 	return k + " " + Fg(t.Muted).Render(label)
 }
 

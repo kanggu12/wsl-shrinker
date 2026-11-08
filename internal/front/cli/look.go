@@ -5,13 +5,66 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
+	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 )
+
+// markSet decides the marks for this run. WSL_SHRINKER_SYMBOLS (unicode,
+// plain or ascii), when set, says. Otherwise the Windows console's own window
+// gets plain marks, since its fonts lack the others, and all ASCII on an East
+// Asian code page, where it draws ambiguous characters two cells wide; any
+// other terminal gets the marks themselves.
+func markSet(setting string, classic, eastAsian bool) ui.MarkSet {
+	switch setting {
+	case "unicode":
+		return ui.MarksUnicode
+	case "plain":
+		return ui.MarksPlain
+	case "ascii":
+		return ui.MarksASCII
+	}
+	switch {
+	case classic && eastAsian:
+		return ui.MarksASCII
+	case classic:
+		return ui.MarksPlain
+	}
+	return ui.MarksUnicode
+}
+
+// consoleInWSL guesses, inside WSL, whether the terminal is the Windows
+// console's own window, which the Linux side cannot ask: WSL started from the
+// Start menu or a shell on Windows 10 runs there, while Windows Terminal,
+// VS Code, tmux, zellij and SSH each say they are there in the environment.
+// A guess that is wrong costs plain marks in a terminal that had fonts for
+// the others; one that is missed, boxes.
+func consoleInWSL(getenv func(string) string) bool {
+	if runtime.GOOS == "windows" || getenv("WSL_DISTRO_NAME") == "" {
+		return false
+	}
+	for _, v := range []string{"WT_SESSION", "TERM_PROGRAM", "TMUX", "ZELLIJ", "SSH_CONNECTION", "SSH_TTY"} {
+		if getenv(v) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// SetMarks sets the marks this process draws, on the screen, in setup and
+// in the commands, for the terminal it runs in. main calls it first.
+func SetMarks() {
+	classic := winapi.ClassicConsole() || (stdoutIsTerminal() && consoleInWSL(os.Getenv))
+	ui.SetMarks(markSet(os.Getenv("WSL_SHRINKER_SYMBOLS"), classic, winapi.ConsoleEastAsian()))
+	// Every text the screen measures takes them before it is measured.
+	i18n.SetRewrite(ui.Words)
+}
 
 // look is how the command line draws on a terminal: marks, and colors that
 // mean what they mean on the screen (teal gives back or done, indigo runs or
@@ -28,8 +81,11 @@ func lookFor(w io.Writer) look {
 	return look{on: ok && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb" && winapi.Colors(f.Fd())}
 }
 
-// paint colors s with one of the terminal's sixteen colors.
+// paint colors s with one of the terminal's sixteen colors. The marks in
+// it are the console's plain ones where its font has none of them.
 func (l look) paint(c, s string) string {
+	// Colors or not, a mark the console has no font for is swapped.
+	s = ui.Words(s)
 	if !l.on || s == "" {
 		return s
 	}

@@ -32,7 +32,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: What `wsl-shrinker version` prints, the first line of `wsl --version`, and the Windows version.
-      placeholder: wsl-shrinker v0.3.0 (abc1234, 2026-11-08), WSL 3.0.3.0, Windows 11 24H2
+      description: What `wsl-shrinker version` prints, the first line of `wsl --version`, the Windows version and processor, and for an install problem the PowerShell version (`$PSVersionTable.PSVersion`).
+      placeholder: wsl-shrinker v0.1.0 (abc1234, 2026-11-08), WSL 3.0.3.0, Windows 11 24H2 x64, PowerShell 7.5
     validations:
       required: true

@@ -45,3 +45,43 @@ func TestShellArgQuotesANameWithSpaces(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainMarksKeepEachMarksWidth(t *testing.T) {
+	// A screen is laid out with the marks, then swapped: each stand-in
+	// takes the cells its mark took, and ⏎ becomes a word only where the
+	// words are not measured yet.
+	t.Cleanup(func() { SetMarks(MarksUnicode) })
+	lackingMarks := "✓✗↻⏎⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	wideMarks := "▪·…→←↑↓–—│╰●•›"
+	if Marks(lackingMarks+wideMarks) != lackingMarks+wideMarks || Words(lackingMarks) != lackingMarks {
+		t.Fatal("marks swapped with the set left as it is")
+	}
+	for _, c := range []struct {
+		set     MarkSet
+		swapped string
+		kept    string
+	}{
+		{MarksPlain, lackingMarks, wideMarks},
+		{MarksASCII, lackingMarks + wideMarks, ""},
+	} {
+		SetMarks(c.set)
+		for _, m := range c.swapped {
+			s := string(m)
+			if got := Marks(s); lipgloss.Width(got) != lipgloss.Width(s) || len(got) != 1 || got[0] > 0x7e {
+				t.Errorf("set %d: %s stands as %q", c.set, s, got)
+			}
+		}
+		for _, m := range c.kept {
+			if got := Marks(string(m)); got != string(m) {
+				t.Errorf("set %d: %c swapped for %q", c.set, m, got)
+			}
+		}
+		if got := Words("⏎ writes them to"); got != "Enter writes them to" {
+			t.Errorf("set %d: %q", c.set, got)
+		}
+		// The words themselves, Korean included, pass as they are.
+		if got := Marks("Ubuntu-24.04 줄일 만한 크기"); got != "Ubuntu-24.04 줄일 만한 크기" {
+			t.Errorf("set %d: %q", c.set, got)
+		}
+	}
+}

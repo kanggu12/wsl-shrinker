@@ -261,7 +261,8 @@ func (m setupModel) protected(name string) bool {
 }
 
 func (m setupModel) View() tea.View {
-	v := tea.NewView(m.render())
+	// The marks a console's font may not have, swapped once all is laid out.
+	v := tea.NewView(ui.Marks(m.render()))
 	v.AltScreen = true
 	v.WindowTitle = "wsl-shrinker setup"
 	return v

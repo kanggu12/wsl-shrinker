@@ -21,6 +21,8 @@ var (
 	kernel32                = windows.NewLazySystemDLL("kernel32.dll")
 	procGetCompressedSizeW  = kernel32.NewProc("GetCompressedFileSizeW")
 	procGetUserDefaultUILng = kernel32.NewProc("GetUserDefaultUILanguage")
+	procGetConsoleWindow    = kernel32.NewProc("GetConsoleWindow")
+	procGetConsoleOutputCP  = kernel32.NewProc("GetConsoleOutputCP")
 )
 
 // Stat returns what Windows says about the file at path.
@@ -264,6 +266,40 @@ var (
 	consoleMu    sync.Mutex
 	consoleModes = map[windows.Handle]uint32{}
 )
+
+// ClassicConsole reports whether this process draws, on its standard
+// output, in a console window of its own: the Windows console host, with the
+// console's own fonts, rather than a terminal that runs the console as a
+// pseudoconsole (Windows Terminal, VS Code's, any other), which draws with
+// fonts of its own and never shows that console's window. The window decides,
+// not WT_SESSION: a console window opened from Windows Terminal inherits that
+// variable.
+func ClassicConsole() bool {
+	// Output to a file or a pipe is drawn by nobody.
+	var mode uint32
+	if windows.GetConsoleMode(windows.Handle(os.Stdout.Fd()), &mode) != nil {
+		return false
+	}
+	// No console window at all: nothing to draw in.
+	h, _, _ := procGetConsoleWindow.Call()
+	if h == 0 {
+		return false
+	}
+	return windows.IsWindowVisible(windows.HWND(h))
+}
+
+// ConsoleEastAsian reports whether the console writes in an East Asian code
+// page (Japanese 932, Simplified Chinese 936, Korean 949, Traditional
+// Chinese 950), where the console host draws characters Unicode leaves
+// ambiguous two cells wide.
+func ConsoleEastAsian() bool {
+	cp, _, _ := procGetConsoleOutputCP.Call()
+	switch cp {
+	case 932, 936, 949, 950:
+		return true
+	}
+	return false
+}
 
 // RestoreConsole puts back the modes Colors changed, as the program ends:
 // the console is left as the shell had it.

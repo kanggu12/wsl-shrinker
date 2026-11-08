@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kanggu12/wsl-shrinker/internal/app/remote"
@@ -308,5 +309,17 @@ func TestSetupEndedBySignalIsAPlainFailure(t *testing.T) {
 		if got := setupFirst("wsl-shrinker.exe", nil, ""); got != want {
 			t.Errorf("%s: %d, want %d", script, got, want)
 		}
+	}
+}
+
+func TestAWindowsProgramThatCannotStartSaysWhy(t *testing.T) {
+	// With WSL's interop off, starting the .exe fails with "exec format
+	// error": the hint says how to turn it on. Other errors have none.
+	err := &os.PathError{Op: "fork/exec", Path: "/mnt/c/x/wsl-shrinker.exe", Err: syscall.ENOEXEC}
+	if h := startHint(err); !strings.Contains(h, "[interop]") || !strings.Contains(h, "wsl --shutdown") {
+		t.Fatalf("%q", h)
+	}
+	if h := startHint(&os.PathError{Op: "fork/exec", Path: "x", Err: syscall.EACCES}); h != "" {
+		t.Fatalf("%q", h)
 	}
 }

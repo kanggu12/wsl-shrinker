@@ -543,11 +543,18 @@ func (m model) helpLines() []string {
 	t := m.th
 	bold := lipgloss.NewStyle().Bold(true).Foreground(t.Ink)
 	var body []string
-	for _, k := range [][2]string{
+	keys := [][2]string{
 		{"↑↓", "help.select"}, {"space", "help.mark"}, {"s ⏎", "help.shrink"}, {"c", "help.clean"},
 		{"r", "help.reload"}, {"R", "help.recover"}, {"h", "help.history"}, {"q", "help.quit"},
-	} {
-		body = append(body, "  "+t.KeyCap(ui.Fit(k[0], 5), "")+" "+i18n.T(k[1]))
+	}
+	// The keys' column is as wide as its widest key, as the console shows
+	// it: ⏎ is a word where its font has no ⏎.
+	w := 5
+	for _, k := range keys {
+		w = max(w, lipgloss.Width(ui.Words(k[0])))
+	}
+	for _, k := range keys {
+		body = append(body, "  "+t.KeyCap(ui.Fit(ui.Words(k[0]), w), "")+" "+i18n.T(k[1]))
 	}
 	body = append(body, "")
 	body = append(body, m.wrap(i18n.T("help.cleankeys"), "  ", ui.Fg(t.Muted))...)

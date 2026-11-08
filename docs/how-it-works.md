@@ -4,9 +4,12 @@
 
 - **Distributions**: every WSL 2 distribution registered for your user, from
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`: its `BasePath` and `VhdFileName` (`ext4.vhdx` when unset), so
-  a distribution moved to another drive is found where it is. WSL 1 distributions have no disk file and are not listed.
+  a distribution moved to another drive is found where it is. WSL 2 is told from WSL 1 as WSL tells them, by the VM
+  mode bit of the registration's `Flags` (its `Version` is the version of WSL 1's file system, 2 for a WSL 1
+  distribution made today). WSL 1 distributions have no disk file and are not listed.
 - **Docker Desktop**: `%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx` (and `Docker\wsl\data\ext4.vhdx` from older
-  releases), which WSL does not register.
+  releases), which WSL does not register, or where Docker Desktop's settings moved it: `CustomWslDistroDir` in
+  `%APPDATA%\Docker\settings-store.json`, with the disk under its `disk` folder.
 - **Other files**: the VHDX files listed under `extra_disks` in the [settings](settings.md).
 
 Which distributions run comes from `wsl --list --running`; a shrink asks again at its check, as the list may be old by

@@ -58,4 +58,44 @@ EOF
 done
 (cd dist && sha256sum ./*.zip | sed 's# \./# #' > checksums.txt)
 cp scripts/install.ps1 dist/
+# The Scoop manifest, with this release's zips and their checksums. Its own
+# checkver and autoupdate let `scoop update` find later releases.
+zip_hash() { awk -v f="wsl-shrinker_${version}_windows_$1.zip" '$2 == f { print $1 }' dist/checksums.txt; }
+url="https://github.com/kanggu12/wsl-shrinker/releases/download"
+cat >dist/wsl-shrinker.json <<EOF
+{
+    "version": "$version",
+    "description": "See where your WSL disk space went, clean it, shrink it, and check it worked.",
+    "homepage": "https://github.com/kanggu12/wsl-shrinker",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "$url/v$version/wsl-shrinker_${version}_windows_amd64.zip",
+            "hash": "$(zip_hash amd64)"
+        },
+        "arm64": {
+            "url": "$url/v$version/wsl-shrinker_${version}_windows_arm64.zip",
+            "hash": "$(zip_hash arm64)"
+        }
+    },
+    "env_add_path": ".",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "$url/v\$version/wsl-shrinker_\$version_windows_amd64.zip"
+            },
+            "arm64": {
+                "url": "$url/v\$version/wsl-shrinker_\$version_windows_arm64.zip"
+            }
+        },
+        "hash": {
+            "url": "\$baseurl/checksums.txt"
+        }
+    },
+    "notes": "Run wsl-shrinker in a new terminal, in Windows or inside WSL."
+}
+EOF
+# A manifest Scoop could not read would fail people, not this script.
+python3 -m json.tool dist/wsl-shrinker.json >/dev/null
 ls -l dist

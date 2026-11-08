@@ -36,6 +36,9 @@ func main() {
 			leave(1)
 		}
 	}()
+	// The marks the terminal can show, before anything is drawn: plain ones
+	// in the Windows console's own window, whose fonts lack the others.
+	cli.SetMarks()
 	// Inside WSL the Linux build hands over to the Windows one, which keeps
 	// its own crashes; this one watches only what it runs itself.
 	forward()

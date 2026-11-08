@@ -1,8 +1,11 @@
-// Package arch_test checks the layering .github/CONTRIBUTING.md describes:
+// Package internal holds no code of its own, only the rules its packages and
+// the repository follow: the layering .github/CONTRIBUTING.md describes, the
+// changelog's shape (changelog_test.go), and the install script's text
+// (scripts_test.go). This file checks the layering:
 // the packages under internal/ sit in layers, and an import goes down them,
 // never up. It reads the source with go/parser rather than `go list`, so it
 // also runs as a Windows test binary, where no Go toolchain is installed.
-package arch_test
+package internal
 
 import (
 	"bufio"
@@ -224,8 +227,9 @@ func TestEveryPackageHasALayer(t *testing.T) {
 				return err
 			}
 			rel = filepath.ToSlash(rel)
-			// This package and the test helpers are outside the table.
-			if rel == "internal/arch" || under(rel, testOnly) {
+			// The test helpers are outside the table; this folder has tests
+			// only, which the check below passes over.
+			if under(rel, testOnly) {
 				return nil
 			}
 			entries, err := os.ReadDir(path)

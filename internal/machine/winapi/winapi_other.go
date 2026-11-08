@@ -61,3 +61,10 @@ func Colors(fd uintptr) bool { return term.IsTerminal(fd) }
 
 // RestoreConsole has nothing to put back off Windows.
 func RestoreConsole() {}
+
+// ClassicConsole is false off Windows: a Linux terminal draws with fonts of
+// its own choosing.
+func ClassicConsole() bool { return false }
+
+// ConsoleEastAsian is false off Windows, which has no console code page.
+func ConsoleEastAsian() bool { return false }

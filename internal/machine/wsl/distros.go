@@ -18,9 +18,20 @@ type regEntry struct {
 	base string
 	// file is VhdFileName; empty means the default ext4.vhdx.
 	file string
-	// version is Version, 1 or 2.
-	version int
+	// flags is Flags. Its VM mode bit says WSL 2; the Version value beside
+	// it is the version of WSL 1's file system, which a WSL 1 distribution
+	// made today holds as 2 too, so it says nothing about WSL 1 or 2.
+	flags uint32
+	// flagsUnread is set when Flags is there but could not be read as a
+	// number; version, the Version value, is then all there is to go by.
+	flagsUnread bool
+	version     uint32
 }
+
+// vmMode is the bit of Flags that makes a distribution WSL 2, as WSL itself
+// reads it (LXSS_DISTRO_FLAGS_VM_MODE). Without a Flags value WSL takes its
+// default flags, which do not have it.
+const vmMode = 0x8
 
 // wslRunner runs wsl.exe with args and returns its decoded output; the
 // real one is wslExe, tests pass recorded output.
@@ -35,8 +46,12 @@ func buildDistros(ctx context.Context, entries []regEntry, def string, run wslRu
 		if e.name == "" {
 			continue
 		}
-		d := Distro{Name: e.name, ID: e.id, Version: e.version, Default: e.id == def}
-		if d.Version == 2 {
+		d := Distro{Name: e.name, ID: e.id, Version: 1, Default: e.id == def}
+		// Flags that cannot be read leave Version: a WSL 2 distribution
+		// is listed, and a WSL 1 one taken for it shows as a disk file
+		// that is not there, rather than a disk going missing.
+		if e.flags&vmMode != 0 || (e.flagsUnread && e.version == 2) {
+			d.Version = 2
 			// The file name is ext4.vhdx unless the registration says otherwise.
 			file := e.file
 			if file == "" {

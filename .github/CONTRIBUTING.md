@@ -6,8 +6,13 @@ filesystems the tests build, the steps of a shrink on a fake WSL, and the screen
 
 ## How the pieces fit
 
-The code under `internal/` sits in layers; an import goes down them, never up, and `internal/arch` has the test that
-fails when one goes up.
+The code under `internal/` sits in layers; an import goes down them, never up, and `internal/layers_test.go` fails
+when one goes up.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/layers-dark.svg">
+  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="../docs/assets/layers-light.svg">
+</picture>
 
 | Layer | Packages | |
 |:---|:---|:---|
@@ -16,19 +21,21 @@ fails when one goes up.
 | engine | `disks`, `estimate`, `survey`, `shrink`, `history`, `journal` | finding disks, what a shrink gives back, looking inside, the steps of a shrink, past runs, the run in progress |
 | settings | `config` | `config.toml` |
 | machine | `vhdx`, `ext4`, `wsl`, `winapi` | reading disk files, talking to WSL and Windows |
-| core | `units` | sizes as Windows shows them, with no I/O |
+| core | `units`, `version` | sizes as Windows shows them, with no I/O; the build's version |
 
 `machine/vhdx` and `machine/ext4` only read, and refuse what they do not fully understand rather than guess. Every
 command run inside a distribution is built in `engine/survey` (cleaning) or `engine/shrink` (stopping and starting);
 nothing else builds one. Whether a disk can be shrunk now is decided once, by `shrink.Preflight`: the run's check, the
 screen, `doctor` and `shrink` all ask it. How a run left its distribution is decided once too, at the end of
 `shrink.Run`, and the result says it (`Left`); the fronts read that rather than the steps.
-[How it works](../docs/how-it-works.md) has the reasons behind each part.
+[Internals](../docs/internals.md) has what runs where and the reasons behind each part, and
+[how it works](../docs/how-it-works.md) what a shrink does.
 
 ## Build and try it
 
-You need Go (the version in `go.mod`), shellcheck, e2fsprogs (`mkfs.ext4`, `debugfs`, `dumpe2fs`) for the ext4 tests,
-and a Windows PC with WSL to run it for real. Development works from inside WSL:
+You need Go (the version in `go.mod`; `go` fetches it if yours is older), shellcheck, e2fsprogs (`mkfs.ext4`,
+`debugfs`, `dumpe2fs`) for the ext4 tests, Docker for the demo image, and a Windows PC with WSL to run it for real.
+Development works from inside WSL:
 
 ```sh
 git clone https://github.com/kanggu12/wsl-shrinker && cd wsl-shrinker
@@ -53,6 +60,8 @@ wsl.exe --unregister wss-test
 make check          # gofmt, go vet and staticcheck for Linux and Windows, shellcheck, go test -race ./...
 make test-windows   # from WSL: every package's tests again as Windows programs
 make fuzz           # the VHDX and ext4 readers, 30s each; a failing input lands in testdata/fuzz
+make vuln           # govulncheck, for Linux and Windows
+make demo           # the demo image from the work tree, opened in this terminal
 ```
 
 The screen has a test that renders every view at widths from 40 to 200 columns, in English and Korean, and fails if
@@ -93,11 +102,27 @@ for the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleas
 
 ## Releases
 
-Versions follow semantic versioning: a release that adds something raises the minor number, one that only fixes raises
-the patch number. To release: move `[Unreleased]` to a `## [x.y.z] - date` section with its link, run `make badges`,
-commit, and push a `vx.y.z` tag. The release workflow runs CI, builds the zips with `scripts/dist.sh`, and publishes them
-with that section as the notes; a tag with a hyphen (`v0.3.0-rc.1`) goes out as a pre-release. `scripts/dist.sh`
-builds only from a work tree that matches its commit, since the zips carry that commit's name.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/release-dark.svg">
+  <img alt="From a change to a release. make check runs gofmt, go vet and staticcheck for Linux and Windows, shellcheck, the unit tests with the race detector, and the layers and changelog tests. make test-windows runs every package again as a Windows program, from WSL. CI runs both, fuzzing and govulncheck, builds the release zips and the demo image, tests on Windows x64 and ARM64, shrinks a throwaway distribution on a real WSL 2, and runs install.ps1 in PowerShell 5.1 and 7, on every push and pull request and once a week. A vX.Y.Z tag runs all of CI, then publishes the zips with checksums, build provenance and a Scoop manifest, and the demo image; then it installs the release to check it." src="../docs/assets/release-light.svg">
+</picture>
+
+A release is a `## [X.Y.Z] - date` section in `CHANGELOG.md` with its link at the bottom, `make badges`, a commit, and
+an annotated `vX.Y.Z` tag on it once CI is green. Versions follow [semantic versioning](https://semver.org/): a release
+that adds something raises the minor number (0.2.0), one that only fixes raises the patch number (0.1.1). Before 1.0 a
+minor release may also change how something works, and its notes say what. The section is the release's notes:
+`.github/workflows/release.yml` refuses a tag without one, and `internal/changelog_test.go` checks the file's shape and
+that the README's badge names the newest release. A tag with a hyphen (`v0.2.0-rc.1`) goes out as a pre-release, with
+a section of its own.
+
+The workflow runs all of CI, then `scripts/dist.sh` builds the zips, `checksums.txt` and the Scoop manifest, the zips
+get build provenance, and the demo image goes to `ghcr.io`; last, `.github/workflows/installers.yml` installs the
+published release as people do. `scripts/dist.sh` builds only from a work tree that matches its commit, since the zips
+carry that commit's name.
+
+v0.3.0, v0.4.0 and v0.4.1 can never be released. v0.3.0 and v0.4.0 were published before the version numbers started
+over at v0.1.0, and the Go module proxy keeps them; `go.mod` retracts them, and v0.4.1 is tagged only to carry that list
+to the proxy, which reads retractions from the highest version it has. The release workflow ignores the three tags.
 
 ## Report a problem
 

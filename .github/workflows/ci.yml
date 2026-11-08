@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Every Monday as well: a new Go patch, runner image or advisory shows up
+  # here before it shows up in a release.
+  schedule:
+    - cron: "23 4 * * 1"
   # The release workflow runs all of CI first.
   workflow_call:
   workflow_dispatch:
@@ -28,29 +32,267 @@ jobs:
         run: make check
       - name: fuzzing, 10s per target
         run: make fuzz FUZZTIME=10s
+      - name: known vulnerabilities in the code the program reaches, for Linux and Windows
+        run: make vuln
       # The notices ship with every release: they must list what it is built from now.
       - name: third-party notices are current
         run: make notices && git diff --exit-code docs/THIRD_PARTY_NOTICES.md
-      - name: the README's release badge names the newest release
-        run: |
-          v=$(awk '/^## \[[0-9]/ { gsub(/[][]/, "", $2); print $2; exit }' CHANGELOG.md)
-          if ! grep -q "release: v$v" docs/assets/badges/release.svg || ! grep -q "alt=\"Release v$v\"" README.md; then
-            echo "the release badge does not say v$v: run make badges"
-            exit 1
-          fi
 
-  windows:
-    name: tests on Windows
+  build:
+    name: release build and demo image
     needs: check
-    runs-on: windows-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # The newest patch of the Go release go.mod names: it carries the
-          # standard library's security fixes.
+          go-version: "1.26.x"
+      - run: sudo apt-get update && sudo apt-get install -y zip
+      # The release's own script, under a version no release has, so the
+      # installers below install what a release would publish.
+      - name: the zips, checksums and Scoop manifest
+        run: scripts/dist.sh 0.0.0-ci
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: |
+            dist/*.zip
+            dist/checksums.txt
+            dist/install.ps1
+            dist/wsl-shrinker.json
+          retention-days: 7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Both platforms the release publishes build; the runner's own is loaded
+      # and run: the demo draws, and says which build it is.
+      - name: the demo image, for amd64 and arm64
+        run: docker buildx build -f docker/demo.Dockerfile --platform linux/amd64,linux/arm64 .
+      - name: the demo image runs
+        run: |
+          docker buildx build -f docker/demo.Dockerfile --load -t wsl-shrinker-demo:ci .
+          docker run --rm --read-only wsl-shrinker-demo:ci version
+          docker run --rm --read-only wsl-shrinker-demo:ci --demo --snapshot 100x30 | tee frame.txt
+          grep -q 'can be given back now' frame.txt
+
+  windows:
+    # Every package as a Windows program, on each Windows the runners offer,
+    # x64 and ARM64; then the program itself against the runner's own WSL,
+    # whatever it has: a missing or inbox WSL is a PC too.
+    name: tests on ${{ matrix.os }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
           go-version: "1.26.x"
       # The Windows API code and wsl.exe's output parsing run where they belong;
       # the ext4 tests skip themselves without e2fsprogs.
       - run: go test -count=1 ./...
+      - name: the program on this runner's Windows and WSL
+        shell: pwsh
+        run: |
+          # Exit codes are read below, one command at a time.
+          $PSNativeCommandUseErrorActionPreference = $false
+          go build -o wss.exe ./cmd/wsl-shrinker
+          # What this runner has, for the log.
+          [Environment]::OSVersion.Version.ToString()
+          $env:PROCESSOR_ARCHITECTURE
+          if (Get-Command wsl.exe -ErrorAction SilentlyContinue) { wsl.exe --version; "wsl.exe exits $LASTEXITCODE" } else { 'no wsl.exe' }
+          # Settings and history go to a folder of the step's own.
+          $env:APPDATA = $env:LOCALAPPDATA = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'wss')).FullName
+          ./wss.exe version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # doctor says what is missing and exits 1 when something is; never
+          # 2 or 3, and never a crash.
+          ./wss.exe doctor | Tee-Object -Variable doctor
+          if ($LASTEXITCODE -gt 1) { "doctor exited $LASTEXITCODE"; exit 1 }
+          if (-not ($doctor -match '^(ok|FAIL|note) ')) { 'doctor printed no check'; exit 1 }
+          # The disks, as JSON a script reads, empty or not.
+          $list = ./wss.exe list --json
+          if ($LASTEXITCODE -ne 0) { "list exited $LASTEXITCODE"; exit 1 }
+          $null = $list | ConvertFrom-Json
+          # Setup by flags, then CLI mode's overview, piped.
+          ./wss.exe setup --mode cli
+          if ($LASTEXITCODE -ne 0) { "setup exited $LASTEXITCODE"; exit 1 }
+          ./wss.exe history
+          if ($LASTEXITCODE -ne 0) { "history exited $LASTEXITCODE"; exit 1 }
+          exit 0
+      # Windows Server 2022 has the WSL built into Windows, with no
+      # --version and only WSL 1: a WSL 1 distribution has no disk file and
+      # must not be listed, which WSL's own registry flags say.
+      - name: a WSL 1 distribution is not listed
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tar = Join-Path $env:RUNNER_TEMP 'alpine.tar.gz'
+          Invoke-WebRequest $env:ROOTFS -OutFile $tar
+          if ((Get-FileHash $tar -Algorithm SHA256).Hash -ne $env:ROOTFS_SHA256) { 'not the root file system expected'; exit 1 }
+          wsl.exe --import wss-v1 (Join-Path $env:RUNNER_TEMP 'wss-v1') $tar --version 1
+          if ($LASTEXITCODE -ne 0) { "wsl --import exited $LASTEXITCODE"; exit 1 }
+          $env:APPDATA = $env:LOCALAPPDATA = (New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'wss')).FullName
+          $list = ./wss.exe list --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { "list exited $LASTEXITCODE"; exit 1 }
+          if ($list.disks | Where-Object name -eq 'wss-v1') { 'a WSL 1 distribution was listed'; exit 1 }
+          wsl.exe --unregister wss-v1
+          exit 0
+        env:
+          ROOTFS: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz
+          ROOTFS_SHA256: cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012
+
+  wsl:
+    # A real shrink on a real WSL 2: Windows Server 2025's runners carry the
+    # WSL package and run WSL 2 distributions. A throwaway Alpine
+    # distribution is imported and half a GiB is written and deleted inside;
+    # then wsl-shrinker reads it, shrinks it with wsl --manage --compact, and
+    # what came back is held against the estimate.
+    name: a real shrink on WSL 2
+    needs: check
+    runs-on: windows-2025
+    # WSL 2 has been seen to hang while it starts on these runners; only the
+    # job's own limit ends that.
+    timeout-minutes: 25
+    env:
+      ROOTFS: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz
+      ROOTFS_SHA256: cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+      - name: a throwaway distribution, with half a GiB freed inside
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          wsl.exe --version
+          $tar = Join-Path $env:RUNNER_TEMP 'alpine.tar.gz'
+          Invoke-WebRequest $env:ROOTFS -OutFile $tar
+          if ((Get-FileHash $tar -Algorithm SHA256).Hash -ne $env:ROOTFS_SHA256) { 'not the root file system expected'; exit 1 }
+          wsl.exe --import wss-ci (Join-Path $env:RUNNER_TEMP 'wss-ci') $tar --version 2
+          if ($LASTEXITCODE -ne 0) { "wsl --import exited $LASTEXITCODE"; exit 1 }
+          # Written and deleted: blocks the filesystem freed, still stored.
+          wsl.exe -d wss-ci -u root -- sh -c 'dd if=/dev/urandom of=/big bs=1M count=512 2>/dev/null && sync && rm /big && sync'
+          if ($LASTEXITCODE -ne 0) { "writing inside exited $LASTEXITCODE"; exit 1 }
+          exit 0
+      - name: read, shrink, and check against the estimate
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          go build -o wss.exe ./cmd/wsl-shrinker
+          $env:APPDATA = $env:LOCALAPPDATA = (New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'state')).FullName
+          ./wss.exe doctor
+          if ($LASTEXITCODE -ne 0) { 'doctor found something missing'; exit 1 }
+          $d = (./wss.exe list --json | ConvertFrom-Json).disks | Where-Object name -eq 'wss-ci'
+          if (-not $d -or -not $d.estimate) { 'wss-ci was not read'; exit 1 }
+          $want = [int64]$d.estimate.reclaim_bytes
+          "estimate: $want bytes back"
+          if ($want -lt 256MB) { 'the freed half GiB is not in the estimate'; exit 1 }
+          $out = ./wss.exe shrink wss-ci --yes --json
+          if ($LASTEXITCODE -ne 0) { $out; "shrink exited $LASTEXITCODE"; exit 1 }
+          $r = ($out | ConvertFrom-Json).results[0]
+          "freed $($r.freed_bytes), left $($r.left)"
+          if (-not $r.compacted) { 'not compacted'; exit 1 }
+          # What came back is the estimate, give or take what the stop and
+          # the journal wrote in between.
+          if ([math]::Abs([int64]$r.freed_bytes - $want) -gt 64MB) { "freed $($r.freed_bytes), estimated $want"; exit 1 }
+          # Read again, the disk has next to nothing left to give.
+          $after = (./wss.exe list --json | ConvertFrom-Json).disks | Where-Object name -eq 'wss-ci'
+          "after: $($after.estimate.reclaim_bytes) bytes back"
+          if ([int64]$after.estimate.reclaim_bytes -gt 64MB) { 'the shrink left space behind'; exit 1 }
+          $runs = ./wss.exe history --json | ConvertFrom-Json
+          if (@($runs.runs).Count -ne 1) { 'the run is not in the history'; exit 1 }
+          exit 0
+      - name: remove the distribution
+        if: always()
+        shell: pwsh
+        run: wsl.exe --unregister wss-ci
+
+  # install.ps1 as people run it, on the zip the build above made: in
+  # PowerShell 7 and in Windows PowerShell 5.1, which every Windows has, and
+  # on ARM64, where it must pick the arm64 zip. A step's shell cannot come
+  # from a matrix, so each has its own job.
+  installer-pwsh:
+    name: install.ps1 in PowerShell 7
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: install, run, remove
+        shell: pwsh
+        run: |
+          $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker_0.0.0-ci_windows_amd64.zip).Path
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
+          $exe = Join-Path $dir 'wsl-shrinker.exe'
+          $v = & $exe version
+          $v
+          if ($v -notmatch '^wsl-shrinker v0\.0\.0-ci ') { 'not the build just installed'; exit 1 }
+          if (-not (Test-Path (Join-Path $dir 'wsl-shrinker'))) { 'no launcher for WSL'; exit 1 }
+          if (-not (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'not on PATH'; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          if (Test-Path $dir) { 'the folder is still there'; exit 1 }
+          if ((([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'still on PATH'; exit 1 }
+          exit 0
+
+  installer-powershell:
+    name: install.ps1 in Windows PowerShell 5.1
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: install, run, remove
+        shell: powershell
+        run: |
+          $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker_0.0.0-ci_windows_amd64.zip).Path
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
+          $exe = Join-Path $dir 'wsl-shrinker.exe'
+          $v = & $exe version
+          $v
+          if ($v -notmatch '^wsl-shrinker v0\.0\.0-ci ') { 'not the build just installed'; exit 1 }
+          if (-not (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'not on PATH'; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          if (Test-Path $dir) { 'the folder is still there'; exit 1 }
+          exit 0
+
+  installer-arm64:
+    name: install.ps1 on Windows 11 on Arm
+    needs: build
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      # The arm64 build installed and run on ARM64 Windows. Which zip the
+      # script picks by the machine's processor is checked after a release,
+      # where it downloads one (.github/workflows/installers.yml).
+      - name: install, run, remove
+        shell: powershell
+        run: |
+          $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker_0.0.0-ci_windows_arm64.zip).Path
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker\wsl-shrinker.exe'
+          $v = & $exe version
+          $v
+          if ($v -notmatch '^wsl-shrinker v0\.0\.0-ci ') { 'the arm64 build did not run'; exit 1 }
+          $env:WSL_SHRINKER_UNINSTALL = '1'
+          & ([scriptblock]::Create((Get-Content dist/install.ps1 -Raw)))
+          if (Test-Path (Split-Path $exe)) { 'the folder is still there'; exit 1 }
+          exit 0

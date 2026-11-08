@@ -150,13 +150,14 @@ const (
 // registration is the registry the recorded lists go with: the three
 // names (one in another case than wsl.exe prints), a WSL 1 one, a store
 // install with the \\?\ prefix, a custom disk file name, and a leftover.
+// Flags are as WSL writes them: 0xf for WSL 2, 0x7 for WSL 1.
 func registration() []regEntry {
 	return []regEntry{
-		{id: "{a}", name: "ubuntu-24.04", base: `\\?\C:\Distros\Ubuntu`, version: 2},
-		{id: "{b}", name: "Debian", base: `C:\Distros\Debian`, file: "disk.vhdx", version: 2},
-		{id: "{c}", name: "Work", base: `C:\Distros\Work`, version: 1},
+		{id: "{a}", name: "ubuntu-24.04", base: `\\?\C:\Distros\Ubuntu`, flags: 0xf},
+		{id: "{b}", name: "Debian", base: `C:\Distros\Debian`, file: "disk.vhdx", flags: 0xf},
+		{id: "{c}", name: "Work", base: `C:\Distros\Work`, flags: 0x7},
 		// A failed install leaves a key without a name.
-		{id: "{d}", base: `C:\Distros\Broken`, version: 2},
+		{id: "{d}", base: `C:\Distros\Broken`, flags: 0xf},
 	}
 }
 
@@ -218,12 +219,38 @@ func TestBuildDistrosWhenTheRunningListFails(t *testing.T) {
 }
 
 func TestBuildDistrosWithNothingNamedAsksNothing(t *testing.T) {
-	for _, entries := range [][]regEntry{nil, {{id: "{d}", version: 2}}} {
+	for _, entries := range [][]regEntry{nil, {{id: "{d}", flags: 0xf}}} {
 		s := &scripted{}
 		got, err := buildDistros(context.Background(), entries, "", s.run)
 		// Nothing to ask about: no list, no error, and wsl.exe is not run.
 		if got != nil || err != nil || len(s.asked) != 0 {
 			t.Errorf("%d entries: %+v %v, asked %q", len(entries), got, err, s.asked)
+		}
+	}
+}
+
+func TestWSL2IsTheVMModeFlagNotTheVersionValue(t *testing.T) {
+	// WSL decides WSL 1 or 2 by the VM mode bit of Flags. A distribution
+	// whose Flags lack it is WSL 1, with no disk file, however its other
+	// values read; one with no Flags value at all takes WSL's default
+	// flags, which lack it too.
+	s := &scripted{answers: map[string]call{listRunning: {out: "\r\n"}}}
+	got, err := buildDistros(context.Background(), []regEntry{
+		{id: "{1}", name: "Old", base: `C:\Distros\Old`, flags: 0x7},
+		{id: "{2}", name: "New", base: `C:\Distros\New`, flags: 0xf},
+		{id: "{3}", name: "Bare", base: `C:\Distros\Bare`},
+		// Interop and the Windows PATH turned off: still WSL 2.
+		{id: "{4}", name: "Quiet", base: `C:\Distros\Quiet`, flags: 0x8},
+		// Flags that could not be read: Version says, as it is all there is.
+		{id: "{5}", name: "Odd", base: `C:\Distros\Odd`, flagsUnread: true, version: 2},
+	}, "", s.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"Old": 1, "New": 2, "Bare": 1, "Quiet": 2, "Odd": 2}
+	for _, d := range got {
+		if d.Version != want[d.Name] || (d.Version == 2) != (d.VHD != "") {
+			t.Errorf("%s: version %d, disk %q", d.Name, d.Version, d.VHD)
 		}
 	}
 }

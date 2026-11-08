@@ -69,7 +69,7 @@ func (a *App) Info(ctx context.Context) wsl.Info {
 // DisksEnv is what disk discovery reads from.
 func (a *App) DisksEnv() disks.Env {
 	return disks.Env{WSL: a.WSL, Stat: winapi.Stat, Open: disks.OpenFile,
-		LocalAppData: winapi.LocalAppData(), Extra: a.Config.ExtraDisks}
+		LocalAppData: winapi.LocalAppData(), AppData: winapi.AppData(), Extra: a.Config.ExtraDisks}
 }
 
 // ShrinkEnv is what a run uses.

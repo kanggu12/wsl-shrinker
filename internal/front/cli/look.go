@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -132,22 +131,4 @@ func screenBug(err error, errOut io.Writer) error {
 // side.
 func PrintScreenError(errOut io.Writer, err error) {
 	printErr(errOut, screenBug(err, errOut))
-}
-
-// shellArg is a name as it goes into a command to type: as it is when it
-// is one word, in quotes when it holds spaces or anything a shell reads,
-// in PowerShell and in Linux shells alike.
-func shellArg(s string) string {
-	plain := s != "" && strings.IndexFunc(s, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-/:", r))
-	}) < 0
-	switch {
-	case plain:
-		return s
-	case !strings.ContainsAny(s, "'"):
-		// Single quotes take everything in them as it is, in both shells.
-		return "'" + s + "'"
-	}
-	// A name with a single quote: double quotes, which it does not end.
-	return `"` + s + `"`
 }

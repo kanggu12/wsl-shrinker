@@ -116,12 +116,13 @@ marks several disks and `s` shrinks them one after another; a protected disk is 
 
 ### TUI or CLI, chosen once
 
-The installer asks in a console, as does the first start: the language, the colors, the mode, the size worth
-shrinking, and the disks never to shrink. `wsl-shrinker setup` asks again, and takes the same choices as flags.
+The installer opens a short wizard in a console, as does the first start: a page each for the language, the colors,
+the mode, the size worth shrinking and the disks never to shrink, each showing what the choice does as it is made.
+`wsl-shrinker setup` opens it again, and takes the same choices as flags.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/setup-dark.png">
-  <img alt="The setup screen on its first start: Language auto, following Windows; Colors auto; Mode TUI; Worth shrinking 1 GB. Below, the disks with what each gives back, the one called Work checked as protected. Enter writes the settings file, Esc keeps the defaults." src="docs/assets/setup-light.png">
+  <img alt="The setup wizard at step 3 of 6. A rail on the left lists the steps, Language and Colors checked, Mode the step now. The page asks what wsl-shrinker should open, TUI chosen over CLI, with a small preview of the screen it opens: two disks and what each gives back. Below, a note that every command works either way. The keys: esc keeps the defaults, left goes back, up and down choose, enter goes on." src="docs/assets/setup-light.png">
 </picture>
 
 TUI mode, the default, opens the screen. CLI mode prints the disks, each in the terminal's own shade of its color

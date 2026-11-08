@@ -23,6 +23,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
+	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
@@ -348,7 +349,7 @@ func cleanChoices(ctx context.Context, a *app.App, queue []disks.Disk, clean []s
 		}
 		d := queue[i]
 		if !d.Running || d.Distro == "" {
-			return nil, hint(fmt.Errorf("%s is not running: nothing inside it can be removed", d.Name), "wsl -d "+shellArg(d.Name)+" starts it")
+			return nil, hint(fmt.Errorf("%s is not running: nothing inside it can be removed", d.Name), "wsl -d "+ui.ShellArg(d.Name)+" starts it")
 		}
 		r, err := survey.Run(ctx, a.WSL, d.Distro)
 		if err != nil {
@@ -356,7 +357,7 @@ func cleanChoices(ctx context.Context, a *app.App, queue []disks.Disk, clean []s
 		}
 		items, bad := pickItems(ids, r.Items)
 		if bad != "" {
-			return nil, hint(fmt.Errorf("%w: nothing with id %q inside %s now", errUsage, bad, d.Name), "see wsl-shrinker inside "+shellArg(d.Name))
+			return nil, hint(fmt.Errorf("%w: nothing with id %q inside %s now", errUsage, bad, d.Name), "see wsl-shrinker inside "+ui.ShellArg(d.Name))
 		}
 		// Two flags for one distribution add up; an item named twice is one.
 		for _, it := range items {
@@ -386,7 +387,7 @@ func leftWords(r shrink.Result) string {
 		}
 		return fmt.Sprintf("%s; %s runs as it did", changed, r.Disk)
 	case shrink.LeftDown:
-		return fmt.Sprintf("%s; %s did not start again: wsl -d %s starts it", changed, r.Disk, shellArg(r.Disk))
+		return fmt.Sprintf("%s; %s did not start again: wsl -d %s starts it", changed, r.Disk, ui.ShellArg(r.Disk))
 	case shrink.LeftSuspect:
 		return fmt.Sprintf("%s, but it does not read as before; %s stays stopped until you know why (see Troubleshooting)", changed, r.Disk)
 	}
@@ -535,7 +536,7 @@ func insideHint(err error, name string) error {
 	switch {
 	case errors.Is(err, wsl.ErrNotRunning):
 		// Nothing is started just to look inside it.
-		return hint(err, "wsl -d "+shellArg(name)+" starts it")
+		return hint(err, "wsl -d "+ui.ShellArg(name)+" starts it")
 	case errors.Is(err, wsl.ErrNoDistro):
 		return hint(err, "see wsl-shrinker list")
 	}
@@ -547,7 +548,7 @@ func insideHint(err error, name string) error {
 func blockHint(err error, b shrink.Block, d disks.Disk) error {
 	switch b {
 	case shrink.BlockProtected:
-		return hint(err, "to shrink it after all: wsl-shrinker setup --unprotect "+shellArg(d.Name))
+		return hint(err, "to shrink it after all: wsl-shrinker setup --unprotect "+ui.ShellArg(d.Name))
 	case shrink.BlockUnreadable:
 		return hint(err, "wsl-shrinker doctor says more")
 	case shrink.BlockEncrypted:

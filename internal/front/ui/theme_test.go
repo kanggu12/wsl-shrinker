@@ -30,3 +30,18 @@ func TestMiddleCountsCellsNotLetters(t *testing.T) {
 		}
 	}
 }
+
+func TestShellArgQuotesANameWithSpaces(t *testing.T) {
+	// As PowerShell and a Linux shell both take it.
+	for name, want := range map[string]string{
+		"Ubuntu-24.04":        "Ubuntu-24.04",
+		"Docker Desktop data": "'Docker Desktop data'",
+		"data/ext4.vhdx":      "data/ext4.vhdx",
+		"a$b":                 "'a$b'",
+		"Ann's disk":          `"Ann's disk"`,
+	} {
+		if got := ShellArg(name); got != want {
+			t.Errorf("%q: %s", name, got)
+		}
+	}
+}

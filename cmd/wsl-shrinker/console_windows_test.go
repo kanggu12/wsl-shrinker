@@ -55,9 +55,10 @@ func TestScreenInAConsole(t *testing.T) {
 }
 
 func TestSetupInAConsole(t *testing.T) {
-	// The setup screen as a first start or the installer opens it in a
-	// console: it draws, → shows the next language at once, and enter
-	// writes the settings file. The settings go to the test's own folder.
+	// The setup wizard as a first start or the installer opens it in a
+	// console: it draws, ↓ on the language page shows the next language at
+	// once, and enter through the pages writes the settings file on the
+	// last. The settings go to the test's own folder.
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
 	t.Setenv("LOCALAPPDATA", dir)
@@ -66,10 +67,17 @@ func TestSetupInAConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := startConsole(t, 100, 30, windows.ComposeCommandLine([]string{exe, "setup", "--lang", "en"}))
-	c.waitFor(t, "First run.", 30*time.Second)
-	// → on the language row: from English to Korean, shown at once.
-	c.write(t, "\x1b[C")
-	c.waitFor(t, "처음 실행", 10*time.Second)
+	c.waitFor(t, "Five quick choices", 30*time.Second)
+	// Past the welcome, ↓ on the language page: from English to Korean,
+	// shown at once.
+	c.write(t, "\r")
+	c.waitFor(t, "Which language?", 10*time.Second)
+	c.write(t, "\x1b[B")
+	c.waitFor(t, "어떤 언어로 볼까요?", 10*time.Second)
+	// On through the colors, the mode, the size and the disks to the last
+	// page, which enter saves.
+	c.write(t, "\r\r\r\r\r")
+	c.waitFor(t, "이대로 저장할까요?", 10*time.Second)
 	c.write(t, "\r")
 	if code := c.wait(t, 30*time.Second); code != 0 {
 		t.Fatalf("exit %d; it drew:\n%s", code, c.text())

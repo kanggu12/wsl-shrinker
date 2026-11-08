@@ -6,6 +6,14 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Changed
+
+- Setup is a wizard: a page for each choice, with the steps on a rail beside it and a bar of how far along, and a last
+  page to check them before they are written. Each page shows what its choice does as it is made: the language and
+  colors on the wizard itself, the mode as a small picture of what it opens, and the size worth shrinking as the
+  person's own disks colored by it. The first page says what was found and what can be given back now. On a small
+  terminal the pictures give way before the choices do.
+
 ## [0.3.0] - 2026-11-08
 
 The first public release. 0.1.0 and 0.2.0 below were published for a short time and withdrawn; what changed since

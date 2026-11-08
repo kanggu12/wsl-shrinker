@@ -199,3 +199,21 @@ func Highlight(row string, bg color.Color, w int) string {
 	row = strings.ReplaceAll(row, "\x1b[0m", "\x1b[0m"+on)
 	return on + row + "\x1b[m"
 }
+
+// ShellArg is a name as it goes into a command to type: as it is when it
+// is one word, in quotes when it holds spaces or anything a shell reads,
+// in PowerShell and in Linux shells alike.
+func ShellArg(s string) string {
+	plain := s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-/:", r))
+	}) < 0
+	switch {
+	case plain:
+		return s
+	case !strings.ContainsAny(s, "'"):
+		// Single quotes take everything in them as it is, in both shells.
+		return "'" + s + "'"
+	}
+	// A name with a single quote: double quotes, which it does not end.
+	return `"` + s + `"`
+}

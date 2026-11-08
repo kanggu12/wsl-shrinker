@@ -159,13 +159,13 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 	var cmds [][2]string
 	// None that can be shrunk now: no shrink to suggest.
 	if len(shrinkable) > 0 {
-		cmds = append(cmds, [2]string{"wsl-shrinker shrink " + shellArg(shrinkable[0].Name), i18n.T("overview.cmd.shrink")})
+		cmds = append(cmds, [2]string{"wsl-shrinker shrink " + ui.ShellArg(shrinkable[0].Name), i18n.T("overview.cmd.shrink")})
 	}
 	// A look inside needs a running distribution: the one worth most, or
 	// any that runs.
 	pool := append(slices.Clone(shrinkable), ds...)
 	if i := slices.IndexFunc(pool, func(d disks.Disk) bool { return d.Running && d.Distro != "" }); i >= 0 {
-		cmds = append(cmds, [2]string{"wsl-shrinker inside " + shellArg(pool[i].Name), i18n.T("overview.cmd.inside")})
+		cmds = append(cmds, [2]string{"wsl-shrinker inside " + ui.ShellArg(pool[i].Name), i18n.T("overview.cmd.inside")})
 	}
 	cmds = append(cmds,
 		[2]string{"wsl-shrinker tui", i18n.T("overview.cmd.tui")},

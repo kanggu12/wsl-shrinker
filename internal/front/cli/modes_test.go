@@ -383,17 +383,6 @@ func TestSetupFlagsAreCheckedAndAFileThatCannotBeWrittenIsNoUsageMistake(t *test
 }
 
 func TestCommandsToTypeQuoteANameWithSpaces(t *testing.T) {
-	for name, want := range map[string]string{
-		"Ubuntu-24.04":        "Ubuntu-24.04",
-		"Docker Desktop data": "'Docker Desktop data'",
-		"data/ext4.vhdx":      "data/ext4.vhdx",
-		"a$b":                 "'a$b'",
-		"Ann's disk":          `"Ann's disk"`,
-	} {
-		if got := shellArg(name); got != want {
-			t.Errorf("%q: %s", name, got)
-		}
-	}
 	// As the hints put it.
 	err := blockHint(errors.New("x"), shrink.BlockProtected, disks.Disk{Name: "Docker Desktop data"})
 	if !strings.Contains(err.Error(), "setup --unprotect 'Docker Desktop data'") {

@@ -379,7 +379,7 @@ func TestCatalogsComplete(t *testing.T) {
 	values := map[string][]string{
 		"step.": steps, "run.skipped.": steps, "run.about.": steps, "run.state.": steps,
 		"kind.": kinds, "group.": kinds, "what.": whats, "since.": strings.Split(unit[1], "|"),
-		"setup.row.": setupRows, "setup.language.": setupLanguages, "setup.theme.": setupThemes,
+		"setup.row.": setupSteps, "setup.language.": setupLanguages, "setup.theme.": setupThemes,
 		"setup.mode.": setupModes, "setup.mode.hint.": setupModes,
 	}
 	for ps, at := range u.prefixes {

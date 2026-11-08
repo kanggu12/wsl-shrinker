@@ -64,9 +64,10 @@ wsl-shrinker setup --mode cli --min-gain 5 --protect Work
 wsl-shrinker setup --language ko --theme light --unprotect Work
 ```
 
-Without flags it opens a screen: `↑` `↓` select, `←` `→` change a value (each goes round; `space` on a setting does
-as `→`), `space` on a disk protects it or lifts its protection, `⏎` writes the choices, `esc` leaves without them, and
-`Ctrl+C` leaves writing nothing. The language and colors show at once. With flags it opens no screen and works
+Without flags it opens a wizard, a page for each choice and a last one to check them: `↑` `↓` choose, and the page
+shows what that does at once, the language and colors on the wizard itself; `⏎` or `→` goes on and `←` goes back. On
+the disks' page `↑` `↓` select a disk and `space` protects it or lifts its protection. `⏎` on the last page writes the
+choices, `esc` leaves without them, and `Ctrl+C` leaves writing nothing. With flags it opens no screen and works
 anywhere, a script too:
 
 | Flag | |

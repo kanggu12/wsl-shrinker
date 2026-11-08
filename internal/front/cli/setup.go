@@ -39,12 +39,13 @@ func setupCmd(p *apps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Choose the language, colors, mode, what is worth shrinking, and the disks to protect",
-		Long: `Open a screen to choose how wsl-shrinker works: the language, the colors, what it
-opens with (the screen, TUI, or the disks as a table with the commands, CLI), the
-size a disk must give back to be worth shrinking, and the disks to protect. Enter
-writes the choices into the settings file, leaving the rest of it as it is; Esc
-changes nothing, or, with no settings file yet, writes the defaults; Ctrl+C
-writes nothing. Nothing on the disks changes here.
+		Long: `Open a wizard to choose how wsl-shrinker works, a page each: the language, the
+colors, what it opens with (the screen, TUI, or the disks as a table with the
+commands, CLI), the size a disk must give back to be worth shrinking, and the
+disks to protect. Up and down choose, shown at once; Enter goes on, Left goes
+back. Enter on the last page writes the choices into the settings file, leaving
+the rest of it as it is; Esc changes nothing, or, with no settings file yet,
+writes the defaults; Ctrl+C writes nothing. Nothing on the disks changes here.
 
 With any of the flags below it opens no screen: the flags are the choices, what
 they leave out stays as it is. That works anywhere, in a script too:

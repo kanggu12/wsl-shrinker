@@ -19,8 +19,8 @@ func Snapshot(b Backend, w, h int, dark bool, keys []string, stopAt string) stri
 	m := newModel(context.Background(), b)
 	m.width, m.height, m.th = w, h, ui.NewTheme(dark)
 	// Load as Init would, but in this goroutine.
-	m.info = b.Info(m.ctx)
-	next, _ := m.Update(disksMsg(func() disksMsg { l, err := b.Disks(m.ctx); return disksMsg{list: l, err: err} }()))
+	m.info, m.infoKnown = b.Info(m.ctx), true
+	next, _ := m.Update(m.loadDisks()())
 	m = next.(model)
 	m = m.surveyNow()
 	for _, k := range keys {
@@ -74,6 +74,21 @@ func snapshotKey(k string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "space":
 		return tea.KeyPressMsg{Code: ' ', Text: " "}
+	// Named keys that would otherwise be read as their first letter.
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "home":
+		return tea.KeyPressMsg{Code: tea.KeyHome}
+	case "end":
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	}
 	r := []rune(k)[0]
 	return tea.KeyPressMsg{Code: r, Text: string(r)}

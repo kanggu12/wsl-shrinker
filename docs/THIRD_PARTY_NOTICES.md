@@ -1,7 +1,7 @@
 # Third-party notices
 
 wsl-shrinker's own code is under the MIT License ([LICENSE](../LICENSE)). Its program is built from the Go modules
-and the Go standard library below, and its logo and figures are drawn from the JetBrains Mono font. Their licenses
+and the Go standard library below, and its logo and figures are lettered in the Space Grotesk font. Their licenses
 follow. `scripts/third-party-notices.sh` writes this file from what the program is built from (`make notices`).
 
 | Component | Version | License | Source |
@@ -13,6 +13,7 @@ follow. `scripts/third-party-notices.sh` writes this file from what the program 
 | `github.com/charmbracelet/ultraviolet` | v0.0.0-20261008173134-6b8d4baf91b4 | MIT | https://pkg.go.dev/github.com/charmbracelet/ultraviolet |
 | `github.com/charmbracelet/x/ansi` | v0.11.9 | MIT | https://pkg.go.dev/github.com/charmbracelet/x/ansi |
 | `github.com/charmbracelet/x/term` | v0.2.2 | MIT | https://pkg.go.dev/github.com/charmbracelet/x/term |
+| `github.com/charmbracelet/x/termios` | v0.1.1 | MIT | https://pkg.go.dev/github.com/charmbracelet/x/termios |
 | `github.com/charmbracelet/x/windows` | v0.2.2 | MIT | https://pkg.go.dev/github.com/charmbracelet/x/windows |
 | `github.com/clipperhouse/displaywidth` | v0.11.0 | MIT | https://pkg.go.dev/github.com/clipperhouse/displaywidth |
 | `github.com/clipperhouse/uax29/v2` | v2.7.0 | MIT | https://pkg.go.dev/github.com/clipperhouse/uax29/v2 |
@@ -27,7 +28,7 @@ follow. `scripts/third-party-notices.sh` writes this file from what the program 
 | `golang.org/x/sync` | v0.22.0 | BSD-3-Clause | https://pkg.go.dev/golang.org/x/sync |
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | https://pkg.go.dev/golang.org/x/sys |
 | Go standard library | 1.26.0 | BSD-3-Clause | https://go.dev |
-| JetBrains Mono (the lettering of the logo and the figures) | 2.211 | OFL-1.1 | https://github.com/JetBrains/JetBrainsMono |
+| Space Grotesk (the lettering of the logo and the figures) | 2.000 | OFL-1.1 | https://github.com/floriankarsten/space-grotesk |
 
 ## charm.land/bubbletea/v2 v2.1.1
 
@@ -186,6 +187,32 @@ SOFTWARE.
 ```
 
 ## github.com/charmbracelet/x/term v0.2.2
+
+```text
+MIT License
+
+Copyright (c) 2023 Charmbracelet, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## github.com/charmbracelet/x/termios v0.1.1
 
 ```text
 MIT License
@@ -919,14 +946,14 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## JetBrains Mono 2.211
+## Space Grotesk 2.000
 
 ```text
-Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+Copyright 2020 The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
-https://openfontlicense.org
+http://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------

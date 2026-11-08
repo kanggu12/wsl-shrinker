@@ -3,10 +3,11 @@
 #   irm https://github.com/kanggu12/wsl-shrinker/releases/latest/download/install.ps1 | iex
 #
 # Settings, all optional, as environment variables:
-#   WSL_SHRINKER_VERSION   release to install, like v0.1.0 (default: the latest)
+#   WSL_SHRINKER_VERSION   release to install, like v0.3.0 (default: the latest)
 #   WSL_SHRINKER_BIN_DIR   where it goes (default: %LOCALAPPDATA%\Programs\wsl-shrinker)
 #   WSL_SHRINKER_BASE_URL  where releases are downloaded from (mirrors, tests)
 #   WSL_SHRINKER_ZIP       a zip already downloaded, installed as it is (tests)
+#   WSL_SHRINKER_NO_SETUP  1: do not open setup after a first install
 #
 # Everything runs in a script block of its own: run through iex, the script
 # shares the caller's session, and a failure must end the install, not the
@@ -21,10 +22,18 @@
   $base = if ($env:WSL_SHRINKER_BASE_URL) { $env:WSL_SHRINKER_BASE_URL } else { "https://github.com/$repo/releases/download" }
   $binDir = if ($env:WSL_SHRINKER_BIN_DIR) { $env:WSL_SHRINKER_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker' }
 
-  # x64 or ARM64 Windows; a 32-bit PowerShell on x64 reports the machine in
+  # x64 or ARM64 Windows. The machine's own architecture counts, not this
+  # PowerShell's: an x64 or x86 PowerShell on ARM64 Windows runs emulated and
+  # says AMD64 or X86, and the x64 launcher it would install cannot run in an
+  # ARM64 distribution. The system's environment in the registry holds the
+  # machine's, whatever the reader; .NET's OSArchitecture says it from .NET 5
+  # (PowerShell 7) on, and a 32-bit PowerShell on x64 finds it in
   # PROCESSOR_ARCHITEW6432.
-  $machine = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-  $arch = switch ($machine) { 'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { throw "wsl-shrinker install: no release for $machine" } }
+  $machine = $null
+  try { $machine = [string](Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name PROCESSOR_ARCHITECTURE -ErrorAction Stop).PROCESSOR_ARCHITECTURE } catch { }
+  if (-not $machine) { try { $machine = [string][Runtime.InteropServices.RuntimeInformation]::OSArchitecture } catch { } }
+  if (-not $machine) { $machine = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+  $arch = switch ($machine) { { $_ -in 'AMD64', 'X64' } { 'amd64' } 'ARM64' { 'arm64' } default { throw "wsl-shrinker install: no release for $machine" } }
 
   $tmp = Join-Path ([IO.Path]::GetTempPath()) ('wsl-shrinker-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -73,8 +82,24 @@
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     # The Windows program, and the launcher WSL finds by name on the PATH it
     # takes from Windows.
-    foreach ($f in 'wsl-shrinker.exe', 'wsl-shrinker') {
-      Copy-Item (Join-Path $tmp "x\$f") (Join-Path $binDir $f) -Force
+    $files = 'wsl-shrinker.exe', 'wsl-shrinker'
+    # A running wsl-shrinker holds its files: find that out before anything
+    # is replaced, so an install never leaves a new program beside an old
+    # launcher.
+    foreach ($f in $files) {
+      $dest = Join-Path $binDir $f
+      if (Test-Path -LiteralPath $dest) {
+        try { [IO.File]::Open($dest, 'Open', 'ReadWrite', 'None').Close() }
+        catch { throw "wsl-shrinker install: $dest is in use; close wsl-shrinker and run the install again" }
+      }
+    }
+    # Each file lands beside its old copy first, then takes its place: a copy
+    # cut short leaves the old one whole.
+    foreach ($f in $files) {
+      Copy-Item -LiteralPath (Join-Path $tmp "x\$f") -Destination (Join-Path $binDir "$f.new") -Force
+    }
+    foreach ($f in $files) {
+      Move-Item -LiteralPath (Join-Path $binDir "$f.new") -Destination (Join-Path $binDir $f) -Force
     }
     Write-Host "installed $(Join-Path $binDir 'wsl-shrinker.exe')"
   } finally {
@@ -98,5 +123,21 @@
     }
   } finally {
     $key.Close()
+  }
+
+  # In a console, a first install opens setup to choose the language, the
+  # colors, TUI or CLI, and the disks to protect; an upgrade keeps the
+  # settings it has. WSL_SHRINKER_NO_SETUP=1 skips it, as does a script: a
+  # redirected console, or PowerShell started with -NonInteractive, where
+  # nobody answers.
+  $nonInteractive = [Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }
+  if ($env:WSL_SHRINKER_NO_SETUP -ne '1' -and -not $nonInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
+    # The install is done whatever setup does: a setup that fails or is
+    # left with Ctrl+C says so itself and opens again at the first start.
+    try {
+      & (Join-Path $binDir 'wsl-shrinker.exe') setup --installer
+    } catch {
+      Write-Host "wsl-shrinker setup did not finish; wsl-shrinker setup opens it again"
+    }
   }
 }

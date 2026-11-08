@@ -4,9 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/kanggu12/wsl-shrinker/internal/core/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
@@ -48,10 +49,11 @@ func NewDemo() *Demo {
 		{Name: "Work", Kind: disks.KindDistro, Distro: "Work",
 			Path: `D:\WSL\Work\ext4.vhdx`, File: winapi.FileInfo{Size: 64 * gb, OnDisk: 64 * gb, DriveFree: 402 * gb}, Estimate: at(64*gb, 51*gb, 49*gb)},
 	}}
-	now := time.Now()
+	// Past runs at fixed times, in the local zone: the README's pictures of
+	// the demo come out the same each time they are made.
 	d.hist = []history.Entry{
-		{At: now.Add(-21 * 24 * time.Hour), Disk: "Ubuntu-24.04", Before: 274 * gb, After: 219 * gb, Freed: 55 * gb, Took: 48},
-		{At: now.Add(-9 * 24 * time.Hour), Disk: "Debian", Before: 37 * gb, After: 17 * gb, Freed: 20 * gb, Took: 21},
+		{At: time.Date(2026, 10, 18, 9, 12, 0, 0, time.Local), Disk: "Ubuntu-24.04", Before: 274 * gb, After: 219 * gb, Freed: 55 * gb, Took: 48},
+		{At: time.Date(2026, 10, 30, 21, 40, 0, 0, time.Local), Disk: "Debian", Before: 37 * gb, After: 17 * gb, Freed: 20 * gb, Took: 21},
 	}
 	return d
 }
@@ -79,7 +81,7 @@ func (d *Demo) Survey(context.Context, string) (survey.Result, error) {
 	return survey.Result{Docker: true, Containers: 3, Items: []survey.Item{
 		it("docker-build-cache", "docker-build-cache", "Docker build cache", 14*gb+800*mb, survey.KindCache, ""),
 		it("go-mod:/home/ann/go/pkg/mod", "go-mod", "/home/ann/go/pkg/mod", 6*gb+100*mb, survey.KindDownload, ""),
-		it("huggingface:/home/ann/.cache/huggingface", "huggingface", "/home/ann/.cache/huggingface", 4*gb+200*mb, survey.KindDownload, ""),
+		it("huggingface:/home/ann/.cache/huggingface/hub", "huggingface", "/home/ann/.cache/huggingface/hub", 4*gb+200*mb, survey.KindDownload, ""),
 		it("npm:/home/ann/.npm/_cacache", "npm", "/home/ann/.npm/_cacache", 3*gb+900*mb, survey.KindCache, ""),
 		it("docker-dangling", "docker-dangling", "Docker images with no name", 3*gb+400*mb, survey.KindImage, ""),
 		it("pip:/home/ann/.cache/pip", "pip", "/home/ann/.cache/pip", 2*gb+700*mb, survey.KindCache, ""),
@@ -93,27 +95,36 @@ func (d *Demo) Survey(context.Context, string) (survey.Result, error) {
 
 // Shrink plays the steps with pauses like a real run's.
 func (d *Demo) Shrink(_ context.Context, disk disks.Disk, opt shrink.Options, emit func(shrink.Event)) shrink.Result {
-	start := time.Now()
 	res := shrink.Result{Disk: disk.Name, Before: disk.Estimate}
 	pause := func(ms int) {
 		if !d.Fast {
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 	}
+	// The run's length as the demo tells it, the same with or without the
+	// pauses: each step's pause, but the compaction at the length its step
+	// says, not the shorter pause that stands in for it.
+	var took time.Duration
 	step := func(ms int, done shrink.Event) {
 		e := shrink.Event{Step: done.Step, Status: shrink.Running, At: time.Now()}
 		emit(e)
 		res.Events = append(res.Events, e)
 		pause(ms)
+		if done.Took > 0 {
+			took += done.Took
+		} else {
+			took += time.Duration(ms) * time.Millisecond
+		}
 		done.At = time.Now()
 		emit(done)
 		res.Events = append(res.Events, done)
 	}
-	step(400, shrink.Event{Step: shrink.StepCheck, Status: shrink.Done, Bytes: disk.Estimate.Reclaim})
 	var cleaned int64
 	for _, it := range opt.Clean {
 		cleaned += it.Bytes
 	}
+	// What the run gives back with what was chosen, as the engine says it.
+	step(400, shrink.Event{Step: shrink.StepCheck, Status: shrink.Done, Bytes: disk.Estimate.Reclaim + cleaned})
 	if len(opt.Clean) > 0 {
 		step(1500, shrink.Event{Step: shrink.StepClean, Status: shrink.Done, Count: len(opt.Clean), Bytes: cleaned})
 	} else {
@@ -134,7 +145,7 @@ func (d *Demo) Shrink(_ context.Context, disk disks.Disk, opt shrink.Options, em
 	}
 	after := disk.File
 	after.OnDisk = disk.Estimate.FileSize - freed
-	res.File, res.Freed, res.Took = &after, freed, time.Since(start)
+	res.File, res.Freed, res.Took = &after, freed, took
 	d.hist = append(d.hist, history.Entry{At: time.Now(), Disk: disk.Name, Before: disk.Estimate.FileSize, After: after.OnDisk, Freed: freed, Took: res.Took.Seconds()})
 	// The disk shows what it is now.
 	for i := range d.list {
@@ -163,3 +174,9 @@ func (d *Demo) Hosts(string) bool { return false }
 
 // Reopen does nothing in the demo.
 func (d *Demo) Reopen([]string) error { return nil }
+
+// Pending: the made-up PC has no run left unfinished.
+func (d *Demo) Pending() (journal.Entry, journal.State) { return journal.Entry{}, journal.None }
+
+// Recover has nothing to finish on the made-up PC.
+func (d *Demo) Recover(context.Context) (string, error) { return "", nil }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
@@ -32,4 +33,9 @@ type Backend interface {
 	Hosts(distro string) bool
 	// Reopen continues in a new window with these arguments.
 	Reopen(args []string) error
+	// Pending is a run that has not ended: going on in another process,
+	// or cut off and waiting to be finished.
+	Pending() (journal.Entry, journal.State)
+	// Recover finishes a run that was cut off, and says what it did.
+	Recover(ctx context.Context) (string, error)
 }

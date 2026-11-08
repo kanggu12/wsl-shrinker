@@ -27,16 +27,23 @@ const (
 	CatSafe
 	// CatBad: cannot be shrunk, or a step that failed.
 	CatBad
+	// CatWarn: a warning, worth a second look.
+	CatWarn
 )
 
-// Theme is one set of colors, for a dark or a light terminal. The palette is
-// zellij-reaper's, so the two tools look like one family.
+// Theme is one set of colors, for a dark or a light terminal. wsl-shrinker's
+// identity is the block map: slate for data that stays, mint for space that
+// goes back to Windows, and the other colors for what a disk is doing.
 type Theme struct {
 	Dark bool
-	// Ink and Muted are the two text levels; Rule draws borders.
-	Ink, Muted, Rule color.Color
-	// Mark is the brand highlighter of the name chip.
+	// Ink and Muted are the two text levels; Rule draws borders; Faint is
+	// for separators between pieces of text, quieter than Muted but still
+	// read on either background.
+	Ink, Muted, Rule, Faint color.Color
+	// Mark is the brand color: the name chip, marks and chosen items.
 	Mark color.Color
+	// Stays is the slate of data that stays in a disk.
+	Stays color.Color
 	// Cat holds the color of each category.
 	Cat map[Category]color.Color
 	// Selected is the background of the selected row; Key the keycaps';
@@ -49,29 +56,36 @@ func NewTheme(dark bool) Theme {
 	ld := lipgloss.LightDark(dark)
 	return Theme{
 		Dark:  dark,
-		Ink:   ld(lipgloss.Color("#1D1C1D"), lipgloss.Color("#E3E4E5")),
-		Muted: ld(lipgloss.Color("#616061"), lipgloss.Color("#9198A1")),
-		Rule:  ld(lipgloss.Color("#D1D9E0"), lipgloss.Color("#3D444D")),
-		Mark:  ld(lipgloss.Color("#F2C744"), lipgloss.Color("#ECB22E")),
+		Ink:   ld(lipgloss.Color("#14171F"), lipgloss.Color("#E8ECF2")),
+		Muted: ld(lipgloss.Color("#5B6474"), lipgloss.Color("#9AA4B2")),
+		Rule:  ld(lipgloss.Color("#D7DDE5"), lipgloss.Color("#2E3541")),
+		Faint: ld(lipgloss.Color("#8A93A3"), lipgloss.Color("#6B7585")),
+		Mark:  ld(lipgloss.Color("#0B8A7C"), lipgloss.Color("#34D3BF")),
+		Stays: ld(lipgloss.Color("#9AA3B2"), lipgloss.Color("#5D6878")),
 		Cat: map[Category]color.Color{
-			CatGain:  ld(lipgloss.Color("#A86A00"), lipgloss.Color("#ECB22E")),
-			CatSmall: ld(lipgloss.Color("#616061"), lipgloss.Color("#9198A1")),
-			CatLive:  ld(lipgloss.Color("#1264A3"), lipgloss.Color("#36C5F0")),
-			CatDone:  ld(lipgloss.Color("#007A5A"), lipgloss.Color("#2EB67D")),
-			CatSafe:  ld(lipgloss.Color("#7B3FA0"), lipgloss.Color("#C9A7EB")),
-			CatBad:   ld(lipgloss.Color("#C0123E"), lipgloss.Color("#E01E5A")),
+			CatGain:  ld(lipgloss.Color("#0B8A7C"), lipgloss.Color("#34D3BF")),
+			CatSmall: ld(lipgloss.Color("#5B6474"), lipgloss.Color("#9AA4B2")),
+			CatLive:  ld(lipgloss.Color("#4F46E5"), lipgloss.Color("#8B93FF")),
+			CatDone:  ld(lipgloss.Color("#0B8A7C"), lipgloss.Color("#34D3BF")),
+			CatSafe:  ld(lipgloss.Color("#C0266D"), lipgloss.Color("#F472B6")),
+			CatBad:   ld(lipgloss.Color("#C8323C"), lipgloss.Color("#FF6B6B")),
+			CatWarn:  ld(lipgloss.Color("#B45309"), lipgloss.Color("#F5B942")),
 		},
-		Selected: ld(lipgloss.Color("#E8F1FB"), lipgloss.Color("#262A31")),
-		Key:      ld(lipgloss.Color("#ECECEE"), lipgloss.Color("#2C2F35")),
-		Track:    ld(lipgloss.Color("#E4E7EB"), lipgloss.Color("#30343B")),
+		Selected: ld(lipgloss.Color("#EAF6F4"), lipgloss.Color("#1B2430")),
+		Key:      ld(lipgloss.Color("#E9EDF2"), lipgloss.Color("#232A35")),
+		Track:    ld(lipgloss.Color("#E4E8EE"), lipgloss.Color("#262D38")),
 	}
 }
 
 // Fg is a style with a foreground color.
 func Fg(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
 
-// Dot is the colored "●" that leads a row.
-func (t Theme) Dot(c Category) string { return Fg(t.Cat[c]).Render("●") }
+// Dot is the colored block that leads a row: one cell wide in every
+// terminal, unlike "●", which East Asian settings draw two cells wide.
+func (t Theme) Dot(c Category) string { return Fg(t.Cat[c]).Render(Block) }
+
+// Block is the identity's unit: a small square, one cell wide everywhere.
+const Block = "▪"
 
 // KeyCap draws a key as a small raised cap followed by what it does.
 func (t Theme) KeyCap(key, label string) string {
@@ -79,9 +93,10 @@ func (t Theme) KeyCap(key, label string) string {
 	return k + " " + Fg(t.Muted).Render(label)
 }
 
-// Chip is the name in the header: dark text on the brand yellow.
+// Chip is the name in the header, as the logo draws it: two blocks of data
+// that stay, one that goes back, then the name.
 func (t Theme) Chip(s string) string {
-	return lipgloss.NewStyle().Background(t.Mark).Foreground(lipgloss.Color("#1D1C1D")).Bold(true).Padding(0, 1).Render(s)
+	return Fg(t.Stays).Render(Block+Block) + Fg(t.Mark).Render(Block) + " " + lipgloss.NewStyle().Foreground(t.Ink).Bold(true).Render(s)
 }
 
 // Bar draws parts of a whole as one bar w cells wide: each part takes cells
@@ -124,11 +139,12 @@ func (t Theme) Bar(w int, total int64, parts ...Part) string {
 		cells[big]--
 		used--
 	}
+	// Each cell is a block, as on a disk; the empty part is the track.
 	var b strings.Builder
 	for i, p := range parts {
-		b.WriteString(Fg(p.Color).Render(strings.Repeat("█", cells[i])))
+		b.WriteString(Fg(p.Color).Render(strings.Repeat(Block, cells[i])))
 	}
-	b.WriteString(Fg(t.Track).Render(strings.Repeat("█", w-used)))
+	b.WriteString(Fg(t.Track).Render(strings.Repeat(Block, w-used)))
 	return b.String()
 }
 
@@ -138,13 +154,14 @@ type Part struct {
 	Color color.Color
 }
 
-// Fit pads or cuts s to exactly w cells, with "…" where it was cut.
+// Fit pads or cuts s to exactly w cells, with "…" where it was cut, right
+// after the last word kept: "Docker Desktop…", never "Docker Desktop …".
 func Fit(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	if lipgloss.Width(s) > w {
-		s = ansi.Truncate(s, w, "…")
+		s = strings.TrimRight(ansi.Truncate(s, w-1, ""), " ") + "…"
 	}
 	return s + strings.Repeat(" ", max(0, w-lipgloss.Width(s)))
 }
@@ -163,11 +180,11 @@ func Middle(s string, w int) string {
 	if lipgloss.Width(s) <= w || w < 8 {
 		return Fit(s, w)
 	}
-	r := []rune(s)
 	keep := w - 1
 	head := keep / 3
 	tail := keep - head
-	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+	// Cut by cells, not letters: a Korean letter takes two.
+	return Fit(ansi.Truncate(s, head, "")+"…"+ansi.TruncateLeft(s, lipgloss.Width(s)-tail, ""), w)
 }
 
 // Highlight paints a whole row's background, w cells wide. Styled parts of

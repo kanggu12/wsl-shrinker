@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -36,7 +35,7 @@ func wslExe(ctx context.Context, args ...string) (string, error) {
 	err := cmd.Run()
 	text := decode(out.Bytes())
 	if err != nil {
-		return text, fmt.Errorf("wsl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(text))
+		return text, fmt.Errorf("wsl %s: %w: %s", describe(args), err, strings.TrimSpace(text))
 	}
 	return text, nil
 }
@@ -57,40 +56,23 @@ func (Real) Distros(ctx context.Context) ([]Distro, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing the WSL registry: %w", err)
 	}
-	running := map[string]bool{}
-	// Without running distributions wsl.exe exits non-zero; that is no error.
-	if out, err := wslExe(ctx, "--list", "--running", "--quiet"); err == nil {
-		for _, l := range lines(out) {
-			running[l] = true
-		}
-	}
-	var out []Distro
+	var entries []regEntry
 	for _, id := range ids {
 		k, err := registry.OpenKey(root, id, registry.READ)
+		// A subkey that cannot be opened is skipped, as if it were absent.
 		if err != nil {
 			continue
 		}
+		// Missing values read as empty or zero; buildDistros judges them.
 		name, _, _ := k.GetStringValue("DistributionName")
 		base, _, _ := k.GetStringValue("BasePath")
 		file, _, _ := k.GetStringValue("VhdFileName")
 		ver, _, _ := k.GetIntegerValue("Version")
 		k.Close()
-		// Entries without a name are leftovers of failed installs.
-		if name == "" {
-			continue
-		}
-		d := Distro{Name: name, ID: id, Version: int(ver), Default: id == def, Running: running[name]}
-		if d.Version == 2 {
-			// The file name is ext4.vhdx unless the registration says otherwise.
-			if file == "" {
-				file = "ext4.vhdx"
-			}
-			// Store installs record the base path with a \\?\ prefix.
-			d.VHD = filepath.Join(strings.TrimPrefix(base, `\\?\`), file)
-		}
-		out = append(out, d)
+		entries = append(entries, regEntry{id: id, name: name, base: base, file: file, version: int(ver)})
 	}
-	return out, nil
+	// Building the list and asking which run is the part tested off Windows.
+	return buildDistros(ctx, entries, def, wslExe)
 }
 
 // Info runs `wsl --version` and `wsl --help`.
@@ -106,17 +88,21 @@ func (Real) Info(ctx context.Context) (Info, error) {
 
 // Run runs the script with sh, inside a distribution that already runs.
 func (r Real) Run(ctx context.Context, distro, user, script string) (string, error) {
-	// Refuse rather than boot a stopped distribution as a side effect.
+	// Refuse rather than boot a stopped distribution as a side effect, and
+	// refuse a name WSL does not have before asking wsl.exe anything.
 	ds, err := r.Distros(ctx)
 	if err != nil {
 		return "", err
 	}
-	for _, d := range ds {
-		if d.Name == distro && !d.Running {
-			return "", fmt.Errorf("%s is not running", distro)
-		}
+	d, err := find(ds, distro)
+	if err != nil {
+		return "", err
 	}
-	return wslExe(ctx, "--distribution", distro, "--user", user, "--exec", "sh", "-c", script)
+	if !d.Running {
+		return "", fmt.Errorf("%s is %w", d.Name, ErrNotRunning)
+	}
+	// The registered spelling of the name, whatever case was asked for.
+	return wslExe(ctx, "--distribution", d.Name, "--user", user, "--exec", "sh", "-c", script)
 }
 
 // Start runs `true` in the distribution, which boots it.

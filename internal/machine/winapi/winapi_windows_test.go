@@ -3,6 +3,7 @@
 package winapi
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,5 +50,32 @@ func TestReopenRefusesShellSyntax(t *testing.T) {
 		if _, err := reopenLine([]string{a}, true); err == nil {
 			t.Errorf("%q accepted", a)
 		}
+	}
+}
+
+func TestRunningKnowsThisProgramByName(t *testing.T) {
+	// The journal's check: this process runs, under its own name; the same id
+	// under another name is another program; an id no process has is none.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Base(self)
+	if !Running(os.Getpid(), name) || !Running(os.Getpid(), strings.ToUpper(name)) {
+		t.Fatalf("this process (%s) does not read as running", name)
+	}
+	if Running(os.Getpid(), "another.exe") {
+		t.Fatal("another name read as this program")
+	}
+	if Running(0x7ffffff0, name) {
+		t.Fatal("an id no process has read as running")
+	}
+}
+
+func TestReopenOpensNoWindowFromATest(t *testing.T) {
+	// Whatever a test does, Reopen does not reach the screen from it: a test
+	// binary run from WSL looks started from WSL, and one did open windows.
+	if err := Reopen([]string{"--reopened"}); !errors.Is(err, errNoWindowInTests) {
+		t.Fatalf("got %v", err)
 	}
 }

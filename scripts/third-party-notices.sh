@@ -12,11 +12,15 @@ cd "$root"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-# Only what is linked into the program is distributed with it, not every
-# module go.mod names, so the list comes from the Windows build itself, the
-# one that carries the most (the WSL launcher is the same code).
+# Only what is linked into the programs is distributed with them, not every
+# module go.mod names, so the list comes from the builds themselves: the
+# Windows program and the WSL launcher, which links a few modules of its own
+# (the terminal's modes on Linux). Each module once, by name.
 CGO_ENABLED=0 GOOS=windows go build -trimpath -o "$tmp/wsl-shrinker.exe" ./cmd/wsl-shrinker
-go version -m "$tmp/wsl-shrinker.exe" | awk '$1 == "dep" { print $2, $3 }' >"$tmp/deps"
+CGO_ENABLED=0 GOOS=linux go build -trimpath -o "$tmp/wsl-shrinker" ./cmd/wsl-shrinker
+for bin in "$tmp/wsl-shrinker.exe" "$tmp/wsl-shrinker"; do
+  go version -m "$bin" | awk '$1 == "dep" { print $2, $3 }'
+done | sort -u >"$tmp/deps"
 
 # license_file prints the license file of the module in directory $1.
 license_file() {
@@ -47,14 +51,14 @@ kind() {
 # The Go release go.mod asks for, not the one this machine has: the file must
 # read the same wherever it is generated.
 gover=$(awk '$1 == "go" { print $2 }' go.mod)
-font_license=docs/assets/JetBrainsMono-OFL.txt
+font_license=docs/assets/SpaceGrotesk-OFL.txt
 
 out="$tmp/notices.md"
 {
   echo "# Third-party notices"
   echo
   echo "wsl-shrinker's own code is under the MIT License ([LICENSE](../LICENSE)). Its program is built from the Go modules"
-  echo "and the Go standard library below, and its logo and figures are drawn from the JetBrains Mono font. Their licenses"
+  echo "and the Go standard library below, and its logo and figures are lettered in the Space Grotesk font. Their licenses"
   echo "follow. \`scripts/third-party-notices.sh\` writes this file from what the program is built from (\`make notices\`)."
   echo
   echo "| Component | Version | License | Source |"
@@ -66,7 +70,7 @@ out="$tmp/notices.md"
     echo "| \`$mod\` | $ver | $(kind "$file") | https://pkg.go.dev/$mod |"
   done <"$tmp/deps"
   echo "| Go standard library | $gover | $(kind "$(go env GOROOT)/LICENSE") | https://go.dev |"
-  echo "| JetBrains Mono (the lettering of the logo and the figures) | 2.211 | OFL-1.1 | https://github.com/JetBrains/JetBrainsMono |"
+  echo "| Space Grotesk (the lettering of the logo and the figures) | 2.000 | OFL-1.1 | https://github.com/floriankarsten/space-grotesk |"
   while read -r mod ver; do
     dir=$(go list -m -f '{{.Dir}}' "$mod")
     file=$(license_file "$dir")
@@ -84,7 +88,7 @@ out="$tmp/notices.md"
   cat "$(go env GOROOT)/LICENSE"
   echo '```'
   echo
-  echo "## JetBrains Mono 2.211"
+  echo "## Space Grotesk 2.000"
   echo
   echo '```text'
   cat "$font_license"

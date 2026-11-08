@@ -9,10 +9,12 @@ package survey
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 )
@@ -54,19 +56,21 @@ type Item struct {
 // Result is what one survey found.
 type Result struct {
 	// Size, Used and Avail are the root filesystem's numbers, in bytes.
-	Size, Used, Avail int64
+	Size  int64 `json:"size_bytes"`
+	Used  int64 `json:"used_bytes"`
+	Avail int64 `json:"avail_bytes"`
 	// Options are the root mount's options ("rw,discard,…").
-	Options string
+	Options string `json:"options"`
 	// Items are the findings, largest first.
-	Items []Item
+	Items []Item `json:"items"`
 	// Docker is set when a Docker engine answered inside the distribution.
-	Docker bool
+	Docker bool `json:"docker"`
 	// Containers counts the containers running now, which a shrink stops
 	// and starts again.
-	Containers int
+	Containers int `json:"containers"`
 	// DockerDesktop is set when the docker command here is Docker Desktop's
 	// integration: its images are on Docker Desktop's own disk.
-	DockerDesktop bool
+	DockerDesktop bool `json:"docker_desktop"`
 }
 
 // cache is one known cache under a home directory.
@@ -85,7 +89,9 @@ var caches = []cache{
 	{"go-build", ".cache/go-build", KindCache},
 	{"go-mod", "go/pkg/mod", KindDownload},
 	{"cargo", ".cargo/registry/cache", KindCache},
-	{"huggingface", ".cache/huggingface", KindDownload},
+	// The models and datasets only: the folder above also holds the login
+	// token and accelerate's settings, which no download brings back.
+	{"huggingface", ".cache/huggingface/hub", KindDownload},
 	{"playwright", ".cache/ms-playwright", KindDownload},
 	{"trash", ".local/share/Trash", KindLog},
 }
@@ -131,9 +137,21 @@ fi
 	return b.String()
 }
 
+// Limits for the work inside a distribution: a Docker that takes the
+// connection and never answers must not hold the screen or a run forever.
+const (
+	surveyLimit = 3 * time.Minute
+	cleanLimit  = 30 * time.Minute
+)
+
 // Run surveys a running distribution.
 func Run(ctx context.Context, sys wsl.System, distro string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, surveyLimit)
+	defer cancel()
 	out, err := sys.Run(ctx, distro, "root", script())
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return Result{}, fmt.Errorf("the look inside took over %s: %w", surveyLimit, ctx.Err())
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -252,9 +270,12 @@ func image(f []string) Item {
 	// would refuse, and the container needs it. Docker lists an image once
 	// even when it has several tags, and removing it by id fails then, so
 	// every tag of that id is removed, which removes the image.
+	// An image known only by its digest has no tag to remove: "name:<none>"
+	// names nothing, so its id is removed instead.
 	if !inuse && validImageID(id) {
 		it.Command = "docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | " +
-			"awk '$2 ~ /^sha256:" + id + "/ {print $1}' | xargs -r docker image rm"
+			"awk '$2 ~ /^sha256:" + id + "/ { if ($1 ~ /:<none>$/) none = $2; else { print $1; named = 1 } } END { if (!named && none != \"\") print none }' | " +
+			"xargs -r docker image rm"
 	}
 	return it
 }
@@ -262,14 +283,18 @@ func image(f []string) Item {
 // removeContents is the command that empties a cache folder. It checks the
 // folder again where it runs, since the survey: still no link on its path
 // and still on the root filesystem, or it removes nothing. find -xdev stays
-// on that filesystem, so a mount inside the folder is left alone, and the
-// folder itself stays for its tool.
+// on that filesystem; a folder with anything mounted inside it, a bind
+// mount of the same filesystem too, which -xdev would not stop at, is left
+// whole. The folder itself stays for its tool.
 func removeContents(path string) string {
 	q := quote(path)
 	// It goes into the folder first and checks where it is from inside, so
 	// a link swapped in on the way after the check cannot move the removal.
-	return "p=" + q + "; if cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$(stat -c %d /)\" ]; " +
-		"then find . -xdev -mindepth 1 -delete; else echo \"skipped $p: moved or linked\"; false; fi"
+	return "p=" + q + "; if cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$(stat -c %d /)\" ]; then " +
+		"if awk -v p=\"$p/\" 'index($5, p) == 1 { found = 1 } END { exit !found }' /proc/self/mountinfo; " +
+		"then echo \"skipped $p: something is mounted inside\"; false; " +
+		"else find . -xdev -mindepth 1 -delete; fi; " +
+		"else echo \"skipped $p: moved or linked\"; false; fi"
 }
 
 // safePath accepts only absolute paths under /root or /home made of plain
@@ -344,5 +369,11 @@ func Clean(ctx context.Context, sys wsl.System, distro string, items []Item) (st
 	if b.Len() == 0 {
 		return "", nil
 	}
-	return sys.Run(ctx, distro, "root", b.String())
+	ctx, cancel := context.WithTimeout(ctx, cleanLimit)
+	defer cancel()
+	out, err := sys.Run(ctx, distro, "root", b.String())
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, fmt.Errorf("removing took over %s: %w", cleanLimit, ctx.Err())
+	}
+	return out, err
 }

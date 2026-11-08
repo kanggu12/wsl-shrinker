@@ -13,13 +13,16 @@ var ErrNotWindows = errors.New("not on Windows")
 type FileInfo struct {
 	// Size is the file's length; OnDisk what it takes on the drive (less for
 	// a sparse or compressed file).
-	Size, OnDisk int64
+	Size   int64 `json:"size_bytes"`
+	OnDisk int64 `json:"on_disk_bytes"`
 	// Sparse, Compressed and Encrypted are the file's NTFS attributes. WSL
 	// cannot compact an encrypted disk (0x80071772).
-	Sparse, Compressed, Encrypted bool
+	Sparse     bool `json:"sparse"`
+	Compressed bool `json:"compressed"`
+	Encrypted  bool `json:"encrypted"`
 	// Held is set when another process has the file open for writing: WSL's
 	// VM holds a disk while it is attached.
-	Held bool
+	Held bool `json:"held"`
 	// DriveFree is the free space of the file's drive.
-	DriveFree int64
+	DriveFree int64 `json:"drive_free_bytes"`
 }

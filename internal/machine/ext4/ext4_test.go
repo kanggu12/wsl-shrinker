@@ -201,3 +201,33 @@ func FuzzRead(f *testing.F) {
 		}
 	})
 }
+
+func TestDamagedInodeCountsAreRefused(t *testing.T) {
+	// A superblock whose inode table size is far past a group's blocks:
+	// each group without a bitmap would mark the rest of the filesystem one
+	// block at a time (the work grows with groups times blocks), and every
+	// block would read as in use. It is refused instead.
+	for name, patch := range map[string]struct {
+		at    int64
+		value []byte
+	}{
+		"inodes per group": {1024 + 0x28, []byte{0xff, 0xff, 0xff, 0xff}},
+		"inode size":       {1024 + 0x58, []byte{0x03, 0x01}}, // 259: not a power of two
+	} {
+		t.Run(name, func(t *testing.T) {
+			img := mkfs(t, "8G")
+			f, err := os.OpenFile(img, os.O_RDWR, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			if _, err := f.WriteAt(patch.value, patch.at); err != nil {
+				t.Fatal(err)
+			}
+			st, _ := f.Stat()
+			if fs, err := Read(f, st.Size()); err == nil {
+				t.Fatalf("read with %d of %d blocks in use", fs.UsedBlocks, fs.Blocks)
+			}
+		})
+	}
+}

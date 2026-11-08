@@ -3,12 +3,15 @@
 package winapi
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"testing"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -96,12 +99,20 @@ func FromWSL() bool {
 // uses `start`, which opens the default terminal (Windows Terminal where it
 // is set as the default, the console host otherwise).
 func Reopen(args []string) error {
+	// A test never opens a window on the person's screen, whatever path it
+	// took to get here: the tests check the command line with `start /b`.
+	if testing.Testing() {
+		return errNoWindowInTests
+	}
 	line, err := reopenLine(args, false)
 	if err != nil {
 		return err
 	}
 	return runCmdLine(line)
 }
+
+// errNoWindowInTests is Reopen refusing inside a test binary.
+var errNoWindowInTests = errors.New("a test does not open windows")
 
 // reopenLine builds the cmd.exe command line for Reopen. inPlace uses
 // `start /b`, which runs in this console instead of a new window: the
@@ -195,4 +206,72 @@ func CompactFile(path string) error {
 		return &os.PathError{Op: "compact virtual disk", Path: path, Err: syscall.Errno(r)}
 	}
 	return nil
+}
+
+// Running reports whether process pid runs and is the program named exe. A
+// process id is given to another program once its own ends, so the name is
+// compared too. A process this user may not look at counts as not running:
+// it is not one of this user's runs.
+func Running(pid int, exe string) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	// An ended process keeps its id while a handle is open: ask whether it
+	// still runs.
+	var code uint32
+	if err := windows.GetExitCodeProcess(h, &code); err != nil || code != stillActive {
+		return false
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Base(windows.UTF16ToString(buf[:n])), exe)
+}
+
+// stillActive is the exit code of a process that has not ended (STILL_ACTIVE).
+const stillActive = 259
+
+// Colors turns on escape-code colors on the console behind fd, and reports
+// whether the console takes them; false for a pipe or a file. The mode it
+// changes is put back by RestoreConsole.
+func Colors(fd uintptr) bool {
+	var mode uint32
+	h := windows.Handle(fd)
+	if windows.GetConsoleMode(h, &mode) != nil {
+		return false
+	}
+	if mode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+		return true
+	}
+	if windows.SetConsoleMode(h, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING) != nil {
+		return false
+	}
+	// The first mode seen is the one the console had.
+	consoleMu.Lock()
+	defer consoleMu.Unlock()
+	if _, ok := consoleModes[h]; !ok {
+		consoleModes[h] = mode
+	}
+	return true
+}
+
+// consoleModes are the consoles' modes before Colors changed them.
+var (
+	consoleMu    sync.Mutex
+	consoleModes = map[windows.Handle]uint32{}
+)
+
+// RestoreConsole puts back the modes Colors changed, as the program ends:
+// the console is left as the shell had it.
+func RestoreConsole() {
+	consoleMu.Lock()
+	defer consoleMu.Unlock()
+	for h, mode := range consoleModes {
+		_ = windows.SetConsoleMode(h, mode)
+		delete(consoleModes, h)
+	}
 }

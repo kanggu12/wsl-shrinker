@@ -5,6 +5,9 @@ package winapi
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // Stat answers with the file's length only: off Windows there is nothing
@@ -43,3 +46,18 @@ func AppData() string {
 
 // CompactFile needs Windows' virtual disk service.
 func CompactFile(string) error { return ErrNotWindows }
+
+// Running reports whether process pid runs the program named exe, from
+// /proc: off Windows only the tests and the demo run, but the journal's
+// check works the same.
+func Running(pid int, exe string) bool {
+	target, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	return err == nil && filepath.Base(target) == exe
+}
+
+// Colors reports whether fd is a terminal: off Windows every terminal takes
+// escape-code colors.
+func Colors(fd uintptr) bool { return term.IsTerminal(fd) }
+
+// RestoreConsole has nothing to put back off Windows.
+func RestoreConsole() {}

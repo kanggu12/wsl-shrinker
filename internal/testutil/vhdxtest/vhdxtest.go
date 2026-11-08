@@ -57,6 +57,12 @@ type Spec struct {
 	BreakRegion1 bool
 	// Parent marks the disk as differencing.
 	Parent bool
+	// HeaderLogOffset, when set, is the log offset both headers name in
+	// place of the real one: a damaged header field.
+	HeaderLogOffset uint64
+	// LastFileOffset, when set, is the file size the log entry claims
+	// (LastFileOffset), in place of the file's real end.
+	LastFileOffset int64
 }
 
 // Write creates the file at path and returns its size.
@@ -133,7 +139,11 @@ func Write(t testing.TB, path string, s Spec) int64 {
 			if s.TruncateLog {
 				flushed = next + 10*mib
 			}
-			entry := logEntry(logID, 100, start, flushed, next, pages)
+			last := next
+			if s.LastFileOffset != 0 {
+				last = s.LastFileOffset
+			}
+			entry := logEntry(logID, 100, start, flushed, last, pages)
 			for j := range int64(len(entry)) {
 				at(entry[j:j+1], logOffset+(start+j)%logLength)
 			}
@@ -213,6 +223,9 @@ func Write(t testing.TB, path string, s Spec) int64 {
 		binary.LittleEndian.PutUint16(h[66:68], 1) // format version
 		binary.LittleEndian.PutUint32(h[68:72], logLength)
 		binary.LittleEndian.PutUint64(h[72:80], logOffset)
+		if s.HeaderLogOffset != 0 {
+			binary.LittleEndian.PutUint64(h[72:80], s.HeaderLogOffset)
+		}
 		sum(h, 4)
 		if i == 0 && s.BreakHeader1 {
 			h[200] ^= 0xff

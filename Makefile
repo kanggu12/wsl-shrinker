@@ -60,5 +60,7 @@ notices:
 badges:
 	scripts/badges.sh
 
+# A dist run that failed halfway leaves its staging folders behind.
 clean:
 	rm -f dist/*.zip dist/checksums.txt dist/install.ps1 dist/wsl-shrinker.exe dist/wsl-shrinker
+	rm -rf dist/stage-amd64 dist/stage-arm64

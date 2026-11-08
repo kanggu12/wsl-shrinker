@@ -20,7 +20,7 @@ sys|apt|/var/cache/apt/archives|204800
 sys|journal|/var/log/journal|1048576
 home|pip|/home/ann/.cache/pip|512000
 home|go-build|/root/.cache/go-build|0
-home|huggingface|/home/ann/.cache/huggingface|20971520
+home|huggingface|/home/ann/.cache/huggingface/hub|20971520
 home|pip|/home/x;rm -rf ~/.cache/pip|100
 home|evil|/home/ann/.ssh|100
 docker|on
@@ -58,7 +58,7 @@ func TestParse(t *testing.T) {
 	if it := byID["journal"]; it.Bytes != 1048576*1024-100<<20 {
 		t.Fatalf("journal: %d", it.Bytes)
 	}
-	if it := byID["huggingface:/home/ann/.cache/huggingface"]; it.Kind != KindDownload {
+	if it := byID["huggingface:/home/ann/.cache/huggingface/hub"]; it.Kind != KindDownload {
 		t.Fatalf("huggingface: %+v", it)
 	}
 	// A path with shell syntax, and a directory not on the list, never pass.

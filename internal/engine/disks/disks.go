@@ -4,6 +4,7 @@ package disks
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kanggu12/wsl-shrinker/internal/core/estimate"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/ext4"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/vhdx"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
@@ -120,8 +121,10 @@ func Find(ctx context.Context, env Env) ([]Disk, error) {
 		}
 	}
 	for _, p := range env.Extra {
+		// The same file spelt two ways ("a\.\x.vhdx", "a\x.vhdx") is one.
+		p = filepath.Clean(p)
 		if !seen[strings.ToLower(p)] {
-			out = append(out, Disk{Name: filepath.Base(p), Kind: KindFile, Path: p})
+			out = append(out, Disk{Name: uniqueName(out, p), Kind: KindFile, Path: p})
 			seen[strings.ToLower(p)] = true
 		}
 	}
@@ -139,6 +142,35 @@ func Find(ctx context.Context, env Env) ([]Disk, error) {
 		return reclaim(a) > reclaim(b)
 	})
 	return out, nil
+}
+
+// uniqueName is the name an extra file is listed by: its file name, or with
+// its folder in front when another disk has that name already (other tools
+// call their disks ext4.vhdx too), and a number after when even that is
+// taken. Names pick disks for marking, protecting and the command line, so
+// two disks never share one; WSL's names ignore case, so these do too. The
+// folder is joined with "/", not "\": the name goes into the settings'
+// protect list, where a backslash in a TOML string starts an escape.
+func uniqueName(out []Disk, p string) string {
+	taken := func(n string) bool {
+		for _, d := range out {
+			if strings.EqualFold(d.Name, n) {
+				return true
+			}
+		}
+		return false
+	}
+	name := filepath.Base(p)
+	if !taken(name) {
+		return name
+	}
+	name = filepath.Base(filepath.Dir(p)) + "/" + name
+	for i, try := 2, name; ; i++ {
+		if !taken(try) {
+			return try
+		}
+		try = fmt.Sprintf("%s (%d)", name, i)
+	}
 }
 
 // Inspect reads one disk again, after a change.
@@ -166,7 +198,14 @@ func inspect(env Env, d *Disk) {
 	}
 	// A disk without ext4 still gets an estimate, from its blocks alone.
 	fs, _ := ext4.Read(vd.Contents(), vd.VirtualSize)
-	r := estimate.Of(vd, fs, fi.OnDisk)
+	// A distribution's disk is compacted by WSL, which trims first; any
+	// other file by Windows alone, which does not.
+	var r estimate.Result
+	if d.Kind == KindDistro {
+		r = estimate.Of(vd, fs, fi.OnDisk)
+	} else {
+		r = estimate.OfUntrimmed(vd, fs, fi.OnDisk)
+	}
 	d.Estimate = &r
 }
 

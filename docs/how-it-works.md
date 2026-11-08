@@ -9,7 +9,8 @@
   releases), which WSL does not register.
 - **Other files**: the VHDX files listed under `extra_disks` in the [settings](settings.md).
 
-Which distributions run comes from `wsl --list --running`. A stopped distribution is never started to look at it.
+Which distributions run comes from `wsl --list --running`; a shrink asks again at its check, as the list may be old by
+then. A stopped distribution is never started to look at it.
 
 ## The estimate
 
@@ -27,7 +28,16 @@ and never shorter than the end of a region placed further into the file (an inte
 table there). The difference from the file's size on the drive now is what comes back.
 
 Measured on disks WSL made with `wsl --import`, then written to and cleaned inside: the estimate matched the size after
-`wsl --manage --compact` to the byte, and so did the estimate for a file compacted through Windows' virtual disk API.
+`wsl --manage --compact` to the byte.
+
+### Docker Desktop's disk and other files
+
+WSL compacts only the distributions it registers. Docker Desktop's disk and the files under `extra_disks` go through
+Windows' virtual disk API instead, on a file nobody has attached, so nothing trims them first: the compaction drops the
+stored blocks that hold only zeros and keeps every other one, data or not (measured on a file the tests write: the
+blocks of zeros went, the blocks with data stayed byte for byte). Their estimate keeps every block the filesystem uses,
+and reads the free ones to find the blocks of zeros, up to 4 GiB per disk; past that, a block counts as kept. So it
+errs towards giving back more than it says, not less.
 
 ### Reading a disk WSL holds
 
@@ -43,41 +53,82 @@ seconds of writes. The screen marks such a disk "read while running".
 ### What can stop the read
 
 The reader refuses what it does not fully understand rather than guess: a header or region table whose checksums
-fail, an unknown region or metadata item marked required, a differencing disk, an ext4 filesystem using the `meta_bg`
-layout. The disk is then listed with the reason and no estimate.
+fail, an unknown region or metadata item marked required, a differencing disk. The disk is then listed with the reason
+and no estimate. A filesystem it cannot read (not ext4, or ext4 with the `meta_bg` layout) does not stop the read: the
+estimate then keeps every stored block, so it can only come out low, and the screen says so.
 
 ## A shrink
 
 | Step | Reads | Changes |
-|---|---|---|
-| check | WSL's version, the file's attributes, whether something holds it | nothing |
+|:---|:---|:---|
+| check | WSL's version, the file's attributes, whether something holds it, whether the distribution runs now, errors the filesystem recorded | nothing |
 | clean | | removes the items you chose, with the one command each was listed with |
-| stop | the running containers | stops them (`docker stop`, each with its own timeout), runs `/etc/wsl-shrinker/pre-stop.d/*`, syncs |
-| compact | | `wsl --manage <distro> --compact`: WSL stops the distribution, trims it, and compacts the file |
+| stop | the running containers | stops them (`docker stop`, each with its own timeout; not when `docker` there is Docker Desktop's, whose containers run in its own distribution), runs `/etc/wsl-shrinker/pre-stop.d/*`, syncs |
+| compact | | `wsl --manage <distro> --compact`: WSL stops the distribution, trims it, and compacts the file; any other file goes through Windows' virtual disk API |
 | verify | the disk file again | nothing |
 | start again | the root's mount options | starts the distribution, and the containers that were running |
 
-**Clean** builds every command itself from a fixed list in `internal/engine/survey`: `rm -rf` of a known cache folder
-under a home directory, `apt-get clean`, `journalctl --vacuum-size=100M`, `docker builder prune --all --force`,
-`docker image prune --force` (unnamed images only) and `docker image rm <id>` for an image no container uses. A test
-fails if a command there could remove a volume, a container or anything else. Ids passed on the command line are
+**Clean** builds every command itself from a fixed list in `internal/engine/survey`: emptying a known folder under a
+home directory (a tool's cache, or the trash) with `find . -xdev -mindepth 1 -delete`, run from inside the folder once
+it has checked that it is still that folder on the root filesystem, and leaving the folder itself; `apt-get clean`;
+`journalctl --vacuum-size=100M`; `docker builder prune --all --force`; `docker image prune --force` (unnamed images
+only); and `docker image rm` of every tag of an image no container uses. A test fails if a command there could remove
+a volume, a container or anything else. Ids passed on the command line are
 looked up in a fresh look inside, so only commands built this way run.
 
-**Verify** reads the file once Windows has let go of it: it must be a valid VHDX with no log left to replay, its
-filesystem must read without recorded errors, and the blocks in use may have dropped by what was cleaned and a little
-more (the journal settling, 0.5 % plus 32 MiB), never by more. A larger drop fails the run and says so.
+**Verify** reads the file once Windows has let go of it, and compares it with the disk as read right before the
+compaction, once the stop has settled it, so a file deleted after the disks were listed is not taken for data gone. It
+must be a valid VHDX (for Docker Desktop's disk and other files, with no log left to replay), its filesystem must read
+without new recorded errors, and the blocks in use may have dropped by what was cleaned and a little more (the journal
+settling, 0.5 % plus 32 MiB), never by more.
+For a distribution's disk, every block that held data and that the filesystem still uses must still be stored. That
+last comparison is left out for the other files: Windows' compaction drops blocks of zeros the filesystem uses too, and
+they read back as the zeros they were. A filesystem that recorded errors before the run stops it at the check, for
+e2fsck to see first.
 
 **Start again** checks the root is mounted read-write. When it is not, the distribution is stopped and started once
 more; if it stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, since it stops every
-distribution. Containers come back with `docker start` on the ids that were running before the stop; a container that
-was already stopped stays stopped.
+distribution. Containers come back with `docker start`, one at a time, on the ids that were running before the stop;
+one that does not start is counted, and a container that was already stopped stays stopped.
 
-A failed compaction starts the distribution again before reporting. A failed check changes nothing and is not recorded
-in the history.
+After a failed stop, a failed compaction, or a disk that could not be opened to verify it, the distribution and the
+containers that were stopped are started again before the run reports. Only a disk that does not read as before after
+the compaction is left stopped, and the run says so (see [Troubleshooting](troubleshooting.md)). A failed check changes
+nothing and is not recorded in the history. All of this is decided in one place at the end of a run, also when the
+program's own code fails (a panic): the result says how the distribution was left (`left` in the JSON: `running`,
+`stopped`, `file`, `suspect` or `down`), and the screen, the command line and the history say what it says.
+
+What can be shrunk is one rule too, which the check applies and the screen, `doctor` and `shrink` show before a run:
+a protected disk, a file that could not be read, an encrypted file, recorded filesystem errors, a file a program
+holds, a WSL without `--compact`. Protection is enforced by the run itself, whatever asked for it.
+
+### A run cut off
+
+A run keeps a journal, `run.json` next to the history: the disk, the step it reached, and the containers it stopped.
+It goes when the run ends, however it went. A run cut off on the way (the window closed, a crash, the power) leaves it
+behind, and the next start of wsl-shrinker says so: `R` on the screen, or `wsl-shrinker recover`, starts the
+distribution again, writable, with those containers. A compaction WSL is still running is left to end first. Until
+then no other run starts, and the journal also keeps two runs, in two windows, from going at once.
 
 ## From inside WSL
 
-`wsl-shrinker` in WSL is a small Linux program that hands the command line to `wsl-shrinker.exe` and passes the name
-of its distribution along (`WSLENV`). Shrinking that distribution stops it, and the terminal with it, so the run
-continues in a new window (`start`, which opens the default terminal), already confirmed. Shrinking any other
-distribution stays in the terminal.
+`wsl-shrinker` in WSL is the Linux build of the same program. The screen (`wsl-shrinker` in TUI mode, or
+`wsl-shrinker tui`) runs in it, in the Linux terminal, and asks
+`wsl-shrinker.exe` for every answer through WSL's pipes (`list --json`, `inside --json`, `history --json`, and the
+hidden `backend` command, which streams a run's steps as JSON lines): the disks are Windows' to read and to compact,
+while keys, resizing and colors stay the terminal's own, in tmux or zellij too. It does so only with the
+`wsl-shrinker.exe` of its own build; with another, or with `WSL_SHRINKER_SCREEN=windows`, the screen runs in
+`wsl-shrinker.exe` as a Windows program, which WSL gives a console of its own. Every other command line is handed to
+`wsl-shrinker.exe`, with the name of the distribution (`WSLENV`). On a first start setup runs in `wsl-shrinker.exe`, in
+the same terminal, and what it chose decides what comes next; in CLI mode `wsl-shrinker.exe` prints the disks.
+
+Before it starts `wsl-shrinker.exe` at all, the launcher reads the program's header. A build for another processor,
+an ARM64 one on an x64 PC, would be stopped by Windows with a dialog on the desktop, far from the terminal; the
+launcher says so in the terminal instead, with the command that installs the right build. An x64 build on an ARM64 PC
+runs on Windows 11 on ARM, which emulates x64, and not on Windows 10 on ARM, which emulates only 32-bit x86: there the
+launcher first asks `cmd.exe`, Windows' own program for the PC's processor, which build of Windows it is.
+
+Shrinking the distribution the terminal runs in stops it, and the terminal with it, so the run continues in a new
+window (`start`, which opens the default terminal), already confirmed, and the screen that asked waits until that
+window says it started. Shrinking any other distribution stays in the terminal. `wsl-shrinker.exe` run straight from
+WSL does not know which distribution it is in, so a shrink of any running distribution continues in a new window.

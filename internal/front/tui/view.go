@@ -11,6 +11,8 @@ import (
 
 	"github.com/kanggu12/wsl-shrinker/internal/core/units"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
@@ -78,28 +80,30 @@ func (m model) bodyHeight() int { return m.height - 4 }
 // disks could give back on the right.
 func (m model) header() string {
 	t := m.th
-	left := t.Chip("wsl-shrinker")
+	chip, version, spin := t.Chip("wsl-shrinker"), "", ""
 	if m.info.Version != "" {
-		left += ui.Fg(t.Muted).Render("  WSL " + m.info.Version)
+		version = ui.Fg(t.Muted).Render("  WSL " + m.info.Version)
 	}
 	if m.loading {
-		left += ui.Fg(t.Muted).Render(" ↻")
+		spin = ui.Fg(t.Muted).Render(" ↻")
 	}
 	var right []string
 	if m.loaded && m.err == nil && len(m.list) > 0 {
 		// What can come back now, and apart from it what a program holds
-		// (Docker Desktop's disk, until it is closed).
+		// (Docker Desktop's disk, until it is closed). A disk that cannot be
+		// shrunk now for another reason counts in neither.
 		var now, held int64
 		for _, d := range m.list {
 			switch {
 			case d.Estimate == nil || m.b.Protected(d.Name):
 			case d.Distro == "" && d.File.Held:
 				held += d.Estimate.Reclaim
-			default:
+			case m.blocked(d) == "" && d.Estimate.Reclaim >= m.b.MinGain():
+				// Worth shrinking, as the status line and CLI mode count.
 				now += d.Estimate.Reclaim
 			}
 		}
-		right = append(right, ui.Fg(t.Cat[ui.CatGain]).Render("● "+i18n.T("header.total.now", units.Bytes(now))))
+		right = append(right, ui.Fg(t.Cat[ui.CatGain]).Render(ui.Block+" "+i18n.T("header.total.now", units.Bytes(now))))
 		if held > 0 {
 			right = append(right, ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("header.held", units.Bytes(held))))
 		}
@@ -107,12 +111,28 @@ func (m model) header() string {
 			right = append(right, ui.Fg(t.Muted).Render(free))
 		}
 	}
-	r := strings.Join(right, ui.Fg(t.Rule).Render(" · "))
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(r) - 2
-	if gap < 2 {
-		return " " + left
+	// fit lays out a left side and right pieces, if they fit with a gap.
+	fit := func(left string, right []string) (string, bool) {
+		r := strings.Join(right, ui.Fg(t.Faint).Render(" · "))
+		gap := m.width - lipgloss.Width(left) - lipgloss.Width(r) - 2
+		if gap < 2 {
+			return "", false
+		}
+		return " " + left + strings.Repeat(" ", gap) + r + " ", true
 	}
-	return " " + left + strings.Repeat(" ", gap) + r + " "
+	// When it does not all fit, pieces go in this order: the drive's free
+	// space, what is in use, then WSL's version; the total stays longest.
+	for n := len(right); n > 0; n-- {
+		if line, ok := fit(chip+version+spin, right[:n]); ok {
+			return line
+		}
+	}
+	if len(right) > 0 {
+		if line, ok := fit(chip+spin, right[:1]); ok {
+			return line
+		}
+	}
+	return " " + chip + version + spin
 }
 
 // driveFree names the free space of the drive the default disk is on.
@@ -154,7 +174,7 @@ func (m model) mainView() string {
 	case m.width >= sideBySide:
 		// Table and recent runs on the left, details on the right.
 		lw := m.width * 56 / 100
-		left := append(m.table(lw), "")
+		left := append(m.table(lw, m.tableRows()), "")
 		left = append(left, m.recent(lw, h-len(left))...)
 		right := m.details(m.width-lw-3, h)
 		for i := 0; i < h; i++ {
@@ -168,9 +188,12 @@ func (m model) mainView() string {
 			body = append(body, ui.Fit(l, lw)+" "+ui.Fg(t.Rule).Render("│")+" "+r)
 		}
 	default:
-		// Narrow: the table, then as much of the details as fits.
-		body = append(m.table(m.width), "")
-		body = append(body, m.details(m.width-2, h-len(body))...)
+		// Narrow: the table, then as much of the details as fits, one cell
+		// in, where the table's rows start.
+		body = append(m.table(m.width, m.tableRows()), "")
+		for _, l := range m.details(m.width-2, h-len(body)) {
+			body = append(body, " "+l)
+		}
 	}
 	screen := m.page(body, m.statusLine(), m.footer())
 	if m.mode == modeConfirm {
@@ -193,36 +216,106 @@ func (m model) centered(h int, lines ...string) []string {
 
 // category says what a disk's color means.
 func (m model) category(d disks.Disk) ui.Category {
-	switch {
-	case m.b.Protected(d.Name):
+	switch m.block(d) {
+	case shrink.BlockProtected:
 		return ui.CatSafe
-	case d.Estimate == nil || d.File.Encrypted:
-		return ui.CatBad
-	case d.Distro == "" && d.File.Held:
+	case shrink.BlockHeld:
 		// In use by its program: it can be shrunk once that program stops.
 		return ui.CatLive
-	case d.Estimate.Reclaim >= m.b.MinGain():
-		return ui.CatGain
+	case "":
+		// Nothing in the way: what it gives back decides.
+		if d.Estimate.Reclaim >= m.b.MinGain() {
+			return ui.CatGain
+		}
+		return ui.CatSmall
 	}
-	return ui.CatSmall
+	// Any other reason is one it cannot be shrunk for now.
+	return ui.CatBad
 }
 
-// table is the disks, one row each, w cells wide.
-func (m model) table(w int) []string {
-	t := m.th
-	// Fixed columns; the name takes what is left.
+// sizeW and barW are the widths of a size column and of a row's bar.
+const sizeW, barW = 8, 6
+
+// columns is which of the table's columns fit a width, and how wide its
+// name and state columns are.
+type columns struct {
+	nameW, stateW           int
+	state, file, after, bar bool
+}
+
+// tableColumns drops columns until a row fits w cells, the least needed
+// first: the bar, the size after, the file's size, the state. What a shrink
+// frees always stays.
+func tableColumns(w int) columns {
+	c := columns{state: true, file: true, after: true, bar: true}
 	// The state column fits its longest word in the language in use.
-	stateW := 0
 	for _, k := range []string{"col.state", "state.running", "state.stopped", "state.inuse", "state.file"} {
-		stateW = max(stateW, lipgloss.Width(i18n.T(k)))
+		c.stateW = max(c.stateW, lipgloss.Width(i18n.T(k)))
 	}
-	const sizeW, barW = 8, 6
-	// 5 cells lead a row (space, mark, space, dot, space), 10 go to gaps.
-	nameW := min(28, max(10, w-5-stateW-3*sizeW-barW-10))
-	head := "    " + ui.Fit(i18n.T("col.disk"), nameW) + "  " + ui.Fit(i18n.T("col.state"), stateW) + "  " +
-		ui.FitRight(i18n.T("col.file"), sizeW) + "  " + ui.FitRight(i18n.T("col.after"), sizeW) + "  " +
-		ui.FitRight(i18n.T("col.frees"), sizeW)
-	lines := []string{lipgloss.NewStyle().Foreground(t.Muted).Bold(true).Render(head)}
+	for {
+		// 5 cells lead a row (space, mark, space, dot, space); every column
+		// after the name takes its width and a gap of 2.
+		used := 5 + 2 + sizeW
+		if c.state {
+			used += 2 + c.stateW
+		}
+		if c.file {
+			used += 2 + sizeW
+		}
+		if c.after {
+			used += 2 + sizeW
+		}
+		if c.bar {
+			used += 2 + barW
+		}
+		c.nameW = min(28, w-used)
+		switch {
+		case c.nameW >= 10:
+			return c
+		case c.bar:
+			c.bar = false
+		case c.after:
+			c.after = false
+		case c.file:
+			c.file = false
+		case c.state:
+			c.state = false
+		default:
+			// Nothing left to drop: the name takes what remains.
+			c.nameW = max(1, c.nameW)
+			return c
+		}
+	}
+}
+
+// cells joins a row's columns, as many as fit.
+func (c columns) cells(name, state, file, after, frees, bar string) string {
+	s := ui.Fit(name, c.nameW)
+	if c.state {
+		s += "  " + ui.Fit(state, c.stateW)
+	}
+	if c.file {
+		s += "  " + ui.FitRight(file, sizeW)
+	}
+	if c.after {
+		s += "  " + ui.FitRight(after, sizeW)
+	}
+	s += "  " + ui.FitRight(frees, sizeW)
+	if c.bar {
+		s += "  " + bar
+	}
+	return s
+}
+
+// table is the disks, one row each, w cells wide, at most rows of them: a
+// longer list shows the window around the selected disk.
+func (m model) table(w, rows int) []string {
+	t := m.th
+	c := tableColumns(w)
+	// The heading starts where the names do, after the 5 cells that lead a row.
+	head := "     " + c.cells(i18n.T("col.disk"), i18n.T("col.state"), i18n.T("col.file"), i18n.T("col.after"),
+		i18n.T("col.frees"), "")
+	lines := []string{lipgloss.NewStyle().Foreground(t.Muted).Bold(true).Render(strings.TrimRight(head, " "))}
 	// The bars share one scale: the disk that gives back most fills its bar.
 	var most int64
 	for _, d := range m.list {
@@ -230,7 +323,9 @@ func (m model) table(w int) []string {
 			most = max(most, d.Estimate.Reclaim)
 		}
 	}
-	for i, d := range m.list {
+	top := m.tableWindow(rows)
+	for i := top; i < len(m.list) && i < top+rows; i++ {
+		d := m.list[i]
 		cat := m.category(d)
 		mark := "  "
 		if m.marked[d.Name] {
@@ -242,10 +337,7 @@ func (m model) table(w int) []string {
 			file, after, frees = units.Bytes(e.FileSize), units.Bytes(e.After), units.Bytes(e.Reclaim)
 			bar = t.Bar(barW, most, ui.Part{Value: e.Reclaim, Color: t.Cat[cat]})
 		}
-		name := d.Name
-		row := " " + mark + t.Dot(cat) + " " + ui.Fit(name, nameW) + "  " + ui.Fit(m.stateWord(d), stateW) + "  " +
-			ui.FitRight(file, sizeW) + "  " + ui.FitRight(after, sizeW) + "  " +
-			ui.FitRight(ui.Fg(t.Cat[cat]).Render(frees), sizeW) + "  " + bar
+		row := " " + mark + t.Dot(cat) + " " + c.cells(d.Name, m.stateWord(d), file, after, ui.Fg(t.Cat[cat]).Render(frees), bar)
 		if i == m.sel {
 			row = ui.Highlight(row, t.Selected, w)
 		}
@@ -258,7 +350,9 @@ func (m model) table(w int) []string {
 func (m model) stateWord(d disks.Disk) string {
 	t := m.th
 	switch {
-	case d.Kind == disks.KindDocker && d.File.Held:
+	case d.Distro == "" && d.File.Held:
+		// Docker Desktop's disk, or a file from the settings another program
+		// has open.
 		return ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("state.inuse"))
 	case d.Kind != disks.KindDistro:
 		return ui.Fg(t.Muted).Render(i18n.T("state.file"))
@@ -304,20 +398,38 @@ func (m model) details(w, h int) []string {
 	lines := []string{bold.Render(d.Name) + ui.Fg(t.Muted).Render("  "+m.kindWords(d))}
 	// The verdict, in the disk's color.
 	var verdict string
-	switch {
-	case m.b.Protected(d.Name):
+	switch m.block(d) {
+	case shrink.BlockProtected:
 		verdict = i18n.T("verdict.protected")
-	case d.Estimate == nil:
+	case shrink.BlockUnreadable:
 		verdict = i18n.T("verdict.unreadable")
-	case d.Distro == "" && d.File.Held:
-		verdict = i18n.T("verdict.held", units.Bytes(d.Estimate.Reclaim))
-	case cat == ui.CatGain:
-		verdict = i18n.T("verdict.gain", units.Bytes(d.Estimate.Reclaim))
-	default:
-		verdict = i18n.T("verdict.small", units.Bytes(d.Estimate.Reclaim))
+	case shrink.BlockHeld:
+		verdict = i18n.T(heldKey(d, "verdict.held"), units.Bytes(d.Estimate.Reclaim))
+	case shrink.BlockEncrypted:
+		verdict = i18n.T("verdict.encrypted", units.Bytes(d.Estimate.Reclaim))
+	case shrink.BlockFSErrors:
+		verdict = i18n.T("verdict.fserrors", units.Bytes(d.Estimate.Reclaim))
+	case shrink.BlockNoCompact:
+		verdict = i18n.T("verdict.nocompact", units.Bytes(d.Estimate.Reclaim))
+	case "":
+		if cat == ui.CatGain {
+			verdict = i18n.T("verdict.gain", units.Bytes(d.Estimate.Reclaim))
+		} else {
+			verdict = i18n.T("verdict.small", units.Bytes(d.Estimate.Reclaim))
+		}
 	}
-	// The verdict wraps rather than lose its end.
-	lines = append(lines, m.wrapTo(verdict, w, "", ui.Fg(t.Cat[cat]).Bold(true))...)
+	// The verdict wraps rather than lose its end; in a pane too short for
+	// all of it, the last line that fits ends where it was cut.
+	vst := ui.Fg(t.Cat[cat]).Bold(true)
+	vl := m.wrapTo(verdict, w, "", vst)
+	if room := h - len(lines); room > 0 && len(vl) > room {
+		rest := make([]string, 0, len(vl)-room+1)
+		for _, l := range vl[room-1:] {
+			rest = append(rest, ansi.Strip(l))
+		}
+		vl = append(vl[:room-1], vst.Render(ui.Fit(strings.Join(rest, " "), w)))
+	}
+	lines = append(lines, vl...)
 	// The rest goes in sections, each whole or not at all, so a short
 	// window never shows a heading without what is under it. The path
 	// goes last, when there is room.
@@ -334,10 +446,16 @@ func (m model) details(w, h int) []string {
 		bw := min(w-2, 44)
 		sec := []string{section(i18n.T("details.space")),
 			// The part that stays in plain grey; the part that goes in the
-			// disk's own color (yellow, or purple when protected).
-			" " + t.Bar(bw, e.FileSize, ui.Part{Value: e.After, Color: t.Cat[ui.CatSmall]}, ui.Part{Value: e.Reclaim, Color: t.Cat[cat]}),
-			" " + ui.Fg(t.Cat[ui.CatSmall]).Render("●") + " " + i18n.T("details.stays", units.Bytes(e.After)) + "   " +
-				ui.Fg(t.Cat[cat]).Render("●") + " " + goesWords(m.b.Protected(d.Name), e.Reclaim)}
+			// disk's own color (teal, or pink when protected).
+			" " + t.Bar(bw, e.FileSize, ui.Part{Value: e.After, Color: t.Stays}, ui.Part{Value: e.Reclaim, Color: t.Cat[cat]})}
+		// Side by side, or one under the other when that does not fit.
+		stays := " " + ui.Fg(t.Stays).Render(ui.Block) + " " + i18n.T("details.stays", units.Bytes(e.After))
+		goes := ui.Fg(t.Cat[cat]).Render(ui.Block) + " " + goesWords(m.b.Protected(d.Name), e.Reclaim)
+		if lipgloss.Width(stays+"   "+goes) <= w {
+			sec = append(sec, stays+"   "+goes)
+		} else {
+			sec = append(sec, stays, " "+goes)
+		}
 		if e.Filesystem {
 			sec = append(sec, ui.Fg(t.Muted).Render(" "+i18n.T("details.used", units.Bytes(e.Used))))
 		}
@@ -346,7 +464,7 @@ func (m model) details(w, h int) []string {
 	// The checks a run makes first, as they stand now.
 	checks := []string{section(i18n.T("details.checks"))}
 	for _, c := range m.checks(d) {
-		checks = append(checks, m.wrapTo(c, w, " ", lipgloss.NewStyle())...)
+		checks = append(checks, m.wrapHang(c, w, " ", "   ", lipgloss.NewStyle())...)
 	}
 	add(checks)
 	// The inside of a running distribution: the findings take the rows left
@@ -371,6 +489,16 @@ func (m model) details(w, h int) []string {
 	return lines
 }
 
+// heldKey is the key of a message about a disk a program holds: Docker
+// Desktop holds its own disk; for a file from the settings, it is another
+// program.
+func heldKey(d disks.Disk, key string) string {
+	if d.Kind == disks.KindDocker {
+		return key
+	}
+	return key + ".file"
+}
+
 // kindWords says what a disk belongs to.
 func (m model) kindWords(d disks.Disk) string {
 	switch {
@@ -389,7 +517,9 @@ func (m model) checks(d disks.Disk) []string {
 	t := m.th
 	ok := func(s string) string { return ui.Fg(t.Cat[ui.CatDone]).Render("✓") + " " + s }
 	bad := func(s string) string { return ui.Fg(t.Cat[ui.CatBad]).Render("✗") + " " + s }
-	note := func(s string) string { return ui.Fg(t.Cat[ui.CatGain]).Render("!") + " " + s }
+	// In use by its program: indigo, as the disk shows everywhere else.
+	inUse := func(s string) string { return ui.Fg(t.Cat[ui.CatLive]).Render(ui.Block) + " " + s }
+	note := func(s string) string { return ui.Fg(t.Cat[ui.CatWarn]).Render("!") + " " + s }
 	var out []string
 	if d.Estimate == nil {
 		return []string{bad(i18n.T("check.unreadable", oneLine(d.Err)))}
@@ -397,11 +527,11 @@ func (m model) checks(d disks.Disk) []string {
 	if d.Distro != "" {
 		if m.info.CanCompact {
 			out = append(out, ok(i18n.T("check.compact", m.info.Version)))
-		} else if m.info.Version != "" {
+		} else if m.infoKnown {
 			out = append(out, bad(i18n.T("check.nocompact")))
 		}
 	} else if d.File.Held {
-		out = append(out, bad(i18n.T("check.held")))
+		out = append(out, inUse(i18n.T(heldKey(d, "check.held"))))
 	} else {
 		out = append(out, ok(i18n.T("check.free")))
 	}
@@ -412,6 +542,10 @@ func (m model) checks(d disks.Disk) []string {
 		out = append(out, note(i18n.T("check.sparse")))
 	}
 	switch {
+	case d.Estimate.FSErrors:
+		// Errors the kernel recorded: the run refuses the disk until e2fsck
+		// has checked it, so this line takes the place of how it read.
+		out = append(out, bad(i18n.T("check.fserrors")))
 	case d.Estimate.InUse && d.Estimate.Mounted:
 		out = append(out, note(i18n.T("check.live")))
 	case d.Estimate.InUse:
@@ -437,7 +571,9 @@ func (m model) inside(d disks.Disk, w, rows int) []string {
 	case s == nil || s.loading:
 		return []string{ui.Fg(t.Muted).Render(" " + spinner[m.spin%len(spinner)] + " " + i18n.T("inside.loading"))}
 	case s.err != nil:
-		return []string{ui.Fg(t.Cat[ui.CatBad]).Render(" " + i18n.T("inside.failed", oneLine(s.err.Error())))}
+		// The reason wraps rather than lose its end, up to a few lines.
+		lines := m.wrapTo(i18n.T("inside.failed", oneLine(s.err.Error())), w, " ", ui.Fg(t.Cat[ui.CatBad]))
+		return lines[:min(len(lines), 4)]
 	case len(s.r.Items) == 0:
 		return []string{ui.Fg(t.Muted).Render(" " + i18n.T("inside.nothing"))}
 	}
@@ -519,6 +655,17 @@ func (m model) statusLine() string {
 	if !m.loaded || m.err != nil || len(m.list) == 0 {
 		return ""
 	}
+	// A run that has not ended matters more than the counts.
+	switch m.unfinishedState {
+	case journal.CutOff:
+		step := i18n.T("step." + m.unfinished.Step)
+		if m.unfinished.Step == "" || m.unfinished.Disk == "" {
+			return " " + ui.Fg(t.Cat[ui.CatWarn]).Render(i18n.T("unfinished.unknown"))
+		}
+		return " " + ui.Fg(t.Cat[ui.CatWarn]).Render(i18n.T("unfinished.cutoff", m.unfinished.Disk, step))
+	case journal.Going:
+		return " " + ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("unfinished.going", m.unfinished.Disk))
+	}
 	worth := 0
 	for _, d := range m.list {
 		if m.category(d) == ui.CatGain {
@@ -535,22 +682,33 @@ func (m model) statusLine() string {
 // footer is the keys of the main screen.
 func (m model) footer() string {
 	if m.mode == modeConfirm {
-		return m.keyBar([][2]string{{"⏎", i18n.T("key.shrink")}, {"c", i18n.T("key.chooseinside")}, {"esc", i18n.T("key.cancel")}})
+		keys := [][2]string{{"⏎", i18n.T("key.shrink")}}
+		if m.choosable(m.queueFor()) {
+			keys = append(keys, [2]string{"c", i18n.T("key.chooseinside")})
+		}
+		return m.keyBar(append(keys, [2]string{"esc", i18n.T("key.cancel")}))
 	}
 	// With no disk on screen, the keys that act on one do nothing.
 	if !m.loaded || m.err != nil || len(m.list) == 0 {
 		return m.keyBar([][2]string{{"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")}, {"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")}})
 	}
-	return m.keyBar([][2]string{
+	keys := [][2]string{
 		{"↑↓", i18n.T("key.select")}, {"space", i18n.T("key.mark")}, {"s", m.shrinkKey()},
 		{"c", i18n.T("key.clean")}, {"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")},
 		{"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")},
-	})
+	}
+	// A run cut off is finished first: its key leads, and never drops.
+	if m.unfinishedState == journal.CutOff {
+		keys = append([][2]string{{"R", i18n.T("key.recover")}}, keys...)
+	}
+	return m.keyBar(keys)
 }
 
 // dropOrder is which keys leave the footer first when it does not fit; the
-// help screen lists them all.
-var dropOrder = []string{"↑↓", "r", "h", "space", "?", "c"}
+// help screen lists them all. A screen's main keys come last: space marks
+// on the disks and chooses in the clean list, where a, n and esc go before
+// it, as the way to choose shows nowhere else.
+var dropOrder = []string{"↑↓", "r", "h", "a", "n", "esc", "space", "?", "c"}
 
 // keyBar joins keycaps to fit the width, dropping the least needed first.
 func (m model) keyBar(keys [][2]string) string {
@@ -590,23 +748,59 @@ func (m model) overlay(screen, box string) string {
 // box draws a dialog: an opaque panel with a rounded border.
 func (m model) box(border ui.Category, lines ...string) string {
 	w := min(70, m.width-4)
-	body := lipgloss.NewStyle().Width(w - 4).Foreground(m.th.Ink).Render(strings.Join(lines, "\n"))
+	// The text wraps once, at the width inside the border (2 cells) and the
+	// padding (4): lipgloss's Width counts both, so a wider body would wrap
+	// again and leave a word alone on a line.
+	body := lipgloss.NewStyle().Width(w - 6).Foreground(m.th.Ink).Render(strings.Join(lines, "\n"))
 	return lipgloss.NewStyle().BorderForeground(m.th.Cat[border]).Border(lipgloss.RoundedBorder()).Padding(0, 2).Width(w).Render(body)
+}
+
+// boxLine is one line of a dialog; drop says how early it goes when the
+// dialog is taller than the screen, higher first (0: never).
+type boxLine struct {
+	s    string
+	drop int
+}
+
+// fitBox draws a dialog no taller than the screen: while it is taller, the
+// line with the highest drop goes, the last of them first.
+func (m model) fitBox(border ui.Category, lines []boxLine) string {
+	for {
+		texts := make([]string, len(lines))
+		worst, at := 0, -1
+		for i, l := range lines {
+			texts[i] = l.s
+			if l.drop > 0 && l.drop >= worst {
+				worst, at = l.drop, i
+			}
+		}
+		box := m.box(border, texts...)
+		if lipgloss.Height(box) <= m.height || at < 0 {
+			return box
+		}
+		lines = append(lines[:at:at], lines[at+1:]...)
+	}
 }
 
 // confirmBox asks before a run, saying what it will do.
 func (m model) confirmBox() string {
 	t := m.th
 	q := m.queueFor()
-	var lines []string
+	// Blank lines go first on a small screen, then the notes, least needed
+	// first; the title, the sizes, what stops and the keys always stay.
+	const blank, others, notes, list, clean = 5, 4, 3, 2, 1
+	var lines []boxLine
+	add := func(s string, drop int) { lines = append(lines, boxLine{s, drop}) }
 	title := lipgloss.NewStyle().Bold(true).Foreground(t.Ink)
 	if len(q) == 1 {
-		lines = append(lines, title.Render(i18n.T("confirm.title", q[0].Name)), "")
+		add(title.Render(i18n.T("confirm.title", q[0].Name)), 0)
 	} else {
-		lines = append(lines, title.Render(i18n.T("confirm.title.n", len(q))), "")
+		add(title.Render(i18n.T("confirm.title.n", len(q))), 0)
 	}
+	add("", blank)
 	var gain, cleaned int64
 	running, containers, known := 0, 0, true
+	runningName := ""
 	for _, d := range q {
 		if d.Estimate != nil {
 			gain += d.Estimate.Reclaim
@@ -618,6 +812,7 @@ func (m model) confirmBox() string {
 		}
 		if d.Running && d.Distro != "" {
 			running++
+			runningName = d.Name
 			// Without a look inside, how many containers run is unknown.
 			if s := m.surveys[d.Distro]; s != nil && !s.loading && s.err == nil {
 				containers += s.r.Containers
@@ -626,60 +821,79 @@ func (m model) confirmBox() string {
 			}
 		}
 		if len(q) > 1 && d.Estimate != nil {
-			lines = append(lines, " • "+d.Name+ui.Fg(t.Muted).Render("  "+i18n.T("confirm.each", units.Bytes(d.Estimate.Reclaim))))
+			add(" • "+d.Name+ui.Fg(t.Muted).Render("  "+i18n.T("confirm.each", units.Bytes(d.Estimate.Reclaim))), list)
 		}
 	}
 	if len(q) > 1 {
-		lines = append(lines, "")
+		add("", blank)
 	}
 	// What comes back is the estimate plus what is removed inside first:
 	// both leave the file.
 	if len(q) == 1 && q[0].Estimate != nil {
 		e := q[0].Estimate
-		lines = append(lines, ui.Fg(t.Cat[ui.CatGain]).Bold(true).Render(i18n.T("confirm.sizes", units.Bytes(e.FileSize), units.Bytes(max(0, e.After-cleaned)), units.Bytes(e.Reclaim+cleaned))))
+		add(ui.Fg(t.Cat[ui.CatGain]).Bold(true).Render(i18n.T("confirm.sizes", units.Bytes(e.FileSize), units.Bytes(max(0, e.After-cleaned)), units.Bytes(e.Reclaim+cleaned))), 0)
 	} else {
-		lines = append(lines, ui.Fg(t.Cat[ui.CatGain]).Bold(true).Render(i18n.T("confirm.total", units.Bytes(gain+cleaned))))
+		add(ui.Fg(t.Cat[ui.CatGain]).Bold(true).Render(i18n.T("confirm.total", units.Bytes(gain+cleaned))), 0)
 	}
 	if cleaned > 0 {
-		lines = append(lines, i18n.T("confirm.clean", units.Bytes(cleaned)))
+		add(i18n.T("confirm.clean", units.Bytes(cleaned)), clean)
 	}
+	// What stops: with several disks and one of them running, by its name,
+	// since "it" would not say which.
 	switch {
 	case running == 0:
+	case len(q) > 1 && running == 1 && !known:
+		add(i18n.T("confirm.stops.of.unknown", runningName), 0)
+	case len(q) > 1 && running == 1 && containers == 0:
+		add(i18n.T("confirm.stops.of.none", runningName), 0)
+	case len(q) > 1 && running == 1:
+		add(i18n.TN("confirm.stops.of", containers, runningName, containers), 0)
 	case !known:
-		lines = append(lines, i18n.TN("confirm.stops.unknown", running))
+		add(i18n.TN("confirm.stops.unknown", running), 0)
 	case running > 1:
-		lines = append(lines, i18n.T("confirm.stops.many", containers))
+		add(i18n.T("confirm.stops.many", containers), 0)
 	case containers == 0:
-		lines = append(lines, i18n.T("confirm.stops.none"))
+		add(i18n.T("confirm.stops.none"), 0)
 	default:
-		lines = append(lines, i18n.TN("confirm.stops", containers, containers))
+		add(i18n.TN("confirm.stops", containers, containers), 0)
 	}
 	// A failure stops the disks after it: say so before several go.
 	if len(q) > 1 {
-		lines = append(lines, ui.Fg(t.Muted).Render(i18n.T("confirm.order")))
+		add(ui.Fg(t.Muted).Render(i18n.T("confirm.order")), notes)
 	}
 	// A running distribution with findings and none chosen: say c chooses,
 	// once, before it is too late to.
-	if len(q) == 1 && q[0].Running && q[0].Distro != "" && cleaned == 0 {
-		if s := m.surveys[q[0].Distro]; s != nil && len(s.r.Items) > 0 {
-			var found int64
-			for _, it := range s.r.Items {
-				found += it.Bytes
-			}
-			lines = append(lines, ui.Fg(t.Muted).Render(i18n.T("confirm.nothing", units.Bytes(found))))
+	if m.choosable(q) && cleaned == 0 {
+		var found int64
+		for _, it := range m.surveys[q[0].Distro].r.Items {
+			found += it.Bytes
 		}
+		add(ui.Fg(t.Muted).Render(i18n.T("confirm.nothing", units.Bytes(found))), notes)
 	}
-	lines = append(lines, ui.Fg(t.Muted).Render(i18n.T("confirm.others")))
+	add(ui.Fg(t.Muted).Render(i18n.T("confirm.others")), others)
 	if m.hostsAny(q) {
-		lines = append(lines, "", ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("confirm.window")))
+		add("", blank)
+		add(ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("confirm.window")), 0)
 	}
-	keys := t.KeyCap("⏎", i18n.T("key.shrink"))
-	// c is offered where there is something inside to choose from.
-	if len(q) == 1 && q[0].Running && q[0].Distro != "" {
-		keys += "   " + t.KeyCap("c", i18n.T("key.chooseinside"))
+	// The keys on one line: the screen behind is dimmed, so they are said
+	// here. c, offered where there is something inside to choose from,
+	// goes first when the box is narrow, then the space between keys.
+	inner := min(70, m.width-4) - 6
+	keys := []string{t.KeyCap("⏎", i18n.T("key.shrink"))}
+	if m.choosable(q) {
+		keys = append(keys, t.KeyCap("c", i18n.T("key.chooseinside")))
 	}
-	lines = append(lines, "", keys+"   "+t.KeyCap("esc", i18n.T("key.cancel")))
-	return m.box(ui.CatGain, lines...)
+	keys = append(keys, t.KeyCap("esc", i18n.T("key.cancel")))
+	line := strings.Join(keys, "   ")
+	if lipgloss.Width(line) > inner {
+		line = strings.Join(keys, "  ")
+	}
+	if lipgloss.Width(line) > inner && len(keys) == 3 {
+		line = keys[0] + "  " + keys[2]
+	}
+	add("", blank)
+	add(line, 0)
+	return m.fitBox(ui.CatGain, lines)
 }
 
 // hostsAny reports whether a run would stop the distribution this
@@ -699,13 +913,30 @@ func (m model) wrap(s, indent string, st lipgloss.Style) []string {
 	return m.wrapTo(s, m.width, indent, st)
 }
 
-// wrapTo is wrap for a column w cells wide. A line already styled keeps its
-// colors; continuation lines are indented one more cell.
+// amountRe matches an amount and its unit ("67.4 GB"), which a line must not
+// part.
+var amountRe = regexp.MustCompile(`(\d) (B|KB|MB|GB|TB)\b`)
+
+// wrapTo is wrap for a column w cells wide, every line after indent. A line
+// already styled keeps its colors.
 func (m model) wrapTo(s string, width int, indent string, st lipgloss.Style) []string {
-	w := max(10, width-lipgloss.Width(indent)-1)
+	return m.wrapHang(s, width, indent, indent, st)
+}
+
+// wrapHang is wrapTo with the first line after first and the lines after it
+// after rest: a check's continuation starts under its words, not its mark.
+func (m model) wrapHang(s string, width int, first, rest string, st lipgloss.Style) []string {
+	w := max(10, width-max(lipgloss.Width(first), lipgloss.Width(rest))-1)
+	// A no-break space holds each amount to its unit while the text wraps.
+	s = amountRe.ReplaceAllString(s, "$1\u00a0$2")
 	var out []string
 	for l := range strings.SplitSeq(lipgloss.NewStyle().Width(w).Render(s), "\n") {
-		out = append(out, indent+st.Render(strings.TrimRight(l, " ")))
+		l = strings.ReplaceAll(strings.TrimRight(l, " "), "\u00a0", " ")
+		lead := rest
+		if len(out) == 0 {
+			lead = first
+		}
+		out = append(out, lead+st.Render(l))
 	}
 	return out
 }

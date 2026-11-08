@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kanggu12/wsl-shrinker/internal/testutil/vhdxtest"
 )
@@ -298,5 +299,39 @@ func TestCompactedSize(t *testing.T) {
 	}
 	if got := d.CompactedSize(400 << 10); got != (12<<20)+(400<<30) {
 		t.Fatalf("BAT at 120 GiB, many blocks: got %d", got)
+	}
+}
+
+func TestDamagedLogIsReadInBoundedTime(t *testing.T) {
+	// A damaged log where every sector looks like the start of an entry as
+	// long as the whole log: each would be checksummed in full, so the work
+	// grows with the square of the log's size. It must stay bounded.
+	const logLen = 16 << 20
+	id := bytes.Repeat([]byte{0xab}, 16)
+	log := make([]byte, logLen)
+	for at := 0; at < logLen; at += logSector {
+		copy(log[at:at+4], "loge")
+		binary.LittleEndian.PutUint32(log[at+8:at+12], logLen)
+		copy(log[at+32:at+48], id)
+	}
+	start := time.Now()
+	_, _, _, err := replay(bytes.NewReader(log), logLen, id, 0, logLen)
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("took %v (err %v)", took, err)
+	}
+}
+
+func TestDamagedLogFieldsAreRefused(t *testing.T) {
+	// A header naming a log outside the file, with no log in use: refused,
+	// rather than counted in the compacted size.
+	if _, err := open(t, vhdxtest.Spec{VirtualSize: 4 << 20, HeaderLogOffset: 1 << 62}); err == nil {
+		t.Fatal("a log region past the end of the file was accepted")
+	}
+	// A log entry claiming the file is far longer than it is: refused,
+	// rather than taken as the file's size (which would let a BAT entry
+	// point anywhere).
+	data := []byte("in the log")
+	if _, err := open(t, vhdxtest.Spec{VirtualSize: 8 << 20, Blocks: map[int64][]byte{3: data}, InLogOnly: []int64{3}, LastFileOffset: 1 << 50}); err == nil {
+		t.Fatal("a log claiming a 1 PiB file was accepted")
 	}
 }

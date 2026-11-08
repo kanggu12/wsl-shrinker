@@ -2,8 +2,11 @@ package vhdx
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
+	"sort"
 )
 
 // The log (MS-VHDX 2.3) holds metadata writes (headers excepted: BAT and
@@ -91,21 +94,38 @@ func replay(r io.ReaderAt, size int64, logID []byte, logOff, logLen int64) (io.R
 	if _, err := r.ReadAt(log, logOff); err != nil {
 		return nil, 0, 0, fmt.Errorf("vhdx: reading the log: %w", err)
 	}
-	// Every sector may start an entry; keep the ones that check out.
+	// Every sector may start an entry; keep the ones that check out. In a
+	// real log the entries do not overlap, so checksumming them all reads
+	// the log about once (twice with an older log's entries left between).
+	// A damaged log can make every sector claim an entry as long as the log,
+	// which would read it once per sector: past four times the log, it is
+	// refused instead.
 	entries := map[int64]*logEntry{}
+	budget := 4 * logLen
 	for at := int64(0); at < logLen; at += logSector {
-		if e := parseEntry(log, at, logID); e != nil {
+		e, ok := parseEntry(log, at, logID, &budget)
+		if !ok {
+			return nil, 0, 0, errors.New("vhdx: the log is damaged (its entries overlap far more than a log's do)")
+		}
+		if e != nil {
 			entries[at] = e
 		}
 	}
 	// The active sequence is the valid one whose head has the highest
 	// sequence number: from the head's tail, each entry follows the one
 	// before it in the log with the next sequence number, up to the head.
+	// Heads are tried from the highest number down, so the first valid
+	// sequence is the one wanted and the rest are never walked.
+	heads := make([]*logEntry, 0, len(entries))
+	for _, e := range entries {
+		heads = append(heads, e)
+	}
+	sort.Slice(heads, func(i, j int) bool { return heads[i].seq > heads[j].seq })
 	var best []*logEntry
-	for _, head := range entries {
-		seqs := sequence(entries, head, logLen)
-		if seqs != nil && (best == nil || head.seq > best[len(best)-1].seq) {
+	for _, head := range heads {
+		if seqs := sequence(entries, head, logLen); seqs != nil {
 			best = seqs
+			break
 		}
 	}
 	if best == nil {
@@ -129,7 +149,13 @@ func replay(r io.ReaderAt, size int64, logID []byte, logOff, logLen int64) (io.R
 		return nil, 0, 0, fmt.Errorf("vhdx: the log writes %d pages, more than a log holds", pages)
 	}
 	for _, e := range best {
-		// The file was at least this long when the entry was written.
+		// The file was at least this long when the entry was written. A log
+		// may extend the file by what it writes, never by more: a larger
+		// claim is damage, and taken as the size it would let a BAT entry
+		// point anywhere past the real end.
+		if e.last > size+maxPages*logSector {
+			return nil, 0, 0, fmt.Errorf("vhdx: the log says the file is %d bytes, far past its %d", e.last, size)
+		}
 		o.size = max(o.size, e.last)
 		for _, w := range e.writes {
 			// Apply the write page by page, in log order.
@@ -170,41 +196,49 @@ func sequence(entries map[int64]*logEntry, head *logEntry, logLen int64) []*logE
 	return nil
 }
 
-// parseEntry reads the entry at offset at of the log, or returns nil if
-// there is no valid entry there for this log GUID.
-func parseEntry(log []byte, at int64, logID []byte) *logEntry {
+// parseEntry reads the entry at offset at of the log. It returns nil if
+// there is no valid entry there for this log GUID, and false when checking
+// it would take the bytes it may still checksum (budget) below zero.
+func parseEntry(log []byte, at int64, logID []byte, budget *int64) (*logEntry, bool) {
 	logLen := int64(len(log))
-	// The entry may wrap past the end of the log back to its start.
-	read := func(off, n int64) []byte {
-		b := make([]byte, n)
-		for i := range n {
-			b[i] = log[(off+i)%logLen]
-		}
-		return b
-	}
 	h := log[at : at+entryHeader]
 	if string(h[0:4]) != "loge" {
-		return nil
+		return nil, true
 	}
 	length := int64(binary.LittleEndian.Uint32(h[8:12]))
 	tail := int64(binary.LittleEndian.Uint32(h[12:16]))
 	count := int64(binary.LittleEndian.Uint32(h[24:28]))
 	// Lengths are whole sectors that fit in the log, the tail is a sector.
 	if length < logSector || length%logSector != 0 || length > logLen || tail%logSector != 0 || tail >= logLen {
-		return nil
+		return nil, true
 	}
 	// An entry of another log (an older one) does not count.
 	if string(h[32:48]) != string(logID) {
-		return nil
+		return nil, true
 	}
-	whole := read(at, length)
-	if !checksumOK(whole, 4) {
-		return nil
+	// Checksumming the entry reads all of it: charge it to the budget.
+	if *budget -= length; *budget < 0 {
+		return nil, false
 	}
+	// The entry may wrap past the end of the log back to its start: it is
+	// at most two stretches of the log, checksummed in place. The checksum
+	// field (bytes 4 to 8, never split, as the entry starts on a sector) is
+	// taken as zero.
+	first := log[at:min(at+length, logLen)]
+	rest := log[:length-int64(len(first))]
+	sum := crc32.Update(0, castagnoli, first[0:4])
+	sum = crc32.Update(sum, castagnoli, make([]byte, 4))
+	sum = crc32.Update(sum, castagnoli, first[8:])
+	sum = crc32.Update(sum, castagnoli, rest)
+	if sum != binary.LittleEndian.Uint32(h[4:8]) {
+		return nil, true
+	}
+	// A valid entry is copied out whole, for its descriptors and data.
+	whole := append(append(make([]byte, 0, length), first...), rest...)
 	// Descriptors fill whole sectors after the header; data sectors follow.
 	descSectors := (entryHeader + count*descSize + logSector - 1) / logSector
 	if count > (length/logSector)*(logSector/descSize) || descSectors*logSector > length {
-		return nil
+		return nil, true
 	}
 	e := &logEntry{
 		at: at, length: length, tail: tail,
@@ -218,28 +252,28 @@ func parseEntry(log []byte, at int64, logID []byte) *logEntry {
 		off := int64(binary.LittleEndian.Uint64(d[16:24]))
 		// Every descriptor carries the entry's sequence number.
 		if binary.LittleEndian.Uint64(d[24:32]) != e.seq || off < 0 || off%logSector != 0 {
-			return nil
+			return nil, true
 		}
 		switch string(d[0:4]) {
 		case "zero":
 			// A run of zeros, in whole sectors.
 			n := int64(binary.LittleEndian.Uint64(d[8:16]))
 			if n <= 0 || n%logSector != 0 || n > maxZeroRun {
-				return nil
+				return nil, true
 			}
 			e.writes = append(e.writes, logWrite{off: off, length: n})
 		case "desc":
 			// One 4 KiB write: 8 leading bytes in the descriptor, 4084 in the
 			// data sector, 4 trailing bytes in the descriptor.
 			if dataAt+logSector > length {
-				return nil
+				return nil, true
 			}
 			s := whole[dataAt : dataAt+logSector]
 			// The data sector repeats the sequence number at both its ends.
 			if string(s[0:4]) != "data" ||
 				binary.LittleEndian.Uint32(s[4:8]) != uint32(e.seq>>32) ||
 				binary.LittleEndian.Uint32(s[4092:4096]) != uint32(e.seq) {
-				return nil
+				return nil, true
 			}
 			page := make([]byte, logSector)
 			copy(page[0:8], d[8:16])
@@ -248,8 +282,8 @@ func parseEntry(log []byte, at int64, logID []byte) *logEntry {
 			e.writes = append(e.writes, logWrite{off: off, data: page, length: logSector})
 			dataAt += logSector
 		default:
-			return nil
+			return nil, true
 		}
 	}
-	return e
+	return e, true
 }

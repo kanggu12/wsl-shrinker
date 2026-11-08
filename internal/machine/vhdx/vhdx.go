@@ -153,6 +153,13 @@ func Read(r io.ReaderAt, size int64) (*Disk, error) {
 	}
 	d := &Disk{FileSize: size, BATOffset: -1, MetadataOffset: -1,
 		LogOffset: int64(binary.LittleEndian.Uint64(h[72:80])), LogLength: binary.LittleEndian.Uint32(h[68:72])}
+	// The log region is required, in whole MiB, after the first MiB and
+	// inside the file (MS-VHDX 2.2.2), whether or not a log is in use: its
+	// place counts in the compacted size, so a damaged one is refused here
+	// rather than turned into a made-up estimate.
+	if d.LogLength == 0 || d.LogLength%mib != 0 || d.LogOffset < mib || d.LogOffset%mib != 0 || d.LogOffset > size-int64(d.LogLength) {
+		return nil, fmt.Errorf("vhdx: the log region (%d bytes at %d) is not usable", d.LogLength, d.LogOffset)
+	}
 	// A non-zero log GUID means the log may hold writes not yet in their
 	// place: read everything after the header through the replayed log.
 	if !allZero(h[48:64]) {
@@ -201,7 +208,8 @@ func Read(r io.ReaderAt, size int64) (*Disk, error) {
 		return nil, errors.New("vhdx: the BAT or the metadata region is missing")
 	}
 	// Regions must lie inside the file, or the reads below would fail late.
-	if d.BATOffset+int64(d.BATLength) > size || d.MetadataOffset+int64(d.MetadataLength) > size {
+	// An offset past 2^63 reads as negative here: that is damage too.
+	if d.BATOffset < 0 || d.MetadataOffset < 0 || d.BATOffset > size-int64(d.BATLength) || d.MetadataOffset > size-int64(d.MetadataLength) {
 		return nil, errors.New("vhdx: a region lies past the end of the file")
 	}
 	if err := d.readMetadata(r); err != nil {

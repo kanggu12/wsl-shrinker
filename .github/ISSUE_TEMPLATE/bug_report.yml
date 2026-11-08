@@ -32,6 +32,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      placeholder: wsl-shrinker v0.1.0, WSL 3.0.3.0, Windows 11 24H2
+      description: What `wsl-shrinker version` prints, the first line of `wsl --version`, and the Windows version.
+      placeholder: wsl-shrinker v0.3.0 (abc1234, 2026-11-08), WSL 3.0.3.0, Windows 11 24H2
     validations:
       required: true

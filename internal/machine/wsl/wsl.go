@@ -7,12 +7,72 @@ package wsl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf16"
 )
 
 // ErrNotWindows is returned by every call on a system that is not Windows.
 var ErrNotWindows = errors.New("wsl-shrinker runs on Windows, where WSL is")
+
+// ErrNoDistro wraps the error for a distribution name WSL does not have, so
+// callers can tell a typo from a failure (errors.Is).
+var ErrNoDistro = errors.New("no such distribution")
+
+// ErrNotRunning is a script for a distribution that is stopped: Run never
+// starts one as a side effect.
+var ErrNotRunning = errors.New("not running")
+
+// find returns the registered distribution named name, ignoring case as
+// wsl.exe does, or an error wrapping ErrNoDistro.
+func find(ds []Distro, name string) (Distro, error) {
+	for _, d := range ds {
+		if strings.EqualFold(d.Name, name) {
+			return d, nil
+		}
+	}
+	return Distro{}, fmt.Errorf("%w: %s", ErrNoDistro, name)
+}
+
+// describe is how an error names a wsl.exe call: its arguments, with a
+// script given to sh -c shown as "<script>". The script is tens of lines
+// of this program's own, which say nothing about what went wrong.
+func describe(args []string) string {
+	shown := make([]string, len(args))
+	for i, a := range args {
+		shown[i] = a
+		if i > 0 && args[i-1] == "-c" {
+			shown[i] = "<script>"
+		}
+	}
+	return strings.Join(shown, " ")
+}
+
+// runningNames reads which distributions run from `wsl --list --running
+// --quiet`. That call also fails when none runs, so a failure is checked
+// against `wsl --list --quiet`: when listing all of them works, the failure
+// meant "none running"; when that fails too, WSL did not answer, and that
+// is an error, never taken as "all stopped" (a run would then stop a
+// distribution without its containers' own stop, and leave it stopped).
+func runningNames(running string, runErr error, all string, allErr error) (map[string]bool, error) {
+	names := map[string]bool{}
+	if runErr == nil {
+		for _, l := range lines(running) {
+			names[strings.ToLower(l)] = true
+		}
+		return names, nil
+	}
+	// A call that ran out of time, or was stopped, did not answer: it says
+	// nothing about what runs.
+	if allErr != nil || errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled) {
+		return nil, fmt.Errorf("asking WSL which distributions run: %w", runErr)
+	}
+	// Some distribution is listed, yet none runs: an empty set.
+	if len(lines(all)) == 0 {
+		return nil, fmt.Errorf("asking WSL which distributions run: %w", runErr)
+	}
+	return names, nil
+}
 
 // Distro is one registered distribution.
 type Distro struct {

@@ -4,18 +4,27 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
+	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // App is the program's parts for this PC.
@@ -24,6 +33,14 @@ type App struct {
 	ConfigPath string
 	WSL        wsl.System
 	History    history.Store
+	// Journal is the run in progress, kept on disk: a lock between two
+	// runs, and what a run cut off left to start again.
+	Journal journal.Store
+	// TerminalIn says whether this program's terminal runs inside a
+	// distribution, which a shrink of it would close; nil asks the system
+	// (Hosts). Tests set it, as a test binary run from WSL looks started
+	// from WSL.
+	TerminalIn func(distro string) bool
 	// info is WSL's answer about itself, asked once.
 	info     wsl.Info
 	infoOnce sync.Once
@@ -38,8 +55,9 @@ func New() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	dir := filepath.Join(winapi.LocalAppData(), "wsl-shrinker")
 	return &App{Config: c, ConfigPath: path, WSL: wsl.New(),
-		History: history.Open(filepath.Join(winapi.LocalAppData(), "wsl-shrinker"))}, nil
+		History: history.Open(dir), Journal: journal.Open(dir, winapi.Running)}, nil
 }
 
 // Info asks WSL about itself, once.
@@ -56,13 +74,65 @@ func (a *App) DisksEnv() disks.Env {
 
 // ShrinkEnv is what a run uses.
 func (a *App) ShrinkEnv(ctx context.Context) shrink.Env {
-	return shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: a.Info(ctx).CanCompact}
+	return shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: a.Info(ctx).CanCompact, Protected: a.Config.Protected}
 }
 
-// Shrink runs one disk and records it in the history.
+// Shrink runs one disk and records it in the history. The journal holds the
+// run from its start to its end: another run waits, and a run cut off on
+// the way leaves what it stopped for Recover.
 func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit func(shrink.Event)) shrink.Result {
-	res := shrink.Run(ctx, a.ShrinkEnv(ctx), d, opt, emit)
-	e := history.Entry{At: timeNow(), Disk: res.Disk, Freed: res.Freed, Took: res.Took.Seconds(), Err: res.Err}
+	exe, _ := os.Executable()
+	j := journal.Entry{PID: os.Getpid(), Exe: filepath.Base(exe), Started: timeNow(), Version: version.String(),
+		Disk: d.Name, Distro: d.Distro, Step: string(shrink.StepCheck)}
+	if err := a.Journal.Begin(j); err != nil {
+		// Refused before anything ran: said as the check's failure, with a
+		// code the screen has words for.
+		e := shrink.Event{Step: shrink.StepCheck, Status: shrink.Failed, Detail: err.Error(), Code: shrink.CodeBusy, At: timeNow()}
+		if emit != nil {
+			emit(e)
+		}
+		res := shrink.Result{Disk: d.Name, Before: d.Estimate, Events: []shrink.Event{e}, Err: err.Error(), FailedAt: shrink.StepCheck}
+		res.Left = untouched(d)
+		return res
+	}
+	// The journal follows the steps that matter for a run cut off: the
+	// stop (from then on the distribution must run again) and the
+	// containers it stopped.
+	follow := func(e shrink.Event) {
+		changed := false
+		// The step reached, and from the stop on, that the distribution must
+		// run again.
+		if e.Status == shrink.Running && e.Step != shrink.StepCheck {
+			if j.Step != string(e.Step) {
+				j.Step, changed = string(e.Step), true
+			}
+			if e.Step == shrink.StepStop && !j.Stopped {
+				j.Stopped, changed = true, true
+			}
+		}
+		// The containers, as soon as the stop step names them: before they
+		// stop, so a run cut off while they stop starts them again.
+		if e.Step == shrink.StepStop && len(e.Containers) > 0 && !slices.Equal(j.Containers, e.Containers) {
+			j.Containers, changed = e.Containers, true
+		}
+		if changed {
+			_ = a.Journal.Update(j)
+		}
+		if emit != nil {
+			emit(e)
+		}
+	}
+	res := shrink.Run(ctx, a.ShrinkEnv(ctx), d, opt, follow)
+	// Run returns only once it settled what it stopped: nothing is left to
+	// recover. The journal goes last, after the history line, so the
+	// history is written under the same lock as the run.
+	defer func() { _ = a.Journal.End() }()
+	e := history.Entry{At: timeNow(), Disk: res.Disk, Freed: res.Freed, Took: res.Took.Seconds(), Err: res.Err,
+		Version: version.String(), FailedAt: string(res.FailedAt), Compacted: res.Compacted, Left: string(res.Left)}
+	// The steps, for what happened: a few kB a run, 500 runs at most.
+	if b, err := json.Marshal(res.Events); err == nil {
+		e.Events = b
+	}
 	if res.Before != nil {
 		e.Before = res.Before.FileSize
 	}
@@ -73,10 +143,91 @@ func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit
 		e.Cleaned += it.Bytes
 	}
 	// A run stopped by its first check changed nothing: it is not history.
-	if len(res.Events) > 2 || res.Err == "" {
-		_ = a.History.Add(e)
+	// A history that cannot be written is said, not swallowed: the run's
+	// fronts show the note.
+	if res.FailedAt != shrink.StepCheck {
+		if err := a.History.Add(e); err != nil {
+			res.Notes["history"] = err.Error()
+		}
 	}
 	return res
+}
+
+// untouched is how a run refused before its first step leaves a disk.
+func untouched(d disks.Disk) shrink.Left {
+	switch {
+	case d.Distro == "":
+		return shrink.LeftFile
+	case d.Running:
+		return shrink.LeftRunning
+	}
+	return shrink.LeftStopped
+}
+
+// Pending is a run that has not ended: one going on in another process, or
+// one cut off.
+func (a *App) Pending() (journal.Entry, journal.State) {
+	e, st, err := a.Journal.Read()
+	if err != nil {
+		return journal.Entry{}, journal.None
+	}
+	return e, st
+}
+
+// Recover finishes a run that was cut off: its distribution started again
+// if the run had stopped it, writable, with the containers it stopped. A
+// compaction WSL is still running is left to end first. It says in a line
+// what it did.
+func (a *App) Recover(ctx context.Context) (string, error) {
+	e, st, err := a.Journal.Read()
+	if err != nil {
+		return "", err
+	}
+	switch st {
+	case journal.None:
+		return "no run was cut off", nil
+	case journal.Going:
+		return "", fmt.Errorf("%s is being shrunk by another wsl-shrinker; let it finish", e.Disk)
+	}
+	msg := "nothing was stopped"
+	switch {
+	case e.Distro == "" && e.Disk != "":
+		// A file's program (Docker Desktop) is the person's to start.
+		msg = e.Disk + " is a file: start the program that uses it again"
+	case e.Distro != "" && e.Stopped:
+		// WSL ends a compaction it began on its own; until then the disk is
+		// held and the distribution down.
+		if ds, err := disks.Find(ctx, a.DisksEnv()); err == nil {
+			for _, d := range ds {
+				if !strings.EqualFold(d.Name, e.Disk) {
+					continue
+				}
+				if d.File.Held && !d.Running {
+					return "", fmt.Errorf("WSL is still compacting %s; try again when it is done", e.Disk)
+				}
+				// Cut off once the compaction began, before the disk was
+				// read again: it is read now, and a disk that does not read
+				// cleanly stays stopped, as a run leaves it. The journal
+				// goes: what is left is the person's to look into.
+				if (e.Step == string(shrink.StepCompact) || e.Step == string(shrink.StepVerify)) && (d.Estimate == nil || d.Estimate.FSErrors) {
+					if err := a.Journal.End(); err != nil {
+						return "", err
+					}
+					return "", fmt.Errorf("%s was cut off after its compaction began, and its disk does not read cleanly; it stays stopped until you know why (see Troubleshooting)", e.Disk)
+				}
+			}
+		}
+		ev, err := shrink.StartAgain(ctx, a.ShrinkEnv(ctx), e.Distro, e.Containers)
+		if err != nil {
+			// The journal stays, for another try.
+			return "", err
+		}
+		msg = e.Disk + ": " + ev.Detail
+	}
+	if err := a.Journal.End(); err != nil {
+		return "", err
+	}
+	return msg, nil
 }
 
 // Backend is the screen's view of the App.
@@ -110,6 +261,12 @@ func (b Backend) History() []history.Entry {
 	return all
 }
 
+// Pending is a run that has not ended, for the screen to say.
+func (b Backend) Pending() (journal.Entry, journal.State) { return b.A.Pending() }
+
+// Recover finishes a run that was cut off.
+func (b Backend) Recover(ctx context.Context) (string, error) { return b.A.Recover(ctx) }
+
 // Protected follows the settings.
 func (b Backend) Protected(name string) bool { return b.A.Config.Protected(name) }
 
@@ -118,7 +275,15 @@ func (b Backend) MinGain() int64 { return int64(b.A.Config.MinGainGB * (1 << 30)
 
 // Hosts reports whether this program's terminal runs inside distro. The
 // window a run moved to never moves again.
-func (b Backend) Hosts(distro string) bool { return !b.Reopened && Hosts(distro) }
+func (b Backend) Hosts(distro string) bool { return !b.Reopened && b.A.Hosts(distro) }
+
+// Hosts reports whether this program's terminal runs inside distro.
+func (a *App) Hosts(distro string) bool {
+	if a.TerminalIn != nil {
+		return a.TerminalIn(distro)
+	}
+	return Hosts(distro)
+}
 
 // Hosts reports whether this process was started from inside distro. Started
 // from WSL, the launcher there passes its distribution's name through
@@ -131,5 +296,91 @@ func Hosts(distro string) bool {
 	return here == "" || strings.EqualFold(here, distro)
 }
 
-// Reopen starts this program again in a new window.
-func (b Backend) Reopen(args []string) error { return winapi.Reopen(args) }
+// Reopen continues in a new window, and waits until it has started.
+func (b Backend) Reopen(args []string) error { return Reopen(args) }
+
+// HandoffArgs is the command line that continues a run in a new window: the
+// disks in their order, each with one --clean per item it resolved (an id
+// is a path, which may hold a comma, so ids are never joined). lang is the
+// language to keep, "" to let the new window choose as usual. The screen
+// and the command line both hand over through it.
+func HandoffArgs(lang string, queue []disks.Disk, chosen map[string][]survey.Item) []string {
+	args := []string{"--reopened"}
+	if lang != "" {
+		args = append(args, "--lang", lang)
+	}
+	for _, d := range queue {
+		// The disk by the name it was found under.
+		args = append(args, "--run", d.Name)
+		for _, it := range chosen[d.Name] {
+			args = append(args, "--clean", d.Name+"="+it.ID)
+		}
+	}
+	return args
+}
+
+// handoffWait is how long Reopen waits for the new window to say it has
+// started: a cold start of the terminal takes a few seconds.
+var handoffWait = 15 * time.Second
+
+// openWindow starts the new window; tests stand in for Windows.
+var openWindow = winapi.Reopen
+
+// Reopen starts this program again in a new window with args, and waits for
+// that window to leave its receipt (Received): a window that did not open
+// is an error said here, in the terminal the person is looking at, rather
+// than a quiet end.
+func Reopen(args []string) error {
+	token, err := randomToken()
+	if err != nil {
+		return err
+	}
+	marker := receiptPath(token)
+	// A receipt left by a window that started after an earlier wait gave
+	// up goes now: none lingers past the next move.
+	dropStaleReceipts(filepath.Dir(marker), time.Now().Add(-2*handoffWait))
+	if err := openWindow(append(args, "--handoff", token)); err != nil {
+		return err
+	}
+	for deadline := time.Now().Add(handoffWait); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if _, err := os.Stat(marker); err == nil {
+			_ = os.Remove(marker)
+			return nil
+		}
+	}
+	return errors.New("the new window did not start; run wsl-shrinker from PowerShell instead")
+}
+
+// Received leaves the receipt Reopen waits for: the new window calls it as
+// soon as it starts.
+func Received(token string) error {
+	p := receiptPath(token)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, nil, 0o644)
+}
+
+// dropStaleReceipts removes the receipts in dir written before before.
+func dropStaleReceipts(dir string, before time.Time) {
+	old, _ := filepath.Glob(filepath.Join(dir, "handoff-*"))
+	for _, p := range old {
+		if st, err := os.Stat(p); err == nil && st.ModTime().Before(before) {
+			_ = os.Remove(p)
+		}
+	}
+}
+
+// receiptPath is where the receipt for token goes, next to the history.
+func receiptPath(token string) string {
+	return filepath.Join(winapi.LocalAppData(), "wsl-shrinker", "handoff-"+token)
+}
+
+// randomToken names one handoff, so two never take each other's receipt.
+func randomToken() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}

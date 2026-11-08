@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -24,12 +25,17 @@ type Fake struct {
 	Fail map[string]error
 	// Calls records "terminate:X", "start:X", "compact:X" and "run:X".
 	Calls []string
+	// DistrosErr makes Distros fail, as when WSL does not answer.
+	DistrosErr error
 }
 
 // Distros returns the list.
 func (f *Fake) Distros(context.Context) ([]Distro, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.DistrosErr != nil {
+		return nil, f.DistrosErr
+	}
 	return slices.Clone(f.List), nil
 }
 
@@ -52,8 +58,13 @@ func (f *Fake) Run(ctx context.Context, distro, user, script string) (string, er
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if !f.running(distro) {
-		return "", fmt.Errorf("%s is not running", distro)
+	// An unknown name and a stopped distribution fail as the real Run does.
+	d, err := find(f.list(), distro)
+	if err != nil {
+		return "", err
+	}
+	if !d.Running {
+		return "", fmt.Errorf("%s is %w", d.Name, ErrNotRunning)
 	}
 	if f.Script == nil {
 		return "", nil
@@ -106,16 +117,11 @@ func (f *Fake) record(op, distro string) error {
 	return f.Fail[key]
 }
 
-// running reports whether a distribution runs.
-func (f *Fake) running(distro string) bool {
+// list returns the distributions as they stand.
+func (f *Fake) list() []Distro {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, d := range f.List {
-		if d.Name == distro {
-			return d.Running
-		}
-	}
-	return false
+	return slices.Clone(f.List)
 }
 
 // set changes whether a distribution runs.
@@ -123,7 +129,7 @@ func (f *Fake) set(distro string, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i := range f.List {
-		if f.List[i].Name == distro {
+		if strings.EqualFold(f.List[i].Name, distro) {
 			f.List[i].Running = on
 		}
 	}

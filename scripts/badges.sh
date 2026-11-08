@@ -28,9 +28,9 @@ badge() {
   mv "$tmp" "$dir/$1.svg"
 }
 
-badge release "release-v$version-ea7233"
-badge license "license-MIT-2a78d6"
-badge runs-on "runs%20on-Windows%2010%20%7C%2011%2C%20WSL%202-555"
+badge release "release-v$version-0B8A7C"
+badge license "license-MIT-5B6474"
+badge runs-on "runs%20on-Windows%2010%20%7C%2011%2C%20WSL%202-4F46E5"
 
 # The README's alt text says the same, for a reader without images.
 sed -i -e "s/alt=\"Release v[0-9][0-9.]*\"/alt=\"Release v$version\"/" README.md

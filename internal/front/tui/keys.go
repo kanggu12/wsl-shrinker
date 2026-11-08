@@ -5,7 +5,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
@@ -25,11 +27,7 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.mode {
 	case modeHelp, modeHistory:
-		if s == "q" {
-			return m, tea.Quit
-		}
-		m.mode = modeMain
-		return m, nil
+		return m.keyPage(s)
 	case modeConfirm:
 		return m.keyConfirm(s)
 	case modeClean:
@@ -53,7 +51,10 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// now stays out, and the status line says why.
 		if d, ok := m.selected(); ok {
 			if why := m.blocked(d); why != "" {
-				m.say(why, ui.CatSafe)
+				// In the color of the reason: protected, in use, or cannot.
+				// The cursor stays on the disk the message is about.
+				m.say(why, m.category(d))
+				return m, nil
 			} else {
 				m.marked[d.Name] = !m.marked[d.Name]
 				if !m.marked[d.Name] {
@@ -70,24 +71,62 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadDisks()
 	case "c":
-		return m.openClean()
+		if d, ok := m.selected(); ok {
+			return m.openClean(d)
+		}
 	case "s", "enter":
 		return m.openConfirm()
+	case "R":
+		// Finish a run that was cut off: its distribution and containers
+		// started again.
+		if m.unfinishedState != journal.CutOff {
+			return m, nil
+		}
+		b, ctx := m.b, m.ctx
+		m.say(i18n.T("toast.recovering"), ui.CatLive)
+		return m, func() tea.Msg {
+			said, err := b.Recover(ctx)
+			return recoverMsg{said: said, err: err}
+		}
 	case "h":
 		m.hist = m.b.History()
-		m.mode = modeHistory
+		m.mode, m.pageTop = modeHistory, 0
 	case "?":
-		m.mode = modeHelp
+		m.mode, m.pageTop = modeHelp, 0
 	}
 	return m, nil
 }
 
-// openClean opens the list of what can go inside the selected distribution.
-func (m model) openClean() (tea.Model, tea.Cmd) {
-	d, ok := m.selected()
+// keyPage scrolls the help or the history; any other key goes back.
+func (m model) keyPage(s string) (tea.Model, tea.Cmd) {
+	last := max(0, m.pageLen()-m.pageVisible())
+	page := max(1, m.pageVisible()-1)
+	// A window made taller may leave the top past what is left to show.
+	m.pageTop = min(m.pageTop, last)
+	switch s {
+	case "q":
+		return m, tea.Quit
+	case "up", "k":
+		m.pageTop = max(0, m.pageTop-1)
+	case "down", "j":
+		m.pageTop = min(last, m.pageTop+1)
+	case "pgup":
+		m.pageTop = max(0, m.pageTop-page)
+	case "pgdown":
+		m.pageTop = min(last, m.pageTop+page)
+	case "home", "g":
+		m.pageTop = 0
+	case "end", "G":
+		m.pageTop = last
+	default:
+		m.mode, m.pageTop = modeMain, 0
+	}
+	return m, nil
+}
+
+// openClean opens the list of what can go inside a distribution.
+func (m model) openClean(d disks.Disk) (tea.Model, tea.Cmd) {
 	switch {
-	case !ok:
-		return m, nil
 	case d.Distro == "":
 		m.say(i18n.T("toast.clean.notdistro", d.Name), ui.CatSmall)
 		return m, nil
@@ -98,7 +137,11 @@ func (m model) openClean() (tea.Model, tea.Cmd) {
 	s := m.surveys[d.Distro]
 	if s == nil || s.loading {
 		m.say(i18n.T("toast.clean.loading"), ui.CatSmall)
-		return m, m.surveySelected()
+		// Look inside this disk, the one asked about, if no look is under way.
+		if s == nil {
+			return m, m.loadSurvey(d.Distro)
+		}
+		return m, nil
 	}
 	if len(s.r.Items) == 0 {
 		m.say(i18n.T("toast.clean.nothing", d.Name), ui.CatSmall)
@@ -170,10 +213,24 @@ func (m model) keyClean(s string) (tea.Model, tea.Cmd) {
 
 // openConfirm asks before a run.
 func (m model) openConfirm() (tea.Model, tea.Cmd) {
+	// A run is already on its way to a new window.
+	if m.reopening {
+		return m, nil
+	}
+	// A run that has not ended comes first: a new one would lose what the
+	// cut-off one stopped, or meet the other one's disk.
+	switch m.unfinishedState {
+	case journal.CutOff:
+		m.say(i18n.T("toast.cutoff"), ui.CatWarn)
+		return m, nil
+	case journal.Going:
+		m.say(i18n.T("toast.going", m.unfinished.Disk), ui.CatLive)
+		return m, nil
+	}
 	q := m.queueFor()
 	if len(q) == 0 {
 		if d, ok := m.selected(); ok {
-			m.say(m.blocked(d), ui.CatSafe)
+			m.say(m.blocked(d), m.category(d))
 		}
 		return m, nil
 	}
@@ -185,16 +242,22 @@ func (m model) openConfirm() (tea.Model, tea.Cmd) {
 func (m model) keyConfirm(s string) (tea.Model, tea.Cmd) {
 	switch s {
 	case "c":
-		// Choose what to remove inside first, as the box offers.
+		// Choose what to remove inside first, where the box offers it: the
+		// list is the one disk of the run's, which may not be the selected
+		// one when it was marked.
+		q := m.queueFor()
+		if !m.choosable(q) {
+			return m, nil
+		}
 		m.mode = modeMain
-		return m.openClean()
+		return m.openClean(q[0])
 	case "enter", "y":
 		q := m.queueFor()
 		// The disks may have become blocked while the box was open.
 		if len(q) == 0 {
 			m.mode = modeMain
 			if d, ok := m.selected(); ok {
-				m.say(m.blocked(d), ui.CatSafe)
+				m.say(m.blocked(d), m.category(d))
 			}
 			return m, nil
 		}
@@ -207,12 +270,12 @@ func (m model) keyConfirm(s string) (tea.Model, tea.Cmd) {
 		// From inside WSL, stopping a running distribution would close
 		// this terminal: continue in a new window instead.
 		if m.hostsAny(q) {
-			if err := m.b.Reopen(reopenArgs(q, clean)); err != nil {
-				m.mode = modeMain
-				m.say(i18n.T("toast.reopen.failed", err.Error()), ui.CatBad)
-				return m, nil
-			}
-			return m, tea.Quit
+			// Opening the window and waiting for its word take a few
+			// seconds: the screen goes on meanwhile.
+			b, args := m.b, app.HandoffArgs(string(i18n.Current()), q, clean)
+			m.mode, m.reopening = modeMain, true
+			m.say(i18n.T("toast.reopening"), ui.CatLive)
+			return m, func() tea.Msg { return reopenMsg{err: b.Reopen(args)} }
 		}
 		return m.startRun(q, clean)
 	case "esc", "n", "q":

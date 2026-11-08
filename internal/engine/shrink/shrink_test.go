@@ -39,7 +39,11 @@ func newWorld(t *testing.T) *world {
 	w.fake.Script = func(_, _, s string) (string, error) {
 		switch {
 		case strings.Contains(s, "docker ps -q"):
-			return "stopped|0123456789ab fedcba987654 \nhook|ok|/etc/wsl-shrinker/pre-stop.d/save\n", nil
+			// The containers the stop step names before it stops them.
+			return "running|0123456789ab fedcba987654 \n", nil
+		case strings.Contains(s, "pre-stop.d"):
+			// The stop script: one hook ran.
+			return "hook|ok|/etc/wsl-shrinker/pre-stop.d/save\n", nil
 		case strings.Contains(s, "/proc/mounts"):
 			if len(w.mount) > 0 {
 				m := w.mount[0]
@@ -48,7 +52,8 @@ func newWorld(t *testing.T) *world {
 			}
 			return "rw,relatime,discard\n", nil
 		case strings.Contains(s, "docker start"):
-			return "ok\n", nil
+			// One line per container, as the start script prints them.
+			return "started|0123456789ab\nstarted|fedcba987654\n", nil
 		}
 		return "", nil
 	}
@@ -169,14 +174,34 @@ func TestFailedCompactBringsTheDistributionBack(t *testing.T) {
 	}
 }
 
+// fileNow makes the disk's file read, from now on, as change has it: the
+// state a run's check reads afresh, whatever the listing said.
+func fileNow(w *world, change func(*winapi.FileInfo) error) {
+	stat := w.env.Disks.Stat
+	w.env.Disks.Stat = func(p string) (winapi.FileInfo, error) {
+		fi, err := stat(p)
+		if err != nil {
+			return fi, err
+		}
+		return fi, change(&fi)
+	}
+}
+
 func TestChecksStopBeforeAnythingChanges(t *testing.T) {
+	// Each the way it is found when the run starts, though the disks were
+	// listed fine: a program took the file since, or it was encrypted.
 	cases := map[string]func(*world, *disks.Disk){
-		"old WSL":   func(w *world, d *disks.Disk) { w.env.CanCompact = false },
-		"encrypted": func(w *world, d *disks.Disk) { d.File.Encrypted = true },
-		"unreadable": func(w *world, d *disks.Disk) {
-			d.Err = "boom"
+		"old WSL": func(w *world, d *disks.Disk) { w.env.CanCompact = false },
+		"encrypted": func(w *world, d *disks.Disk) {
+			fileNow(w, func(fi *winapi.FileInfo) error { fi.Encrypted = true; return nil })
 		},
-		"docker disk held": func(w *world, d *disks.Disk) { d.Distro, d.Kind, d.File.Held = "", disks.KindDocker, true },
+		"unreadable": func(w *world, d *disks.Disk) {
+			fileNow(w, func(*winapi.FileInfo) error { return errors.New("boom") })
+		},
+		"docker disk held": func(w *world, d *disks.Disk) {
+			d.Distro, d.Kind = "", disks.KindDocker
+			fileNow(w, func(fi *winapi.FileInfo) error { fi.Held = true; return nil })
+		},
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -349,7 +374,9 @@ func TestFailedCompactStartsContainersAgain(t *testing.T) {
 	}
 	w.fake.Fail = map[string]error{"compact:Dev": errors.New("boom")}
 	Run(context.Background(), w.env, w.disk(), Options{}, nil)
-	if !slices.ContainsFunc(scripts, func(s string) bool { return strings.Contains(s, "docker start 0123456789ab fedcba987654") }) {
+	if !slices.ContainsFunc(scripts, func(s string) bool {
+		return strings.Contains(s, "docker start") && strings.Contains(s, "0123456789ab fedcba987654")
+	}) {
 		t.Fatalf("containers left stopped; scripts %q", scripts)
 	}
 }

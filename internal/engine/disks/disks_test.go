@@ -2,9 +2,12 @@ package disks
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
@@ -75,5 +78,76 @@ func TestFind(t *testing.T) {
 	}
 	if !got[0].Running || !got[0].Default {
 		t.Fatalf("state lost: %+v", got[0])
+	}
+}
+
+func TestExtraDisksGetNamesOfTheirOwn(t *testing.T) {
+	// Other tools name their disks alike (ext4.vhdx): each one listed gets
+	// a name no other disk has, so marking, protecting or naming one on the
+	// command line means that one. The same file spelt twice is one disk.
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a", "ext4.vhdx")
+	b := filepath.Join(dir, "b", "ext4.vhdx")
+	for _, p := range []string{a, b} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		vhdxtest.Write(t, p, vhdxtest.Spec{VirtualSize: 4 << 20})
+	}
+	env := Env{WSL: &wsl.Fake{}, Stat: winapi.Stat, Open: OpenFile,
+		Extra: []string{a, b, filepath.Dir(a) + string(filepath.Separator) + "." + string(filepath.Separator) + "ext4.vhdx"}}
+	got, err := Find(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("%d disks: %+v", len(got), got)
+	}
+	if got[0].Name == got[1].Name {
+		t.Fatalf("both are called %q", got[0].Name)
+	}
+	// The second is named with its folder, in a form the settings' protect
+	// list can hold as it is (no backslash to escape).
+	if got[1].Name != "b/ext4.vhdx" {
+		t.Fatalf("the second is called %q", got[1].Name)
+	}
+	var c struct{ Protect []string }
+	if _, err := toml.Decode(`protect = ["`+got[1].Name+`"]`, &c); err != nil || c.Protect[0] != got[1].Name {
+		t.Fatalf("the name does not go into the settings as it is: %v %v", c.Protect, err)
+	}
+}
+
+func TestDockerDiskIsEstimatedWithoutATrim(t *testing.T) {
+	// Docker Desktop's disk is compacted by Windows without a trim: its
+	// estimate is the untrimmed one, while a distribution's is trimmed.
+	dir := t.TempDir()
+	docker := filepath.Join(dir, `Docker\wsl\disk\docker_data.vhdx`)
+	distro := filepath.Join(dir, "d.vhdx")
+	if err := os.MkdirAll(filepath.Dir(docker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{docker, distro} {
+		vhdxtest.Write(t, p, vhdxtest.Spec{VirtualSize: 4 << 20, Blocks: map[int64][]byte{0: {1}}})
+	}
+	env := Env{WSL: &wsl.Fake{List: []wsl.Distro{{Name: "D", VHD: distro, Version: 2}}}, Stat: winapi.Stat, Open: OpenFile, LocalAppData: dir}
+	got, err := Find(context.Background(), env)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, d := range got {
+		if d.Estimate == nil || d.Estimate.Trimmed != (d.Kind == KindDistro) {
+			t.Fatalf("%s: %+v", d.Name, d.Estimate)
+		}
+	}
+}
+
+func TestDiskJSONKeys(t *testing.T) {
+	b, err := json.Marshal(Disk{Name: "n", Kind: KindDistro, Path: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"n","kind":"distro","path":"p","file":{"size_bytes":0,"on_disk_bytes":0,"sparse":false,"compressed":false,"encrypted":false,"held":false,"drive_free_bytes":0}}`
+	if string(b) != want {
+		t.Fatalf("got  %s\nwant %s", b, want)
 	}
 }

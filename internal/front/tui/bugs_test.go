@@ -134,7 +134,7 @@ func (s *scripted) Shrink(_ context.Context, d disks.Disk, _ shrink.Options, emi
 	for _, e := range s.events {
 		emit(e)
 	}
-	return shrink.Result{Disk: d.Name, Err: "failed"}
+	return settledLike(d, shrink.Result{Disk: d.Name, Err: "failed", Events: s.events})
 }
 
 func TestReviewCompactAndRestartBothFailed(t *testing.T) {
@@ -153,6 +153,8 @@ func TestReviewVerifyFailedAfterCompaction(t *testing.T) {
 	b := &scripted{Demo: demo(), events: []shrink.Event{
 		{Step: shrink.StepCheck, Status: shrink.Done}, {Step: shrink.StepCompact, Status: shrink.Done},
 		{Step: shrink.StepVerify, Status: shrink.Failed},
+		// The disk did not read as before: the engine leaves it stopped.
+		{Step: shrink.StepRestart, Status: shrink.Skipped, Detail: "left stopped: check the disk first"},
 	}}
 	m := playKeys(t, b, []string{"space", "s", "enter"})
 	for !m.run.done {

@@ -143,7 +143,18 @@ func Read(r io.ReaderAt, size int64) (*FS, error) {
 		inodeSize = uint64(binary.LittleEndian.Uint16(sb[0x58:]))
 	}
 	inodesPerGroup := uint64(binary.LittleEndian.Uint32(sb[0x28:]))
+	// An inode is a power of two from 128 bytes up to a block; a group has
+	// at most one inode bitmap's worth (8 per byte of a block) and its
+	// inode table fits in the group. Past that the superblock is damaged,
+	// and trusting it would mark up to the whole filesystem per group.
+	if inodeSize < 128 || inodeSize > uint64(fs.BlockSize) || inodeSize&(inodeSize-1) != 0 ||
+		inodesPerGroup == 0 || inodesPerGroup > uint64(fs.BlockSize)*8 {
+		return nil, fmt.Errorf("ext4: %d inodes of %d bytes per group", inodesPerGroup, inodeSize)
+	}
 	itableBlocks := (inodesPerGroup*inodeSize + uint64(fs.BlockSize) - 1) / uint64(fs.BlockSize)
+	if itableBlocks > perGroup {
+		return nil, fmt.Errorf("ext4: an inode table of %d blocks in groups of %d", itableBlocks, perGroup)
+	}
 	sparse2 := compat&compatSparseSuper2 != 0
 	backup1 := uint64(binary.LittleEndian.Uint32(sb[0x24C:]))
 	backup2 := uint64(binary.LittleEndian.Uint32(sb[0x250:]))

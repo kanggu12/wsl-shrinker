@@ -1,28 +1,41 @@
 # Settings
 
-The settings file is `%APPDATA%\wsl-shrinker\config.toml`. Every key is optional; `wsl-shrinker config init` writes
-one with every key at its default. A file that does not load stops wsl-shrinker with the reason, rather than running
-with settings you did not choose.
+The settings file is `%APPDATA%\wsl-shrinker\config.toml`. Every key is optional. `wsl-shrinker setup` chooses the
+language, colors, mode, size worth shrinking and protected disks, on a screen or as flags (see
+[Commands](commands.md#setup)), and writes only the keys that changed, leaving the rest of the file, comments
+included, as it was; with no file yet it writes a whole commented file like the one below (here with example values). The first start and the installer
+open it. `wsl-shrinker config init` writes a file with every key at its default. A file that does not load stops
+wsl-shrinker with the reason and what to do, rather than running with settings you did not choose.
 
 ```toml
-# Language of the screen: "en", "ko", or "auto": WSL_SHRINKER_LANG when it is
-# set, then Windows' display language.
+# Language of the screen, setup and CLI mode's disks: "en", "ko", or "auto":
+# WSL_SHRINKER_LANG when it is set, then Windows' display language. The other
+# commands print English, for scripts.
 language = "auto"
 
 # Colors: "auto" asks the terminal, or "dark", "light".
 theme = "auto"
 
+# What wsl-shrinker opens in a terminal: "tui", the screen, or "cli", the
+# disks as a table with the commands to use. Every command works in both.
+mode = "tui"
+
 # A disk that gives back at least this many GB is marked worth shrinking.
 min_gain_gb = 1
 
-# More VHDX files to show, for disks of other tools.
+# More VHDX files to show, for disks of other tools, as full Windows paths.
 extra_disks = ['D:\VMs\data.vhdx']
 
-# Disks, by name, the dashboard never shrinks.
+# Disks, by name, that are never shrunk.
 protect = ["Work"]
 ```
 
-A protected disk is listed in purple with its estimate, but cannot be marked or shrunk, from the screen or from
+`min_gain_gb` takes a number from 0 to 1,000,000. `extra_disks` takes full Windows paths, from a drive letter
+(`D:\VMs\data.vhdx`) or a network share (`\\server\share\data.vhdx`), each a `.vhdx`; a file listed twice is shown once.
+A file with the same name as another disk (other tools call theirs `ext4.vhdx` too) is listed with its folder in
+front: `data/ext4.vhdx`, which `protect` takes as it is shown.
+
+A protected disk is listed in pink with its estimate, but cannot be marked or shrunk, from the screen or from
 `wsl-shrinker shrink`.
 
 ## Before a distribution stops: pre-stop.d
@@ -41,11 +54,29 @@ EOF
 sudo chmod +x /etc/wsl-shrinker/pre-stop.d/10-postgres
 ```
 
-A script that fails is reported in the run's stop step; the run goes on.
+A script that fails is reported in the run's stop step; the run goes on. The whole stop step, containers and scripts,
+has 15 minutes; past that, the run ends there and starts the containers it stopped again.
 
 ## Files wsl-shrinker writes
 
 | File | |
-|---|---|
-| `%APPDATA%\wsl-shrinker\config.toml` | the settings, only when you run `config init` |
+|:---|:---|
+| `%APPDATA%\wsl-shrinker\config.toml` | the settings, when setup saves them (the first start, the installer, `wsl-shrinker setup`) or you run `config init` |
 | `%LOCALAPPDATA%\wsl-shrinker\history.jsonl` | one line per run, the newest 500 |
+| `%LOCALAPPDATA%\wsl-shrinker\run.json` | the run going on, while it goes; one left behind is a run cut off, which `R` on the screen or `wsl-shrinker recover` finishes |
+| `%LOCALAPPDATA%\wsl-shrinker\handoff-*` | an empty receipt a new window leaves for the terminal a run moved from, removed once seen, or at the next move |
+| `%LOCALAPPDATA%\wsl-shrinker\crash-*.txt` | each run's, empty while it runs and removed when it ends. After an error Go cannot recover from, it holds what Go printed, until a later run in a terminal says where it is, as that run ends, and renames it `...-shown.txt`. Ten of each wait at most. Inside WSL, the launcher keeps one the same way in `~/.cache/wsl-shrinker` while it draws the screen |
+
+## Install and remove
+
+The one-line install (README's quick start) takes these, as environment variables set before it runs:
+
+| Variable | |
+|:---|:---|
+| `WSL_SHRINKER_VERSION` | the release to install, like `v0.3.0` (default: the latest) |
+| `WSL_SHRINKER_BIN_DIR` | where the program goes (default: `%LOCALAPPDATA%\Programs\wsl-shrinker`) |
+| `WSL_SHRINKER_NO_SETUP` | `1`: no setup screen after a first install |
+
+To remove wsl-shrinker, delete its folder (`%LOCALAPPDATA%\Programs\wsl-shrinker` unless you chose another), take
+that folder out of your user PATH (Settings, then "Edit environment variables for your account"), and delete
+`%APPDATA%\wsl-shrinker` and `%LOCALAPPDATA%\wsl-shrinker`, the files listed above.

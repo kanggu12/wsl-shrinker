@@ -6,6 +6,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
@@ -38,6 +41,17 @@ type (
 	disksMsg struct {
 		list []disks.Disk
 		err  error
+		// unfinished is a run that has not ended, read with the disks.
+		unfinished      journal.Entry
+		unfinishedState journal.State
+	}
+	// reopenMsg is how continuing in a new window went: nil once the new
+	// window said it started.
+	reopenMsg struct{ err error }
+	// recoverMsg is how finishing a cut-off run went.
+	recoverMsg struct {
+		said string
+		err  error
 	}
 	infoMsg   wsl.Info
 	surveyMsg struct {
@@ -48,6 +62,9 @@ type (
 	// eventMsg is one step's progress; doneMsg ends one disk's run.
 	eventMsg shrink.Event
 	doneMsg  shrink.Result
+	// bugMsg is a bug in the goroutine a run goes in, past the engine's own
+	// recovery: the screen ends, and the program says it was a bug.
+	bugMsg BugError
 	// frameMsg advances the spinner and the elapsed time while a run goes.
 	frameMsg time.Time
 	// autoRunMsg starts the run the options asked for.
@@ -89,6 +106,8 @@ type runState struct {
 type model struct {
 	b   Backend
 	ctx context.Context
+	// bug is what ended the screen, when a bug did.
+	bug *BugError
 	th  ui.Theme
 	// themeFixed is set when the settings chose dark or light.
 	themeFixed bool
@@ -96,17 +115,24 @@ type model struct {
 	width, height int
 	now           time.Time
 
-	info    wsl.Info
-	list    []disks.Disk
-	err     error
-	loaded  bool
-	loading bool
+	info wsl.Info
+	// infoKnown is set once WSL's answer arrived: before, no distribution is
+	// called one this WSL cannot compact.
+	infoKnown bool
+	list      []disks.Disk
+	err       error
+	loaded    bool
+	loading   bool
 
 	// sel is the selected row; selName keeps it on the same disk across
 	// reloads. marked holds the disks chosen with space, by name.
 	sel     int
 	selName string
 	marked  map[string]bool
+	// tableTop is the first disk the table shows when the list is longer
+	// than the window; pageTop the first line of the help or the history.
+	tableTop int
+	pageTop  int
 
 	surveys map[string]*surveyState
 
@@ -123,9 +149,17 @@ type model struct {
 	hist []history.Entry
 	spin int
 
-	toast      string
-	toastCat   ui.Category
-	toastUntil time.Time
+	toast    string
+	toastCat ui.Category
+	// unfinished is a run that has not ended, from the journal: one going
+	// on in another process holds shrinking back, one cut off as well,
+	// until R finishes it.
+	unfinished      journal.Entry
+	unfinishedState journal.State
+	toastUntil      time.Time
+	// reopening is set while a new window is being opened for a run: no
+	// second run starts meanwhile.
+	reopening bool
 
 	// pending is a run asked for by the options, started after the first
 	// load; preparing is set while that run looks inside first, when keys
@@ -160,8 +194,30 @@ func Run(ctx context.Context, b Backend, opt Options) error {
 	if opt.Theme == "light" || opt.Theme == "dark" {
 		m.th, m.themeFixed = ui.NewTheme(opt.Theme == "dark"), true
 	}
-	_, err := tea.NewProgram(m).Run()
-	return err
+	end, err := tea.NewProgram(m).Run()
+	return ended(end, err)
+}
+
+// BugError is the screen ended by a bug in a run's goroutine: what it was
+// and where, for a report. Bubble Tea catches the screen's own; this is the
+// one goroutine the program starts itself.
+type BugError struct {
+	Value any
+	Stack []byte
+}
+
+func (e *BugError) Error() string { return fmt.Sprintf("stopped on a bug: %v", e.Value) }
+
+// ended is how the screen ended: Bubble Tea's error, or the bug that ended
+// it, or nil.
+func ended(end tea.Model, err error) error {
+	if err != nil {
+		return err
+	}
+	if m, ok := end.(model); ok && m.bug != nil {
+		return m.bug
+	}
+	return nil
 }
 
 // Init loads the disks and WSL's version, and asks the terminal for its
@@ -175,7 +231,8 @@ func (m model) loadDisks() tea.Cmd {
 	b, ctx := m.b, m.ctx
 	return func() tea.Msg {
 		l, err := b.Disks(ctx)
-		return disksMsg{list: l, err: err}
+		e, st := b.Pending()
+		return disksMsg{list: l, err: err, unfinished: e, unfinishedState: st}
 	}
 }
 
@@ -220,11 +277,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case infoMsg:
-		m.info = wsl.Info(msg)
+		m.info, m.infoKnown = wsl.Info(msg), true
 		return m, nil
 	case disksMsg:
 		m.loading, m.loaded = false, true
 		m.list, m.err, m.now = msg.list, msg.err, time.Now()
+		m.unfinished, m.unfinishedState = msg.unfinished, msg.unfinishedState
 		m.hist = m.b.History()
 		m.reselect()
 		if m.pending != nil && m.err == nil {
@@ -245,6 +303,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startRun(msg.queue, msg.clean)
+	case reopenMsg:
+		// The new window took the run: this one has nothing left to do.
+		m.reopening = false
+		if msg.err == nil {
+			return m, tea.Quit
+		}
+		m.mode = modeMain
+		m.say(i18n.T("toast.reopen.failed", msg.err.Error()), ui.CatBad)
+		return m, nil
+	case recoverMsg:
+		// Said either way; the disks are read again, and with them whether
+		// a run is still unfinished.
+		if msg.err != nil {
+			m.say(oneLine(msg.err.Error()), ui.CatBad)
+		} else {
+			m.say(msg.said, ui.CatDone)
+		}
+		m.loading = true
+		return m, m.loadDisks()
 	case surveyMsg:
 		// A reload may have dropped the state this answer was for.
 		s := m.surveys[msg.distro]
@@ -275,6 +352,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.waitRun()
 	case doneMsg:
 		return m.finishDisk(shrink.Result(msg))
+	case bugMsg:
+		bug := BugError(msg)
+		m.bug = &bug
+		return m, tea.Quit
 	case frameMsg:
 		// The clock keeps going for the whole session: spinners turn while
 		// something loads, a run's times count up, passing messages expire.
@@ -296,6 +377,8 @@ func (m *model) reselect() {
 	if len(m.list) > 0 {
 		m.selName = m.list[m.sel].Name
 	}
+	// The table follows the selected disk into view.
+	m.tableTop = m.tableWindow(m.tableRows())
 	// A disk that left the list cannot stay marked.
 	for name := range m.marked {
 		if !slices.ContainsFunc(m.list, func(d disks.Disk) bool { return d.Name == name }) {
@@ -332,7 +415,29 @@ func (m *model) move(n int) tea.Cmd {
 	}
 	m.sel = min(max(m.sel+n, 0), len(m.list)-1)
 	m.selName = m.list[m.sel].Name
+	m.tableTop = m.tableWindow(m.tableRows())
 	return m.surveySelected()
+}
+
+// tableRows is how many disks the table shows at most: the rows under its
+// heading, less, in a narrow window, room under the table for the selected
+// disk's name and verdict.
+func (m model) tableRows() int {
+	n := m.bodyHeight() - 1
+	if m.width < sideBySide {
+		n -= 3
+	}
+	return max(1, n)
+}
+
+// tableWindow is the first disk the table shows when n fit: the window moves
+// only as far as it must to keep the selected disk in it.
+func (m model) tableWindow(n int) int {
+	top := min(m.tableTop, m.sel)
+	if m.sel >= top+n {
+		top = m.sel - n + 1
+	}
+	return max(0, min(top, len(m.list)-n))
 }
 
 // say shows a short message in the status line for a few seconds.
@@ -362,6 +467,15 @@ func (m *model) startDisk() tea.Cmd {
 	opt := shrink.Options{Clean: r.clean[d.Name]}
 	b, ctx, ch := m.b, m.ctx, r.events
 	go func() {
+		// A bug past the engine's own recovery (which settles the disk on
+		// its own) ends the screen, which then says so, rather than the
+		// program with the terminal still the screen's. A run it cut off
+		// stays in the journal, for the next start to finish.
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- bugMsg{Value: r, Stack: debug.Stack()}
+			}
+		}()
 		res := b.Shrink(ctx, d, opt, func(e shrink.Event) { ch <- eventMsg(e) })
 		ch <- doneMsg(res)
 	}()
@@ -386,7 +500,7 @@ func (m model) finishDisk(res shrink.Result) (tea.Model, tea.Cmd) {
 	r.results = append(r.results, res)
 	// A disk that was compacted is done with, even when a later step went
 	// wrong: marked again, it would be shrunk a second time.
-	if e, ok := r.steps[shrink.StepCompact]; res.Err == "" || ok && e.Status == shrink.Done {
+	if res.Err == "" || res.Compacted {
 		delete(m.marked, res.Disk)
 	}
 	// A failure stops the queue: the next disk can wait for a look.
@@ -417,19 +531,31 @@ func (m model) queueFor() []disks.Disk {
 	return q
 }
 
-// blocked says why a disk cannot be shrunk now, or "" when it can. These
-// are the reasons a run's first check would stop on, said before it starts.
+// block is the first reason a disk cannot be shrunk now, "" when it can:
+// the engine's own rule, the one a run's check stops on.
+func (m model) block(d disks.Disk) shrink.Block {
+	// Until WSL has answered, no distribution is held back for its WSL.
+	canCompact := m.info.CanCompact || !m.infoKnown
+	if bs := shrink.Preflight(d, canCompact, m.b.Protected(d.Name)); len(bs) > 0 {
+		return bs[0]
+	}
+	return ""
+}
+
+// blocked says why a disk cannot be shrunk now, in words, or "" when it can.
 func (m model) blocked(d disks.Disk) string {
-	switch {
-	case m.b.Protected(d.Name):
+	switch m.block(d) {
+	case shrink.BlockProtected:
 		return i18n.T("toast.protected", d.Name)
-	case d.Estimate == nil:
+	case shrink.BlockUnreadable:
 		return i18n.T("toast.unreadable", d.Name)
-	case d.File.Encrypted:
+	case shrink.BlockEncrypted:
 		return i18n.T("toast.encrypted", d.Name)
-	case d.Distro == "" && d.File.Held:
-		return i18n.T("toast.held", d.Name)
-	case d.Distro != "" && m.info.Version != "" && !m.info.CanCompact:
+	case shrink.BlockFSErrors:
+		return i18n.T("toast.fserrors", d.Name)
+	case shrink.BlockHeld:
+		return i18n.T(heldKey(d, "toast.held"), d.Name)
+	case shrink.BlockNoCompact:
 		return i18n.T("toast.nocompact")
 	}
 	return ""
@@ -480,8 +606,8 @@ func (m model) cleanRows(items []survey.Item) []cleanRow {
 	return rows
 }
 
-// cleanVisible is how many list rows fit under the clean list's title.
-func (m model) cleanVisible() int { return max(1, m.bodyHeight()-4) }
+// cleanVisible is how many list rows fit under the clean list's head.
+func (m model) cleanVisible() int { return max(1, m.bodyHeight()-len(m.cleanHead())) }
 
 // scrollClean keeps the cursor's row, and its group's header when it fits,
 // on screen.
@@ -506,6 +632,16 @@ func (m *model) scrollClean() {
 	m.pickTop = max(0, min(m.pickTop, len(rows)-visible))
 }
 
+// choosable reports whether the confirm box offers c: the run is of one
+// running distribution, and its look inside found something to choose.
+func (m model) choosable(q []disks.Disk) bool {
+	if len(q) != 1 || !q[0].Running || q[0].Distro == "" {
+		return false
+	}
+	s := m.surveys[q[0].Distro]
+	return s != nil && !s.loading && s.err == nil && len(s.r.Items) > 0
+}
+
 // pickKey names one item of one distribution.
 func pickKey(distro, id string) string { return distro + "\x00" + id }
 
@@ -528,7 +664,7 @@ func (m model) chosenItems(distro string) []survey.Item {
 // looking inside each distribution again so only items found now are used.
 func (m model) prepareRun(p Options) tea.Cmd {
 	list, b, ctx := m.list, m.b, m.ctx
-	m.info = b.Info(ctx)
+	m.info, m.infoKnown = b.Info(ctx), true
 	return func() tea.Msg {
 		var q []disks.Disk
 		clean := map[string][]survey.Item{}
@@ -571,20 +707,4 @@ func (m model) prepareRun(p Options) tea.Cmd {
 		}
 		return autoRunMsg{queue: q, clean: clean}
 	}
-}
-
-// reopenArgs is the command line that continues this run in a new window.
-func reopenArgs(q []disks.Disk, clean map[string][]survey.Item) []string {
-	args := []string{"--reopened", "--lang", string(i18n.Current())}
-	for _, d := range q {
-		args = append(args, "--run", d.Name)
-		var ids []string
-		for _, it := range clean[d.Name] {
-			ids = append(ids, it.ID)
-		}
-		if len(ids) > 0 {
-			args = append(args, "--clean", d.Name+"="+strings.Join(ids, ","))
-		}
-	}
-	return args
 }

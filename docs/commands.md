@@ -20,7 +20,8 @@ terminal's own; `WSL_SHRINKER_SCREEN=windows` keeps it in `wsl-shrinker.exe`.
 | `wsl-shrinker version` | this build's version, commit and date (`dev` for a build that is not a release) |
 
 `--json` prints one object: `"schema": 1`, then `disks`, `runs`, `results`, or the look inside (the root filesystem's
-numbers, Docker, and the `items` with their ids). Sizes are in bytes and times in seconds, as keys like `after_bytes`
+numbers, Docker, and the `items` with their ids). Each disk in `list --json` says whether it is `protected`, and in
+`blocked` the first thing that stands in the way of a shrink now (`protected`, `held`, ...), `""` for none. Sizes are in bytes and times in seconds, as keys like `after_bytes`
 and `took_seconds` say. A change to this shape raises the schema number.
 
 Every command takes `--lang en|ko`, the language of the screen, setup and CLI mode's disks (default: the settings, then

@@ -48,7 +48,7 @@ func TestUsageErrorsSayWhatIsWrong(t *testing.T) {
 		// A word after config that is none of its commands.
 		{[]string{"config", "bogus"}, `unknown command "bogus"`},
 		// A theme that is not one is refused, like a language.
-		{[]string{"--theme", "bogus", "--snapshot", "80x24"}, `--theme takes dark or light`},
+		{[]string{"--theme", "bogus", "--snapshot", "80x24"}, `--theme takes auto, dark or light`},
 		// The screen's --clean takes one id per flag, and never none.
 		{[]string{"--clean", "Ubuntu="}, `--clean takes NAME=ID`},
 		{[]string{"--clean", "Ubuntu"}, `--clean takes NAME=ID`},
@@ -204,5 +204,28 @@ func TestJSONStartsWithItsSchema(t *testing.T) {
 	}
 	if !strings.HasPrefix(strings.TrimSpace(out), "{\n  \"schema\": 1,") {
 		t.Fatalf("the schema is not first:\n%s", out)
+	}
+}
+
+func TestShrinkAsksAtATerminalWSLRelays(t *testing.T) {
+	// The launcher in WSL says a person is at its terminal: the question is
+	// asked there, though the .exe only sees pipes.
+	oldIn, oldRelay := stdinIsTerminal, relayed
+	stdinIsTerminal, relayed = func() bool { return false }, func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal, relayed = oldIn, oldRelay })
+	_, _, errOut := runCLI(t, "shrink", "Ubuntu")
+	if strings.Contains(errOut, "no terminal to ask in") {
+		t.Fatalf("refused a relayed terminal: %q", errOut)
+	}
+}
+
+func TestATypoSaysTheCommandMeant(t *testing.T) {
+	// The command meant, when one is near; the help, when none is.
+	for args, want := range map[string]string{"lst": "did you mean: wsl-shrinker list", "config pth": "did you mean: wsl-shrinker config path",
+		"zzzz": "wsl-shrinker --help lists the commands", "list extra": "wsl-shrinker list --help"} {
+		code, _, errOut := runCLI(t, strings.Fields(args)...)
+		if code != exitUsage || !strings.Contains(errOut, want) {
+			t.Errorf("%s: exit %d, %q", args, code, errOut)
+		}
 	}
 }

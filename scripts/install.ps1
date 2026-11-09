@@ -50,10 +50,17 @@
       }
     }
     # The two programs, and the copies an install cut short left beside them.
+    # What was there is counted, so a second uninstall does not claim to
+    # have removed anything.
+    $found = 0
     foreach ($f in $files) {
-      foreach ($n in $f, "$f.new") { Remove-Item -LiteralPath (Join-Path $binDir $n) -Force -ErrorAction SilentlyContinue }
+      foreach ($n in $f, "$f.new") {
+        $p = Join-Path $binDir $n
+        if (Test-Path -LiteralPath $p) { $found++ }
+        Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+      }
     }
-    Write-Host "removed wsl-shrinker from $binDir"
+    if ($found) { Write-Host "removed wsl-shrinker from $binDir" } else { Write-Host "wsl-shrinker is not installed in $binDir" }
     # The folder goes too once nothing else is in it, and with it its PATH
     # entry. A folder that holds other files, as one the PATH had before
     # (WSL_SHRINKER_BIN_DIR set to it), keeps them and its entry: the install
@@ -83,8 +90,8 @@
     } elseif (Test-Path -LiteralPath (Join-Path $state 'run.json')) {
       # The journal of a run cut off is what recover needs to start a
       # distribution and its containers again: it is not thrown away.
-      Write-Host "kept ${state}: a run was cut off there; install wsl-shrinker again and run wsl-shrinker recover first"
       Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+      Write-Host "removed the settings; kept ${state}: a run was cut off there; install wsl-shrinker again and run wsl-shrinker recover first"
     } else {
       foreach ($d in $data, $state) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
       Write-Host "removed the settings and the history"
@@ -124,7 +131,7 @@
           $url = $resp.ResponseUri.AbsoluteUri
           $resp.Close()
         } catch {
-          throw 'wsl-shrinker install: could not find the latest release; set WSL_SHRINKER_BASE_URL and WSL_SHRINKER_VERSION'
+          throw "wsl-shrinker install: could not find the latest release: $($_.Exception.Message); check the connection, or set WSL_SHRINKER_VERSION, like v0.5.0"
         }
         if ($url -notmatch '/releases/tag/(.+)$') { throw 'wsl-shrinker install: no release published yet; set WSL_SHRINKER_VERSION' }
         $version = $Matches[1]
@@ -138,7 +145,7 @@
         $wc.DownloadFile("$base/$version/$name", $zip)
         $wc.DownloadFile("$base/$version/checksums.txt", (Join-Path $tmp 'checksums.txt'))
       } catch {
-        throw "wsl-shrinker install: could not download $name"
+        throw "wsl-shrinker install: could not download $name from $base/${version}: $($_.Exception.Message); check WSL_SHRINKER_VERSION and the connection"
       }
       # The release's checksum. Get-FileHash is missing from some PowerShell
       # setups, so the hash is computed directly.
@@ -148,7 +155,7 @@
       $sha = [Security.Cryptography.SHA256]::Create()
       $stream = [IO.File]::OpenRead($zip)
       try { $got = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Close() }
-      if ($got -ne $want) { throw "wsl-shrinker install: checksum mismatch for $name" }
+      if ($got -ne $want) { throw "wsl-shrinker install: checksum mismatch for ${name}: the download was damaged or changed; run the install again, and report it if it repeats" }
     }
 
     Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'x') -Force

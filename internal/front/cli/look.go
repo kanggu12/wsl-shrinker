@@ -78,7 +78,10 @@ type look struct{ on bool }
 // off for a pipe, a file, NO_COLOR, or a terminal that says it is dumb.
 func lookFor(w io.Writer) look {
 	f, ok := w.(*os.File)
-	return look{on: ok && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb" && winapi.Colors(f.Fd())}
+	// A terminal WSL's launcher writes this program's pipes to takes colors
+	// as the console would.
+	tty := ok && (winapi.Colors(f.Fd()) || relayed() && (f == os.Stdout || f == os.Stderr))
+	return look{on: tty && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"}
 }
 
 // paint colors s with one of the terminal's sixteen colors. The marks in

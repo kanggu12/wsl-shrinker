@@ -60,6 +60,13 @@ type Settings struct {
 	Mode string `json:"mode"`
 	// First is a PC with no settings file yet: setup comes first.
 	First bool `json:"first"`
+	// LanguageSetting is the language as set, "auto" too; AutoLanguage
+	// what auto picks on Windows; MinGainGB the size worth shrinking; Path
+	// the settings file. Setup drawn here starts from them.
+	LanguageSetting string  `json:"language_setting"`
+	AutoLanguage    string  `json:"auto_language"`
+	MinGainGB       float64 `json:"min_gain_gb"`
+	Path            string  `json:"path"`
 }
 
 // Backend answers the screen through wsl-shrinker.exe.

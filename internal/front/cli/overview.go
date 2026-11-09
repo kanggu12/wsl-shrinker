@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -37,7 +38,7 @@ func tuiCmd(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A wrong value stops before anything is read.
 			if !slices.Contains(themes, theme) {
-				return fmt.Errorf("%w: --theme takes dark or light", errUsage)
+				return fmt.Errorf("%w: --theme takes auto, dark or light", errUsage)
 			}
 			// The screen draws on a terminal; a pipe gets nothing it can use.
 			if !stdoutIsTerminal() {
@@ -50,7 +51,7 @@ func tuiCmd(p *apps) *cobra.Command {
 			return screen(cmd.Context(), a, theme, tui.Options{}, false, cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().StringVar(&theme, "theme", "", "colors of the screen: dark or light (default: the settings, then ask the terminal)")
+	cmd.Flags().StringVar(&theme, "theme", "", "colors of the screen: auto, dark or light (default: the settings, then ask the terminal)")
 	return cmd
 }
 
@@ -127,6 +128,8 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 			// Said in words, not by its pink alone, which a narrow table
 			// keeps when the note column goes.
 			state = l.safe(i18n.T("state.protected"))
+		case blockedWord(d) != "":
+			state = l.bad(state)
 		case d.Running || (d.Kind != disks.KindDistro && d.File.Held):
 			state = l.live(state)
 		}
@@ -163,8 +166,22 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 	slices.SortStableFunc(shrinkable, func(x, y disks.Disk) int { return cmp.Compare(y.Estimate.Reclaim, x.Estimate.Reclaim) })
 	var cmds [][2]string
 	// None that can be shrunk now: no shrink to suggest.
+	// The ones worth it, all of them, as the summary counts them; else the
+	// one that gives back most.
 	if len(shrinkable) > 0 {
-		cmds = append(cmds, [2]string{"wsl-shrinker shrink " + ui.ShellArg(shrinkable[0].Name), i18n.T("overview.cmd.shrink")})
+		names := []string{ui.ShellArg(shrinkable[0].Name)}
+		if len(worth) > 0 {
+			names = names[:0]
+			slices.SortStableFunc(worth, func(x, y disks.Disk) int { return cmp.Compare(y.Estimate.Reclaim, x.Estimate.Reclaim) })
+			for _, d := range worth {
+				names = append(names, ui.ShellArg(d.Name))
+			}
+		}
+		// A terminal too narrow for them all gets the first, whole.
+		if 2+ansi.StringWidth("wsl-shrinker shrink "+strings.Join(names, " ")) > width-1 {
+			names = names[:1]
+		}
+		cmds = append(cmds, [2]string{"wsl-shrinker shrink " + strings.Join(names, " "), i18n.T("overview.cmd.shrink")})
 	}
 	// A look inside needs a running distribution: the one worth most, or
 	// any that runs.
@@ -176,7 +193,8 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 		[2]string{"wsl-shrinker tui", i18n.T("overview.cmd.tui")},
 		[2]string{"wsl-shrinker setup", i18n.T("overview.cmd.setup")},
 		[2]string{"wsl-shrinker --help", i18n.T("overview.cmd.help")})
-	// Each command whole; what it does, cut to the terminal when it must be.
+	// Each command whole; what it does, when it fits whole: a cut one says
+	// nothing.
 	cmdW := 0
 	for _, c := range cmds {
 		cmdW = max(cmdW, ansi.StringWidth(c[0]))
@@ -185,12 +203,8 @@ func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int
 	room := width - 1 - (2 + cmdW + 2)
 	for _, c := range cmds {
 		what := c[1]
-		switch {
-		case room < 8:
-			// Too narrow to say anything useful: the commands alone.
+		if ansi.StringWidth(what) > room {
 			what = ""
-		case ansi.StringWidth(what) > room:
-			what = ansi.Truncate(what, room-1, "") + "…"
 		}
 		hints = append(hints, []string{"  " + l.bold(c[0]), l.muted(what)})
 	}
@@ -261,11 +275,12 @@ func fitTable(rows [][]string, right []bool, width int) ([][]string, []bool) {
 func overviewLook(l look, d disks.Disk, block shrink.Block, minGain int64) (func(string) string, string) {
 	switch block {
 	case shrink.BlockProtected:
-		return l.safe, l.safe(i18n.T("setup.disk.protected"))
+		// The state says "protected" already: the note says what to do.
+		return l.safe, l.muted(i18n.T("overview.protected", d.Name))
 	case shrink.BlockHeld:
 		// Docker Desktop's disk, or a file another program has open.
 		// The state says "in use" already: the note says what to do.
-		if d.Kind == disks.KindDocker {
+		if d.Kind == disks.KindDocker || shrink.DockerDesktops(d) {
 			return l.live, l.muted(i18n.T("overview.held"))
 		}
 		return l.live, l.muted(i18n.T("overview.held.file"))
@@ -287,18 +302,42 @@ func overviewLook(l look, d disks.Disk, block shrink.Block, minGain int64) (func
 	return l.bad, ""
 }
 
-// widthOf is the width of the terminal w writes to, 100 when it is none.
+// widthOf is the width of the terminal w writes to, 100 when it is none. A
+// terminal WSL's launcher relays says its width itself.
 func widthOf(w io.Writer) int {
 	if f, ok := w.(*os.File); ok {
 		if tw, _, err := term.GetSize(f.Fd()); err == nil && tw > 0 {
 			return tw
 		}
+		if n, err := strconv.Atoi(os.Getenv("WSL_SHRINKER_COLUMNS")); relayed() && err == nil && n > 0 {
+			return n
+		}
 	}
 	return 100
 }
 
+// blockedWord is the state of a disk that cannot be shrunk whatever is
+// done to WSL: unreadable, encrypted, or with errors on its filesystem; ""
+// for any other.
+func blockedWord(d disks.Disk) string {
+	switch {
+	case d.Err != "" || d.Estimate == nil:
+		return i18n.T("state.unreadable")
+	case d.File.Encrypted:
+		return i18n.T("state.encrypted")
+	case d.Estimate.FSErrors:
+		return i18n.T("state.fserrors")
+	}
+	return ""
+}
+
 // stateWords is a disk's state in the screen's words.
 func stateWords(d disks.Disk) string {
+	// A disk that cannot be shrunk says why first: its name for the
+	// state, not "stopped", which reads as ready.
+	if w := blockedWord(d); w != "" {
+		return w
+	}
 	switch {
 	case d.Kind != disks.KindDistro && d.File.Held:
 		return i18n.T("state.inuse")

@@ -773,7 +773,7 @@ func (m setupModel) pageKeys() [][2]string {
 	case stepWelcome:
 		return [][2]string{{"esc", leave}, {"⏎", i18n.T("key.start")}}
 	case stepProtect:
-		return [][2]string{{"esc", leave}, back, {"↑↓", i18n.T("key.select")}, {"space", i18n.T("key.protect")}, {"⏎", i18n.T("key.next")}}
+		return [][2]string{{"esc", leave}, back, {"↑↓", i18n.T("key.choose")}, {"space", i18n.T("key.protect")}, {"⏎", i18n.T("key.next")}}
 	case stepReady:
 		return [][2]string{{"esc", leave}, back, {"⏎", i18n.T("key.save")}}
 	}

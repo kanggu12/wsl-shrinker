@@ -35,8 +35,13 @@ import (
 var (
 	stdinIsTerminal  = func() bool { return term.IsTerminal(os.Stdin.Fd()) }
 	stdoutIsTerminal = func() bool { return term.IsTerminal(os.Stdout.Fd()) }
-	openScreen       = tui.Run
-	openSetup        = tui.RunSetup
+	// relayed reports a person at a terminal this program reaches only
+	// through pipes: WSL's launcher says so when it starts the .exe from a
+	// terminal Windows has no console for (zellij, tmux, any Linux one).
+	// A question, colors and CLI mode's table work then; a screen does not.
+	relayed    = func() bool { return os.Getenv("WSL_SHRINKER_TTY") == "1" }
+	openScreen = tui.Run
+	openSetup  = tui.RunSetup
 )
 
 // listCmd prints every disk with its estimate.
@@ -66,13 +71,27 @@ func list(ctx context.Context, a *app.App, w io.Writer, asJSON bool) error {
 	}
 	if asJSON {
 		// None is an empty list, never null, for a script to loop over.
-		if ds == nil {
-			ds = []disks.Disk{}
+		// Each disk says whether it is protected, and the first thing that
+		// stands in the way of a shrink now, "" for none: a script learns it
+		// here rather than from a shrink that fails.
+		type listed struct {
+			disks.Disk
+			Protected bool   `json:"protected"`
+			Blocked   string `json:"blocked"`
+		}
+		canCompact := a.Info(ctx).CanCompact
+		out := []listed{}
+		for _, d := range ds {
+			e := listed{Disk: d, Protected: a.Config.Protected(d.Name)}
+			if bs := shrink.Preflight(d, canCompact, e.Protected); len(bs) > 0 {
+				e.Blocked = string(bs[0])
+			}
+			out = append(out, e)
 		}
 		return printJSON(w, struct {
-			Schema int          `json:"schema"`
-			Disks  []disks.Disk `json:"disks"`
-		}{schema, ds})
+			Schema int      `json:"schema"`
+			Disks  []listed `json:"disks"`
+		}{schema, out})
 	}
 	// Names and states read from the left, sizes line up on the right; the
 	// last column holds why a disk could not be read. On a terminal the
@@ -86,6 +105,15 @@ func list(ctx context.Context, a *app.App, w io.Writer, asJSON bool) error {
 	for _, d := range ds {
 		state := "stopped"
 		switch {
+		case a.Config.Protected(d.Name):
+			// Never shrunk, whatever else it is.
+			state = "protected"
+		case d.Err != "" || d.Estimate == nil:
+			state = "unreadable"
+		case d.File.Encrypted:
+			state = "encrypted"
+		case d.Estimate.FSErrors:
+			state = "fs errors"
 		case d.Kind != disks.KindDistro && d.File.Held:
 			// Docker Desktop's disk, or a file from the settings, that its
 			// program has open.
@@ -95,7 +123,12 @@ func list(ctx context.Context, a *app.App, w io.Writer, asJSON bool) error {
 		case d.Running:
 			state = "running"
 		}
-		if d.Running || state == "in use" {
+		switch {
+		case state == "protected":
+			state = l.safe(state)
+		case state == "unreadable" || state == "encrypted" || state == "fs errors":
+			state = l.bad(state)
+		case d.Running || state == "in use":
 			state = l.live(state)
 		}
 		if d.Estimate == nil {
@@ -141,13 +174,20 @@ func insideCmd(p *apps) *cobra.Command {
 				return insideHint(err, args[0])
 			}
 			if asJSON {
+				// The distribution as WSL names it, whatever case it was typed in.
+				name := args[0]
+				if all, err := a.WSL.Distros(cmd.Context()); err == nil {
+					if i := slices.IndexFunc(all, func(d wsl.Distro) bool { return strings.EqualFold(d.Name, name) }); i >= 0 {
+						name = all[i].Name
+					}
+				}
 				// The whole look: the root filesystem's numbers, Docker, and
 				// the items with their ids.
 				return printJSON(cmd.OutOrStdout(), struct {
 					Schema       int    `json:"schema"`
 					Distribution string `json:"distribution"`
 					survey.Result
-				}{schema, args[0], r})
+				}{schema, name, r})
 			}
 			// The size lines up on the right, the words on the left.
 			rows := [][]string{{"SIZE", "KIND", "ID", "WHERE"}}
@@ -183,7 +223,7 @@ func shrinkCmd(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The question needs someone to answer it: without a terminal and
 			// without --yes, stop before anything is read or asked.
-			if !yes && !stdinIsTerminal() {
+			if !yes && !stdinIsTerminal() && !relayed() {
 				return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to shrink without the question")
 			}
 			a, err := p.get()
@@ -227,6 +267,16 @@ func shrinkCmd(p *apps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// From inside WSL, the distribution this runs in may stop: go on
+			// in a new window when any running distribution is in the queue.
+			moves := slices.ContainsFunc(queue, func(d disks.Disk) bool { return d.Running && d.Distro != "" && a.Hosts(d.Distro) })
+			// The run moves to the screen in a new window, and its result
+			// stays there: a script waiting on this command could not read
+			// it, so --json is refused, before the question, rather than
+			// answered with nothing.
+			if moves && asJSON {
+				return hint(fmt.Errorf("%w: --json cannot follow a run into a new window", errUsage), "run it from PowerShell")
+			}
 			if !yes {
 				for _, d := range queue {
 					gain := "?"
@@ -248,15 +298,7 @@ func shrinkCmd(p *apps) *cobra.Command {
 					return fmt.Errorf("not shrunk")
 				}
 			}
-			// From inside WSL, the distribution this runs in may stop: go on
-			// in a new window when any running distribution is in the queue.
-			if slices.ContainsFunc(queue, func(d disks.Disk) bool { return d.Running && d.Distro != "" && a.Hosts(d.Distro) }) {
-				// The run moves to the screen in a new window, and its result
-				// stays there: a script waiting on this command could not read
-				// it, so --json is refused rather than answered with nothing.
-				if asJSON {
-					return hint(fmt.Errorf("%w: --json cannot follow a run into a new window", errUsage), "run it from PowerShell")
-				}
+			if moves {
 				if err := app.Reopen(app.HandoffArgs(cmd.Flag("lang").Value.String(), queue, chosen)); err != nil {
 					return err
 				}
@@ -648,7 +690,7 @@ func configCmd() *cobra.Command {
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				p := config.Path(winapi.AppData())
 				if _, err := os.Stat(p); err == nil {
-					return fmt.Errorf("%s exists already", p)
+					return hint(fmt.Errorf("%s exists already", p), "wsl-shrinker setup changes it; move it away to start from the defaults")
 				}
 				if err := os.MkdirAll(dirOf(p), 0o755); err != nil {
 					return err

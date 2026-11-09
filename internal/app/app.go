@@ -194,28 +194,40 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 	case e.Distro == "" && e.Disk != "":
 		// A file's program (Docker Desktop) is the person's to start.
 		msg = e.Disk + " is a file: start the program that uses it again"
-	case e.Distro != "" && e.Stopped:
-		// WSL ends a compaction it began on its own; until then the disk is
-		// held and the distribution down.
-		if ds, err := disks.Find(ctx, a.DisksEnv()); err == nil {
-			for _, d := range ds {
-				if !strings.EqualFold(d.Name, e.Disk) {
-					continue
-				}
-				if d.File.Held && !d.Running {
-					return "", fmt.Errorf("WSL is still compacting %s; try again when it is done", e.Disk)
-				}
-				// Cut off once the compaction began, before the disk was
-				// read again: it is read now, and a disk that does not read
-				// cleanly stays stopped, as a run leaves it. The journal
-				// goes: what is left is the person's to look into.
-				if (e.Step == string(shrink.StepCompact) || e.Step == string(shrink.StepVerify)) && (d.Estimate == nil || d.Estimate.FSErrors) {
-					if err := a.Journal.End(); err != nil {
-						return "", err
-					}
-					return "", fmt.Errorf("%s was cut off after its compaction began, and its disk does not read cleanly; it stays stopped until you know why (see Troubleshooting)", e.Disk)
-				}
+	case e.Distro != "":
+		// The disk as it is now. WSL ends a compaction it began on its own;
+		// until then the disk is held and the distribution down, whether the
+		// run had stopped it or found it stopped.
+		var d *disks.Disk
+		ds, err := disks.Find(ctx, a.DisksEnv())
+		for i := range ds {
+			if strings.EqualFold(ds[i].Name, e.Disk) {
+				d = &ds[i]
 			}
+		}
+		if err == nil && d == nil {
+			// Unregistered since: nothing is left to start, and a journal
+			// kept for it would hold every later run back.
+			if err := a.Journal.End(); err != nil {
+				return "", err
+			}
+			return e.Disk + " is no longer registered in WSL; the run that was cut off is closed", nil
+		}
+		if d != nil && d.File.Held && !d.Running {
+			return "", fmt.Errorf("WSL is still compacting %s; try again when it is done", e.Disk)
+		}
+		// Cut off once the compaction began, before the disk was read
+		// again: it is read now, and a disk that does not read cleanly stays
+		// stopped, as a run leaves it. The journal goes: what is left is the
+		// person's to look into.
+		if d != nil && (e.Step == string(shrink.StepCompact) || e.Step == string(shrink.StepVerify)) && (d.Estimate == nil || d.Estimate.FSErrors) {
+			if err := a.Journal.End(); err != nil {
+				return "", err
+			}
+			return "", fmt.Errorf("%s was cut off after its compaction began, and its disk does not read cleanly; it stays stopped until you know why (see Troubleshooting)", e.Disk)
+		}
+		if !e.Stopped {
+			break
 		}
 		ev, err := shrink.StartAgain(ctx, a.ShrinkEnv(ctx), e.Distro, e.Containers)
 		if err != nil {

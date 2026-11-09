@@ -5,6 +5,7 @@ package version
 import (
 	"regexp"
 	"runtime/debug"
+	"strings"
 )
 
 // pseudo matches the end of a Go pseudo-version, "-20261107192537-1d1924b3cf34"
@@ -26,6 +27,13 @@ var (
 	Commit  = ""
 	Date    = ""
 )
+
+// Short returns the version alone, "v0.1.0", or "dev" for a source build:
+// what the screen shows next to the name.
+func Short() string {
+	v, _, _ := strings.Cut(String(), " ")
+	return v
+}
 
 // String returns "v0.1.0 (abc1234, 2026-11-04)" or the best a source build knows.
 func String() string {

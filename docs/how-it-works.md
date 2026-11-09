@@ -129,9 +129,11 @@ run starts. The journal also keeps two runs, in two windows, from going at once.
 lines. The disks are Windows' to read and to compact; keys, resizing and colors stay the terminal's own, in tmux or
 zellij too. This works only with the `wsl-shrinker.exe` of its own build. With another, or with
 `WSL_SHRINKER_SCREEN=windows`, the screen runs in `wsl-shrinker.exe` as a Windows program, which WSL gives a console of
-its own. Every other command line goes to `wsl-shrinker.exe`, with the distribution's name (`WSLENV`). On a first
-start, setup runs in `wsl-shrinker.exe` in the same terminal, and what it chose decides what comes next; in CLI mode,
-`wsl-shrinker.exe` prints the disks.
+its own. Setup's screen runs in the Linux terminal the same way and saves through `wsl-shrinker.exe setup` with the
+choices as flags; on a first start it comes first, and what it chose decides what comes next. Every other command line
+goes to `wsl-shrinker.exe`, with the distribution's name (`WSLENV`). From a terminal, `WSL_SHRINKER_TTY=1` and the
+terminal's width go along too: `wsl-shrinker.exe` sees only pipes there, and so asks `shrink`'s question, colors its
+lines and prints CLI mode's table as it would in a console.
 
 Before starting `wsl-shrinker.exe`, the launcher reads the program's header. Windows would stop a build for another
 processor (an ARM64 one on an x64 PC) with a dialog on the desktop, far from the terminal; the launcher says so in the

@@ -44,7 +44,7 @@ var (
 	// wide are the characters an East Asian console draws two cells wide:
 	// marks, arrows and the lines of a box, whose corners become +. A step
 	// waiting is ., apart from - for one skipped.
-	wide = []string{"▪", "#", "·", ".", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
+	wide = []string{"▪", "#", "█", "#", "·", ".", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
 		"│", "|", "─", "-", "╭", "+", "╮", "+", "╰", "+", "╯", "+", "┌", "+", "┐", "+", "└", "+", "┘", "+",
 		"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+", "═", "=", "║", "|", "●", "*", "•", "*", "›", ">"}
 	// arrows are the arrows in words not measured yet, two cells each, so

@@ -94,6 +94,14 @@ func (t Theme) KeyCap(key, label string) string {
 	return k + " " + Fg(t.Muted).Render(label)
 }
 
+// Logo is the mark as the logo draws it, three rows of three blocks, each two
+// cells wide to look square: the data that stays in slate, stepped down to
+// the left, and the blocks that go back to Windows in teal, up on the right.
+func (t Theme) Logo() []string {
+	s, g := Fg(t.Stays).Render("██"), Fg(t.Mark).Render("██")
+	return []string{s + " " + g + " " + g, s + " " + s + " " + g, s + " " + s + " " + s}
+}
+
 // Chip is the name in the header, as the logo draws it: two blocks of data
 // that stay, one that goes back, then the name.
 func (t Theme) Chip(s string) string {

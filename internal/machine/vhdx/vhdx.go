@@ -381,9 +381,15 @@ func (d *Disk) readBAT(r io.ReaderAt) error {
 		switch state {
 		case stateFullyPresent:
 			// The file offset is in MiB, in bits 20 to 63.
-			b.Offset = int64(e>>20) * mib
-			// A block outside the file means the BAT cannot be trusted.
-			if b.Offset < 0 || b.Offset+int64(d.BlockSize) > d.FileSize {
+			// A block outside the file means the BAT cannot be trusted; the
+			// offset is checked before it is multiplied, so a damaged entry
+			// cannot wrap around to a small number.
+			mibs := e >> 20
+			if d.FileSize < 0 || mibs > uint64(d.FileSize)>>20 {
+				return fmt.Errorf("vhdx: block %d lies past the end of the file", i)
+			}
+			b.Offset = int64(mibs) * mib
+			if b.Offset > d.FileSize-int64(d.BlockSize) {
 				return fmt.Errorf("vhdx: block %d lies past the end of the file", i)
 			}
 		case statePartlyPresent:

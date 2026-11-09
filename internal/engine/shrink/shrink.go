@@ -225,10 +225,21 @@ func Preflight(d disks.Disk, canCompact, protected bool) []Block {
 	if d.Distro == "" && d.File.Held {
 		out = append(out, BlockHeld)
 	}
+	// Docker Desktop's own distributions are its to run: while they run,
+	// Docker Desktop holds them as it holds its data disk.
+	if DockerDesktops(d) && d.Running {
+		out = append(out, BlockHeld)
+	}
 	if d.Distro != "" && !canCompact {
 		out = append(out, BlockNoCompact)
 	}
 	return out
+}
+
+// DockerDesktops reports whether d is a distribution Docker Desktop
+// registers for itself, docker-desktop or the older docker-desktop-data.
+func DockerDesktops(d disks.Disk) bool {
+	return strings.EqualFold(d.Distro, "docker-desktop") || strings.EqualFold(d.Distro, "docker-desktop-data")
 }
 
 // Reason is a block in English, as the run's check and the command line
@@ -247,7 +258,7 @@ func (b Block) Reason(d disks.Disk) string {
 		// them, and e2fsck should see the disk first.
 		return "the filesystem records errors; check it with e2fsck first"
 	case BlockHeld:
-		if d.Kind == disks.KindDocker {
+		if d.Kind == disks.KindDocker || DockerDesktops(d) {
 			return "the file is in use; quit Docker Desktop first"
 		}
 		return "the file is in use; close the program that uses it first"
@@ -970,7 +981,10 @@ func readOnly(ctx context.Context, env Env, distro string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	opts := strings.TrimSpace(out)
+	// The options are the last line: wsl.exe can put a warning of its own
+	// before what the command printed.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	opts := strings.TrimSpace(lines[len(lines)-1])
 	return opts == "ro" || strings.HasPrefix(opts, "ro,"), nil
 }
 

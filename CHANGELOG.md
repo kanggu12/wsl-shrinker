@@ -6,6 +6,45 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-10
+
+The numbers 0.3 and 0.4 were used before the version numbers started over at 0.1.0, and stay retracted: this release
+takes the next minor number free.
+
+### Added
+
+- The screen's header shows wsl-shrinker's mark and the version, and help and the loading screen open with the logo,
+  the version and what the tool does.
+- From a WSL terminal, tmux and zellij included, setup draws in that terminal too, and saves through
+  `wsl-shrinker.exe setup` with the choices as flags. `wsl-shrinker.exe`, which sees only pipes there, is told a person
+  is at the terminal: `shrink` asks its question, the lines take their colors and marks, and CLI mode prints its table
+  rather than the bare list. Before, a first start there stopped with "setup needs a terminal".
+- `list --json` says for each disk whether it is `protected`, and in `blocked` what stands in the way of a shrink now.
+  The CLI table says `protected`, `unreadable`, `encrypted` or `fs errors` in its state column, as the screen does.
+- A mistyped command names the one meant (`did you mean: wsl-shrinker list`); other mistakes in a command line point at
+  the command's `--help`.
+
+### Fixed
+
+- Docker Desktop's own distributions are not shrunk while they run: Docker Desktop holds them as it holds its data disk.
+- A distribution's root read as writable when WSL printed a warning line before the answer.
+- `recover` no longer keeps a run's lock forever when its distribution was unregistered, and waits while WSL still
+  compacts the disk.
+- A VHDX whose block table points past the end of the file is refused instead of read.
+- `shrink --json` from inside the distribution it would stop refuses before the question, not after it.
+- `inside --json` names the distribution as WSL does, whatever case it was typed in.
+- Choosing what to remove after a look inside failed says it failed, not that there is nothing to remove. The keys
+  under the disks leave out `s` while a run is cut off or going on, the question to shrink opens without an older note
+  above it, `wsl -d NAME` is never split across lines, and the history shows no total before the first run.
+- `doctor`'s failed checks read as failures ("WSL does not answer wsl --version"), and a protected disk's note says how
+  to shrink it. CLI mode's protected disks say the command to use rather than "protected" twice, and its shrink example
+  names every disk worth shrinking. A description that does not fit is left out rather than cut.
+- `--lang` and `--theme` say they take `auto` too. `config init` on an existing file says what to do instead.
+- The installer says why a download failed, what a checksum mismatch means, and that nothing was installed when an
+  uninstall finds nothing.
+- Korean wording: shorter notes for a disk in use or with filesystem errors, "줄이기 전" and "줄인 뒤" for the bars, and
+  clearer words for a running disk's reading, the compaction, `recover`, setup's last page and the help's colors.
+
 ## [0.2.2] - 2026-11-09
 
 ### Changed
@@ -97,7 +136,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.0
 [0.2.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.1
 [0.2.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.0

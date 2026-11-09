@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/kanggu12/wsl-shrinker/internal/app/remote"
+	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
 )
 
 func TestWSLENV(t *testing.T) {
@@ -199,6 +200,9 @@ func TestTheWindowsBuildIsReadFromVer(t *testing.T) {
 	}
 }
 
+// launchedEnv is the environment launch would have started the .exe with.
+var launchedEnv []string
+
 // stopped is how a test's exit ends forward: with the code it was given.
 type stopped int
 
@@ -225,7 +229,8 @@ func launch(t *testing.T, exe string, terminal bool, args ...string) (code int, 
 	os.Args = append([]string{"wsl-shrinker"}, args...)
 	locate = func() string { return exe }
 	inTerminal = func() bool { return terminal }
-	execve = func(argv0 string, _ []string, _ []string) error {
+	execve = func(argv0 string, _ []string, env []string) error {
+		launchedEnv = env
 		started = append(started, "exec "+argv0)
 		return errors.New("not started in a test")
 	}
@@ -306,7 +311,7 @@ func TestSetupEndedBySignalIsAPlainFailure(t *testing.T) {
 	t.Cleanup(func() { runChild = saved })
 	for script, want := range map[string]int{"exit 0": 0, "exit 3": 3, "kill -INT $$": 1, "kill -HUP $$": 1} {
 		runChild = func(*exec.Cmd) error { return exec.Command("sh", "-c", script).Run() }
-		if got := setupFirst("wsl-shrinker.exe", nil, ""); got != want {
+		if got := runExe("wsl-shrinker.exe", nil, []string{"setup"}); got != want {
 			t.Errorf("%s: %d, want %d", script, got, want)
 		}
 	}
@@ -321,5 +326,39 @@ func TestAWindowsProgramThatCannotStartSaysWhy(t *testing.T) {
 	}
 	if h := startHint(&os.PathError{Op: "fork/exec", Path: "x", Err: syscall.EACCES}); h != "" {
 		t.Fatalf("%q", h)
+	}
+}
+
+func TestSetupDrawnHereSavesThroughTheExesFlags(t *testing.T) {
+	// The flags carry every value, and the protection as what to add and
+	// drop against what is protected now, in any case.
+	got := strings.Join(setupArgs(tui.SetupChoice{Language: "ko", Theme: "auto", Mode: "cli", MinGainGB: 5, Protect: []string{"work", "Dev"}}, []string{"Work", "Old"}), " ")
+	want := "setup --language ko --theme auto --mode cli --min-gain 5 --protect Dev --unprotect Old"
+	if got != want {
+		t.Fatalf("%s\nwant %s", got, want)
+	}
+	// Only setup alone, or with --lang, is drawn here; flags of its own go
+	// to the .exe.
+	for args, want := range map[string]bool{"setup": true, "setup --lang ko": true, "setup --lang=en": true,
+		"setup --mode cli": false, "setup --lang fr": false, "list": false, "": false} {
+		if _, ok := setupOnly(strings.Fields(args)); ok != want {
+			t.Errorf("%q: %v", args, ok)
+		}
+	}
+}
+
+func TestATerminalIsRelayedToTheExe(t *testing.T) {
+	// From a terminal the .exe is told a person is there, with the width;
+	// from a pipe it is not.
+	onHost(t, machineAMD64, 0, false)
+	exe := fakeExe(t, t.TempDir(), "x64.exe", machineAMD64)
+	for _, terminal := range []bool{true, false} {
+		launchedEnv = nil
+		launch(t, exe, terminal, "list")
+		joined := strings.Join(launchedEnv, "\n")
+		has := strings.Contains(joined, "WSL_SHRINKER_TTY=1") && strings.Contains(joined, "WSL_SHRINKER_TTY/w") && strings.Contains(joined, "WSL_SHRINKER_COLUMNS=")
+		if has != terminal {
+			t.Errorf("terminal %v: relayed %v", terminal, has)
+		}
 	}
 }

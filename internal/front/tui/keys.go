@@ -143,6 +143,12 @@ func (m model) openClean(d disks.Disk) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	// A look that failed found nothing because it could not look: say
+	// so, not that there is nothing to remove.
+	if s.err != nil {
+		m.say(i18n.T("inside.failed", oneLine(s.err.Error())), ui.CatBad)
+		return m, nil
+	}
 	if len(s.r.Items) == 0 {
 		m.say(i18n.T("toast.clean.nothing", d.Name), ui.CatSmall)
 		return m, nil
@@ -234,6 +240,8 @@ func (m model) openConfirm() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	// The question stands alone: a note from before would read as part of it.
+	m.toast = ""
 	m.mode = modeConfirm
 	return m, nil
 }

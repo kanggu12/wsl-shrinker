@@ -70,8 +70,16 @@ func backendCmd(p *apps) *cobra.Command {
 			Protect      []string `json:"protect"`
 			Mode         string   `json:"mode"`
 			First        bool     `json:"first"`
+			// What setup, drawn on the WSL side, starts from: the language
+			// as set ("auto" too), what auto picks here, the size in GB and
+			// the file the choices go to.
+			LanguageSetting string  `json:"language_setting"`
+			AutoLanguage    string  `json:"auto_language"`
+			MinGainGB       float64 `json:"min_gain_gb"`
+			Path            string  `json:"path"`
 		}{schema, string(i18n.Choose(c.Language, winapi.Korean())), c.Theme, int64(c.MinGainGB * (1 << 30)), protect,
-			c.Mode, a.ConfigPath != "" && !exists(a.ConfigPath)})
+			c.Mode, a.ConfigPath != "" && !exists(a.ConfigPath),
+			c.Language, string(i18n.Choose("auto", winapi.Korean())), c.MinGainGB, a.ConfigPath})
 	}})
 	// crashes takes the crashes this program kept and did not say yet, for
 	// the launcher's screen to say: this side's stderr reaches no one.

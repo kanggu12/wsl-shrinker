@@ -15,7 +15,7 @@ Installing, and running it from inside WSL:
 - ["Windows protected your PC"](#windows-protected-your-pc)
 - [Boxes where marks should be](#boxes-where-marks-should-be)
 
-## "WSL answers wsl --version"
+## "WSL does not answer wsl --version"
 
 `doctor` fails this check under the WSL built into older Windows 10, which has no `--version`, or with no WSL at all.
 `wsl --update` replaces the built-in one with the current WSL; with no WSL, `wsl --install` in an administrator

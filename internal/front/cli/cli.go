@@ -86,7 +86,7 @@ func runWith(args []string, out, errOut io.Writer, newApp func() (*app.App, erro
 	root.SetErr(errOut)
 	err := root.Execute()
 	if err != nil {
-		printErr(errOut, withHint(err))
+		printErr(errOut, withHint(usageHint(root, args, err)))
 	}
 	return exitFor(err)
 }
@@ -102,6 +102,36 @@ func withHint(err error) error {
 		return hint(err, "run it on Windows, or inside WSL with wsl-shrinker.exe installed on Windows")
 	}
 	return err
+}
+
+// usageHint adds what to do to cobra's own errors about how a command was
+// called: the command meant, for a word that is none, or the command's help.
+// Cobra's own suggestion lines are dropped: the hint says it in one.
+func usageHint(root *cobra.Command, args []string, err error) error {
+	var h hinted
+	if errors.As(err, &h) || !(cobraUsage(err) || errors.Is(err, errUsage)) {
+		return err
+	}
+	first, _, _ := strings.Cut(err.Error(), "\n")
+	c, rest, ferr := root.Find(args)
+	if ferr != nil || c == nil {
+		c = root
+	}
+	if word, ok := strings.CutPrefix(first, "unknown command "); ok {
+		// The word cobra did not know, as it quoted it.
+		w, _, _ := strings.Cut(strings.Trim(word, `"`), `"`)
+		if len(rest) > 0 && w == "" {
+			w = rest[0]
+		}
+		// Cobra sets the distance only on its own path; two letters off
+		// is its default too.
+		c.SuggestionsMinimumDistance = 2
+		if sug := c.SuggestionsFor(w); len(sug) > 0 {
+			return hint(fmt.Errorf("%w: %s", errUsage, first), "did you mean: "+c.CommandPath()+" "+sug[0])
+		}
+		return hint(fmt.Errorf("%w: %s", errUsage, first), c.CommandPath()+" --help lists the commands")
+	}
+	return hint(fmt.Errorf("%w: %s", errUsage, trimUsage(first)), c.CommandPath()+" --help")
 }
 
 // trimUsage drops the "usage: " that marks a mistake in how a command was
@@ -159,7 +189,7 @@ func newRoot(p *apps) *cobra.Command {
 				}
 			}
 			if setting != "" && setting != "auto" && setting != "en" && setting != "ko" {
-				return fmt.Errorf("%w: --lang takes en or ko", errUsage)
+				return fmt.Errorf("%w: --lang takes auto, en or ko", errUsage)
 			}
 			i18n.Set(i18n.Choose(setting, winapi.Korean()))
 			return nil
@@ -167,7 +197,7 @@ func newRoot(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A wrong theme is refused like a wrong language, before anything is read.
 			if !slices.Contains(themes, theme) {
-				return fmt.Errorf("%w: --theme takes dark or light", errUsage)
+				return fmt.Errorf("%w: --theme takes auto, dark or light", errUsage)
 			}
 			// The clean choices are checked first too: a mistake stops before the screen.
 			cleanMap, err := parseScreenClean(clean)
@@ -205,7 +235,12 @@ func newRoot(p *apps) *cobra.Command {
 			}
 			ctx, out := cmd.Context(), cmd.OutOrStdout()
 			// Without a terminal there is no screen to draw: print the list.
+			// A terminal WSL's launcher relays gets CLI mode's table, which
+			// needs no console; the launcher draws the screen and setup itself.
 			if !stdoutIsTerminal() {
+				if relayed() && len(run) == 0 && !reopened {
+					return overview(ctx, app.Backend{A: a}, out, lookFor(out), widthOf(out))
+				}
 				return list(ctx, a, out, false)
 			}
 			// The window a run moved to goes on with that run, on the screen;
@@ -231,10 +266,10 @@ func newRoot(p *apps) *cobra.Command {
 		},
 	}
 	root.Flags().BoolVar(&demo, "demo", false, "open the screen on a made-up PC; nothing real is read or changed")
-	root.Flags().StringVar(&theme, "theme", "", "colors of the screen: dark or light (default: the settings, then ask the terminal)")
+	root.Flags().StringVar(&theme, "theme", "", "colors of the screen: auto, dark or light (default: the settings, then ask the terminal)")
 	// The commands print English; the flag is on every command so a run that
 	// moves to a new window keeps the language of the screen there.
-	root.PersistentFlags().StringVar(&lang, "lang", "", "language of the screen: en or ko (default: the settings, then WSL_SHRINKER_LANG, then Windows)")
+	root.PersistentFlags().StringVar(&lang, "lang", "", "language of the screen, setup and CLI mode; the other commands print English: auto, en or ko (default: the settings, then WSL_SHRINKER_LANG, then Windows)")
 	root.Flags().StringVar(&snapshot, "snapshot", "", "print one frame WIDTHxHEIGHT of the demo and exit")
 	root.Flags().StringVar(&keys, "keys", "", "keys to press before --snapshot prints, like \"c space enter\"")
 	root.Flags().StringVar(&stopAt, "stop-at", "", "with --snapshot, stop a run while this step runs")

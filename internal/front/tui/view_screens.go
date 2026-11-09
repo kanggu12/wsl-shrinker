@@ -523,7 +523,11 @@ func (m model) pageOf(title string, lines []string, status string) string {
 	t := m.th
 	visible := m.pageVisible()
 	top := max(0, min(m.pageTop, len(lines)-visible))
-	body := []string{" " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(title), ""}
+	// A page with no title (help) starts with lines of its own instead.
+	var body []string
+	if title != "" {
+		body = []string{" " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(title), ""}
+	}
 	body = append(body, lines[top:min(len(lines), top+visible)]...)
 	keys := [][2]string{{"esc", i18n.T("key.back")}, {"q", i18n.T("key.quit")}}
 	if len(lines) > visible {
@@ -546,7 +550,12 @@ func (m model) historyView() string {
 	for _, e := range m.hist {
 		total += e.Freed
 	}
-	return m.pageOf(i18n.T("history.title"), m.historyLines(), i18n.T("history.total", units.Bytes(total)))
+	// No run yet gives back nothing in all: the empty list says it.
+	status := ""
+	if len(m.hist) > 0 {
+		status = i18n.T("history.total", units.Bytes(total))
+	}
+	return m.pageOf(i18n.T("history.title"), m.historyLines(), status)
 }
 
 // historyLines is one line per past run, newest first.
@@ -573,7 +582,7 @@ func (m model) historyLines() []string {
 
 // helpView explains the keys and what a shrink does.
 func (m model) helpView() string {
-	return m.pageOf(i18n.T("help.title"), m.helpLines(), "")
+	return m.pageOf("", m.helpLines(), "")
 }
 
 // helpLines is the help under its title: the keys, the clean list's keys,
@@ -581,7 +590,13 @@ func (m model) helpView() string {
 func (m model) helpLines() []string {
 	t := m.th
 	bold := lipgloss.NewStyle().Bold(true).Foreground(t.Ink)
+	// The logo and the version first: which program, which build. Then the
+	// keys, under a heading as "What a shrink does" is.
 	var body []string
+	for _, l := range m.logoBlock() {
+		body = append(body, " "+l)
+	}
+	body = append(body, "", " "+bold.Render(i18n.T("help.title")), "")
 	keys := [][2]string{
 		{"↑↓", "help.select"}, {"space", "help.mark"}, {"s ⏎", "help.shrink"}, {"c", "help.clean"},
 		{"r", "help.reload"}, {"R", "help.recover"}, {"h", "help.history"}, {"q", "help.quit"},

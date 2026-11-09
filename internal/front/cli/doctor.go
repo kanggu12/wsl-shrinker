@@ -71,7 +71,7 @@ func doctorCmd(made *apps) *cobra.Command {
 			// A run cut off is the first thing to fix; one going on is news.
 			switch e, st := a.Pending(); {
 			case st == journal.CutOff:
-				line(false, "a run of "+e.Disk+" was cut off at "+e.Step, "wsl-shrinker recover starts again what it stopped")
+				line(false, "a run of "+e.Disk+" was cut off at "+e.Step, "wsl-shrinker recover finishes it")
 			case st == journal.Going:
 				note(e.Disk + " is being shrunk by another wsl-shrinker")
 			}
@@ -82,9 +82,9 @@ func doctorCmd(made *apps) *cobra.Command {
 			ds, findErr := disks.Find(ctx, a.DisksEnv())
 			switch {
 			case info.Version == "":
-				line(false, "WSL answers wsl --version", wslFix(findErr == nil && len(ds) > 0))
+				line(false, "WSL does not answer wsl --version", wslFix(findErr == nil && len(ds) > 0))
 			case !info.CanCompact:
-				line(false, "WSL "+info.Version+" can compact (wsl --manage --compact)", "update WSL: wsl --update")
+				line(false, "WSL "+info.Version+" cannot compact (wsl --manage --compact)", "update WSL: wsl --update")
 			default:
 				line(true, "WSL "+info.Version+" can compact", "")
 			}
@@ -96,7 +96,7 @@ func doctorCmd(made *apps) *cobra.Command {
 				}
 			}
 			if findErr != nil {
-				line(false, "list the distributions: "+findErr.Error(), "")
+				line(false, "could not list the distributions: "+findErr.Error(), "wsl --status says why")
 				return problems(bad)
 			}
 			if len(ds) == 0 {
@@ -159,7 +159,7 @@ func doctorDisk(d disks.Disk, canCompact, protected bool, line func(bool, string
 			line(false, d.Name+": the filesystem records errors", "check it with e2fsck first: see Troubleshooting in the docs")
 		case shrink.BlockProtected:
 			// A choice made in the settings, not a problem.
-			note(d.Name + ": protected in the settings; it is never shrunk")
+			note(d.Name + ": protected in the settings; wsl-shrinker setup --unprotect " + d.Name + " shrinks it again")
 		case shrink.BlockHeld:
 			// Waiting on a program, not a problem.
 			if d.Kind == disks.KindDocker {

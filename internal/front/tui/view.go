@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	buildversion "github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // sideBySide is the width from which the details sit beside the table.
@@ -81,9 +83,10 @@ func (m model) bodyHeight() int { return m.height - 4 }
 // disks could give back on the right.
 func (m model) header() string {
 	t := m.th
-	chip, version, spin := t.Chip("wsl-shrinker"), "", ""
+	// The name with this build's version beside it, then WSL's, apart.
+	chip, version, spin := t.Chip("wsl-shrinker")+" "+ui.Fg(t.Ink).Render(buildversion.Short()), "", ""
 	if m.info.Version != "" {
-		version = ui.Fg(t.Muted).Render("  WSL " + m.info.Version)
+		version = ui.Fg(t.Muted).Render("  ·  WSL " + m.info.Version)
 	}
 	if m.loading {
 		spin = ui.Fg(t.Muted).Render(" ↻")
@@ -153,7 +156,8 @@ func (m model) mainView() string {
 	var body []string
 	switch {
 	case !m.loaded:
-		body = m.centered(h, ui.Fg(t.Muted).Render(i18n.T("loading")))
+		// The logo while the disks are read, and what is going on under it.
+		body = m.centered(h, append(m.logoBlock(), "", ui.Fg(t.Muted).Render(i18n.T("loading")))...)
 	case m.err != nil:
 		// The error says what is wrong in WSL's own words: show it whole,
 		// under what to do when that is known.
@@ -213,6 +217,29 @@ func (m model) centered(h int, lines ...string) []string {
 		out = append(out, lipgloss.PlaceHorizontal(m.width, lipgloss.Center, l))
 	}
 	return out
+}
+
+// logoBlock is the logo as the screen draws it: the mark, and beside it the
+// name with this build's version over the line that says what it does. Its
+// lines are padded to one width, so placed in the middle the mark stays square.
+func (m model) logoBlock() []string {
+	t := m.th
+	mark := t.Logo()
+	name := lipgloss.NewStyle().Foreground(t.Ink).Bold(true).Render("wsl-shrinker") + "  " + ui.Fg(t.Ink).Render(buildversion.Short())
+	room := max(10, m.width-lipgloss.Width(mark[0])-6)
+	lines := []string{
+		mark[0] + "   " + name,
+		mark[1] + "   " + ui.Fg(t.Muted).Render(ui.Fit(i18n.T("logo.tagline"), room)),
+		mark[2],
+	}
+	w := 0
+	for _, l := range lines {
+		w = max(w, lipgloss.Width(l))
+	}
+	for i, l := range lines {
+		lines[i] = l + strings.Repeat(" ", w-lipgloss.Width(l))
+	}
+	return lines
 }
 
 // category says what a disk's color means.
@@ -355,6 +382,14 @@ func (m model) stateWord(d disks.Disk) string {
 		// Said in words, not by its pink alone: it is never shrunk, whatever
 		// else it is.
 		return ui.Fg(t.Cat[ui.CatSafe]).Render(i18n.T("state.protected"))
+	case d.Err != "" || d.Estimate == nil:
+		// A disk that cannot be shrunk says why, not "stopped", which reads
+		// as ready.
+		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.unreadable"))
+	case d.File.Encrypted:
+		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.encrypted"))
+	case d.Estimate.FSErrors:
+		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.fserrors"))
 	case d.Distro == "" && d.File.Held:
 		// Docker Desktop's disk, or a file from the settings another program
 		// has open.
@@ -703,7 +738,12 @@ func (m model) footer() string {
 		{"c", i18n.T("key.clean")}, {"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")},
 		{"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")},
 	}
-	// A run cut off is finished first: its key leads, and never drops.
+	// While a run is cut off, or another wsl-shrinker runs one, s only says
+	// so: its key goes. A run cut off is finished first: its key leads, and
+	// never drops.
+	if m.unfinishedState == journal.CutOff || m.unfinishedState == journal.Going {
+		keys = slices.DeleteFunc(keys, func(k [2]string) bool { return k[0] == "s" })
+	}
 	if m.unfinishedState == journal.CutOff {
 		keys = append([][2]string{{"R", i18n.T("key.recover")}}, keys...)
 	}
@@ -923,6 +963,10 @@ func (m model) wrap(s, indent string, st lipgloss.Style) []string {
 // part.
 var amountRe = regexp.MustCompile(`(\d) (B|KB|MB|GB|TB)\b`)
 
+// commandRe matches "wsl -d NAME", a command a line must not part either:
+// it is read, and typed, as one.
+var commandRe = regexp.MustCompile(`wsl -d (\S+)`)
+
 // wrapTo is wrap for a column w cells wide, every line after indent. A line
 // already styled keeps its colors.
 func (m model) wrapTo(s string, width int, indent string, st lipgloss.Style) []string {
@@ -935,6 +979,7 @@ func (m model) wrapHang(s string, width int, first, rest string, st lipgloss.Sty
 	w := max(10, width-max(lipgloss.Width(first), lipgloss.Width(rest))-1)
 	// A no-break space holds each amount to its unit while the text wraps.
 	s = amountRe.ReplaceAllString(s, "$1\u00a0$2")
+	s = commandRe.ReplaceAllString(s, "wsl\u00a0-d\u00a0$1")
 	var out []string
 	for l := range strings.SplitSeq(lipgloss.NewStyle().Width(w).Render(s), "\n") {
 		l = strings.ReplaceAll(strings.TrimRight(l, " "), "\u00a0", " ")

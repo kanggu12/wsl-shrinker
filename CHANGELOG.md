@@ -15,10 +15,10 @@ takes the next minor number free.
 
 - The screen's header shows wsl-shrinker's mark and the version, and help and the loading screen open with the logo,
   the version and what the tool does.
-- From a WSL terminal, tmux and zellij included, setup draws in that terminal too, and saves through
-  `wsl-shrinker.exe setup` with the choices as flags. `wsl-shrinker.exe`, which sees only pipes there, is told a person
-  is at the terminal: `shrink` asks its question, the lines take their colors and marks, and CLI mode prints its table
-  rather than the bare list. Before, a first start there stopped with "setup needs a terminal".
+- From a WSL terminal, tmux and zellij included, setup draws in that terminal too, and saves what changed through
+  `wsl-shrinker.exe setup` with the choices as flags. `wsl-shrinker.exe`, which may see only pipes there, is told which
+  of its ends a person is at: `shrink` asks its question, the lines take their colors and marks, and CLI mode prints its
+  table rather than the bare list. Before, a first start there could stop with "setup needs a terminal".
 - `list --json` says for each disk whether it is `protected`, and in `blocked` what stands in the way of a shrink now.
   The CLI table says `protected`, `unreadable`, `encrypted` or `fs errors` in its state column, as the screen does.
 - A mistyped command names the one meant (`did you mean: wsl-shrinker list`); other mistakes in a command line point at
@@ -32,6 +32,8 @@ takes the next minor number free.
   compacts the disk.
 - A VHDX whose block table points past the end of the file is refused instead of read.
 - `shrink --json` from inside the distribution it would stop refuses before the question, not after it.
+- A run that failed before the disk was measured again shows no expected size under it, which read as if the disk had
+  been shrunk.
 - `inside --json` names the distribution as WSL does, whatever case it was typed in.
 - Choosing what to remove after a look inside failed says it failed, not that there is nothing to remove. The keys
   under the disks leave out `s` while a run is cut off or going on, the question to shrink opens without an older note

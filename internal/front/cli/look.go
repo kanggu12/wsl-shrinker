@@ -80,8 +80,14 @@ func lookFor(w io.Writer) look {
 	f, ok := w.(*os.File)
 	// A terminal WSL's launcher writes this program's pipes to takes colors
 	// as the console would.
-	tty := ok && (winapi.Colors(f.Fd()) || relayed() && (f == os.Stdout || f == os.Stderr))
+	tty := ok && (winapi.Colors(f.Fd()) || relayedFile(f))
 	return look{on: tty && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"}
+}
+
+// relayedFile reports whether f is stdout or stderr at a terminal WSL's
+// launcher relays (relayed).
+func relayedFile(f *os.File) bool {
+	return f == os.Stdout && relayed(1) || f == os.Stderr && relayed(2)
 }
 
 // paint colors s with one of the terminal's sixteen colors. The marks in

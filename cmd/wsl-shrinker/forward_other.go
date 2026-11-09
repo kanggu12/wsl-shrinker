@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"testing"
 
 	"github.com/charmbracelet/x/term"
 
@@ -64,34 +65,30 @@ func forward() bool {
 	// So does the choice of plain marks, for a WSL that runs in the Windows
 	// console's own window.
 	wslenv = appendWSLENV(wslenv, "WSL_SHRINKER_SYMBOLS/w")
-	env := os.Environ()
-	// A person at this terminal: the .exe reaches it only through pipes, so
-	// it is told so, with the terminal's width, to ask its questions, color
-	// its lines and lay out CLI mode's table as at a console.
-	if inTerminal() {
-		wslenv = appendWSLENV(appendWSLENV(wslenv, "WSL_SHRINKER_TTY/w"), "WSL_SHRINKER_COLUMNS/w")
-		env = withVar(withVar(env, "WSL_SHRINKER_TTY", "1"), "WSL_SHRINKER_COLUMNS", strconv.Itoa(termWidth()))
-	}
-	env = withWSLENV(env, wslenv)
+	// env is what the .exe answers the questions of a screen here with,
+	// through pipes; started in this terminal, it gets here too.
+	env := withWSLENV(os.Environ(), wslenv)
+	here := relayEnv(env, wslenv, terminals(), termWidth())
 	// Setup, asked for alone in a terminal, is drawn here too, for the
-	// same reason as the screen: the .exe has no console to draw it on.
+	// same reason as the screen: the .exe may have no console to draw on.
 	if lang, ok := setupOnly(os.Args[1:]); ok && os.Getenv("WSL_SHRINKER_SCREEN") != "windows" && inTerminal() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		b, err := openRemote(ctx, remote.Exe(exe, env), os.Getenv("WSL_DISTRO_NAME"), version.String())
 		if err == nil {
-			code := setupHere(ctx, b, exe, env, lang)
+			code := setupHere(ctx, b, exe, here, lang)
 			stop()
 			exit(code)
 			return true
 		}
 		stop()
+		// Another build: setup goes on in the .exe, which says what it can.
 	}
 	// The screen, asked for alone in a terminal, runs here, in this Linux
 	// terminal, and asks wsl-shrinker.exe for every answer through pipes:
 	// keys, sizes and colors stay Linux's, and the Windows program needs no
 	// console. WSL_SHRINKER_SCREEN=windows keeps the screen in the .exe.
 	if s, ok := screenOnly(os.Args[1:]); ok && os.Getenv("WSL_SHRINKER_SCREEN") != "windows" && inTerminal() {
-		if code, ran := screenHere(exe, env, s); ran {
+		if code, ran := screenHere(exe, env, here, s); ran {
 			exit(code)
 			return true
 		}
@@ -99,7 +96,7 @@ func forward() bool {
 	}
 	// Replace this process: the terminal, the exit code and Ctrl+C all
 	// belong to the Windows program from here on.
-	err := execve(exe, append([]string{exe}, os.Args[1:]...), env)
+	err := execve(exe, append([]string{exe}, os.Args[1:]...), here)
 	cli.PrintError(os.Stderr, "could not start "+exe+": "+err.Error(), startHint(err))
 	exit(1)
 	return true
@@ -110,21 +107,49 @@ func forward() bool {
 var (
 	// locate finds wsl-shrinker.exe.
 	locate = findExe
-	// execve replaces this process with the .exe.
-	execve = syscall.Exec
+	// execve replaces this process with the .exe. A test never starts it:
+	// a stand-in .exe would put Windows' dialog for a program it cannot run
+	// on the person's screen.
+	execve = func(argv0 string, argv, env []string) error {
+		if testing.Testing() {
+			return errNoProgramInTests
+		}
+		return syscall.Exec(argv0, argv, env)
+	}
 	// exit ends the launcher, as main ends the program.
 	exit = leave
 	// watch starts keeping a crash of the screen here.
 	watch = cli.WatchCrashes
 	// inTerminal reports whether a person types into a terminal here.
 	inTerminal = func() bool { return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) }
+	// terminals says which of stdin, stdout and stderr are a terminal here:
+	// "0", "1" and "2", in that order.
+	terminals = func() string {
+		fds := ""
+		for i, f := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
+			if term.IsTerminal(f.Fd()) {
+				fds += strconv.Itoa(i)
+			}
+		}
+		return fds
+	}
 	// openRemote meets the .exe through pipes, for the screen here.
 	openRemote = remote.Open
-	// runChild runs the .exe in this terminal and waits for it.
-	runChild = func(c *exec.Cmd) error { return c.Run() }
+	// runChild runs the .exe in this terminal and waits for it; never in a
+	// test, as execve.
+	runChild = func(c *exec.Cmd) error {
+		if testing.Testing() {
+			return errNoProgramInTests
+		}
+		return c.Run()
+	}
 	// setupScreen draws setup in this terminal.
 	setupScreen = tui.RunSetup
 )
+
+// errNoProgramInTests is what starting the .exe gives in a test, whatever
+// path it took to get there: tests give stand-ins for what would start.
+var errNoProgramInTests = errors.New("a test starts no program; give it a stand-in")
 
 // installHint is how wsl-shrinker is installed, in PowerShell on Windows:
 // the installer picks the build for the PC's processor.
@@ -168,12 +193,13 @@ func screenOnly(args []string) (screenArgs, bool) {
 	return s, true
 }
 
-// screenHere runs the screen in this terminal, over wsl-shrinker.exe. It
-// reports false, having shown nothing, when the .exe is another build or
-// cannot answer, or when CLI mode prints the disks instead: the .exe goes on
-// then. The first start opens setup first, in the .exe, which writes the
-// settings.
-func screenHere(exe string, env []string, s screenArgs) (int, bool) {
+// screenHere runs the screen in this terminal, over wsl-shrinker.exe, which
+// answers through pipes started with env. It reports false, having shown
+// nothing, when the .exe is another build or cannot answer, or when CLI mode
+// prints the disks instead: the .exe goes on then. A first start draws setup
+// here first; the .exe, started in this terminal with tty, writes what was
+// chosen.
+func screenHere(exe string, env, tty []string, s screenArgs) (int, bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	open := func() (*remote.Backend, error) {
@@ -185,7 +211,7 @@ func screenHere(exe string, env []string, s screenArgs) (int, bool) {
 	}
 	setup, here := startAs(s, b.Settings())
 	if setup {
-		if code := setupHere(ctx, b, exe, env, s.lang); code != 0 {
+		if code := setupHere(ctx, b, exe, tty, s.lang); code != 0 {
 			return code, true
 		}
 		// Ctrl+C reached this process too: it stops here, as setup did.
@@ -239,66 +265,110 @@ func startAs(s screenArgs, st remote.Settings) (setup, here bool) {
 }
 
 // setupHere draws setup in this terminal, from the settings and disks the
-// .exe answered with, and saves what was chosen through the .exe's own
-// flags, which write only the keys that changed. lang, from --lang, is the
-// language it starts in. It returns the exit code, as setup's own.
+// .exe answered b with, and saves what was chosen through the .exe's own
+// flags, started with env. lang, from --lang, is the language it starts in.
+// It returns the exit code, as setup in the .exe would.
 func setupHere(ctx context.Context, b *remote.Backend, exe string, env []string, lang string) int {
 	st := b.Settings()
 	ds, _ := b.Disks(ctx)
-	start := tui.SetupStart{Language: cmp.Or(lang, st.LanguageSetting, "auto"), Theme: st.Theme, Mode: st.Mode,
-		MinGainGB: st.MinGainGB, Protect: st.Protect, Disks: ds, AutoLanguage: i18n.Choose(st.AutoLanguage, false),
-		Path: st.Path, First: st.First}
+	start := tui.SetupStart{Language: cmp.Or(lang, st.LanguageSetting, "auto"), Theme: cmp.Or(st.Theme, "auto"),
+		Mode: cmp.Or(st.Mode, "tui"), MinGainGB: st.MinGainGB, Protect: st.Protect, Disks: ds,
+		AutoLanguage: i18n.Choose(st.AutoLanguage, false), Path: st.Path, First: st.First}
 	choice, saved, err := setupScreen(ctx, start)
 	if err != nil {
+		// Ctrl+C says it wrote nothing; a bug says it is one.
 		cli.PrintScreenError(os.Stderr, err)
 		return 1
 	}
-	if !saved && !st.First {
+	if !saved {
+		if !st.First {
+			fmt.Println("nothing changed")
+			return 0
+		}
+		// A first start left with esc keeps the defaults, written down, so
+		// setup does not come back at every start.
+		choice = tui.SetupChoice{Language: start.Language, Theme: start.Theme, Mode: start.Mode, MinGainGB: start.MinGainGB, Protect: start.Protect}
+	}
+	args := setupArgs(choice, st)
+	if args == nil {
 		fmt.Println("nothing changed")
 		return 0
 	}
-	if !saved {
-		// A first start left with esc: the defaults, written down, so setup
-		// does not come back at every start.
-		choice = tui.SetupChoice{Language: start.Language, Theme: start.Theme, Mode: start.Mode, MinGainGB: start.MinGainGB, Protect: start.Protect}
-	}
-	return runExe(exe, env, setupArgs(choice, st.Protect))
+	return runExe(exe, env, args)
 }
 
-// setupArgs are the .exe's setup flags for choice, against the disks
-// protected now: every value, and the protection as what to add and drop.
-func setupArgs(choice tui.SetupChoice, now []string) []string {
-	args := []string{"setup", "--language", choice.Language, "--theme", choice.Theme, "--mode", choice.Mode,
-		"--min-gain", strconv.FormatFloat(choice.MinGainGB, 'f', -1, 64)}
+// setupArgs are the .exe's setup flags that write choice over the settings
+// st: the values that changed, so a file written by hand keeps the rest as
+// it is, and the disks to protect and to protect no more. With no settings
+// file yet, every value, so all of them are there next time. Nil when
+// nothing changed.
+func setupArgs(choice tui.SetupChoice, st remote.Settings) []string {
+	var args []string
+	put := func(flag, value string, changed bool) {
+		if changed || st.First {
+			args = append(args, flag, value)
+		}
+	}
+	put("--language", choice.Language, choice.Language != cmp.Or(st.LanguageSetting, "auto"))
+	put("--theme", choice.Theme, choice.Theme != cmp.Or(st.Theme, "auto"))
+	put("--mode", choice.Mode, choice.Mode != cmp.Or(st.Mode, "tui"))
+	put("--min-gain", strconv.FormatFloat(choice.MinGainGB, 'f', -1, 64), choice.MinGainGB != st.MinGainGB)
+	// A disk is the same disk in any case, as in the settings.
+	has := func(list []string, name string) bool {
+		return slices.ContainsFunc(list, func(n string) bool { return strings.EqualFold(n, name) })
+	}
 	for _, p := range choice.Protect {
-		if !slices.ContainsFunc(now, func(n string) bool { return strings.EqualFold(n, p) }) {
+		if !has(st.Protect, p) {
 			args = append(args, "--protect", p)
 		}
 	}
-	for _, n := range now {
-		if !slices.ContainsFunc(choice.Protect, func(p string) bool { return strings.EqualFold(n, p) }) {
+	for _, n := range st.Protect {
+		if !has(choice.Protect, n) {
 			args = append(args, "--unprotect", n)
 		}
 	}
-	return args
+	if args == nil {
+		return nil
+	}
+	return append([]string{"setup"}, args...)
 }
 
-// setupOnly reports whether a command line is setup alone, with at most
-// --lang: setup's screen, which is drawn here. With flags of its own it
-// opens no screen, and the .exe takes it.
-func setupOnly(args []string) (string, bool) {
-	if len(args) == 0 || args[0] != "setup" {
-		return "", false
+// setupOnly reports whether a command line is setup's screen and nothing
+// else: setup, with at most --lang and a language it takes, before or after
+// it. With a choice given as a flag setup opens no screen: the .exe takes
+// that, as it takes any mistake, in its own words.
+func setupOnly(args []string) (lang string, ok bool) {
+	langs := []string{"auto", "en", "ko"}
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "setup" && !ok:
+			ok = true
+		case a == "--lang" && i+1 < len(args) && slices.Contains(langs, args[i+1]):
+			lang = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--lang=") && slices.Contains(langs, strings.TrimPrefix(a, "--lang=")):
+			lang = strings.TrimPrefix(a, "--lang=")
+		default:
+			return "", false
+		}
 	}
-	switch rest := args[1:]; {
-	case len(rest) == 0:
-		return "", true
-	case len(rest) == 1 && (rest[0] == "--lang=en" || rest[0] == "--lang=ko"):
-		return strings.TrimPrefix(rest[0], "--lang="), true
-	case len(rest) == 2 && rest[0] == "--lang" && (rest[1] == "en" || rest[1] == "ko"):
-		return rest[1], true
+	return lang, ok
+}
+
+// relayEnv is env for the .exe started in this terminal: fds says which of
+// its ends a person is at ("0" stdin, "1" stdout, "2" stderr) and goes
+// across as WSL_SHRINKER_TTY, with the terminal's width. Started from WSL,
+// the .exe may reach this terminal only through pipes (tmux, zellij, a
+// terminal whose console is gone); told so, it asks shrink's question,
+// colors its lines and lays out CLI mode's table as at a console. With no
+// end at a terminal, env as it is.
+func relayEnv(env []string, wslenv, fds string, width int) []string {
+	if fds == "" {
+		return env
 	}
-	return "", false
+	wslenv = appendWSLENV(appendWSLENV(wslenv, "WSL_SHRINKER_TTY/w"), "WSL_SHRINKER_COLUMNS/w")
+	env = withVar(withVar(env, "WSL_SHRINKER_TTY", fds), "WSL_SHRINKER_COLUMNS", strconv.Itoa(width))
+	return withWSLENV(env, wslenv)
 }
 
 // runExe runs the .exe with args in this terminal and returns its exit

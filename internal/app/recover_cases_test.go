@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 )
 
 // A run cut off while Dev was down; then Dev is unregistered. Recover must
@@ -30,5 +32,39 @@ func TestRecoverAfterUnregister(t *testing.T) {
 	t.Logf("another run: err=%q", res.Err)
 	if st != journal.None {
 		t.Errorf("journal stays %v; every run is refused: %s", st, res.Err)
+	}
+}
+
+// A run cut off during the compaction of a distribution it found stopped:
+// WSL goes on compacting on its own and holds the disk until it is done.
+// Recover waits, the journal kept, and closes the run once WSL lets go.
+func TestRecoverWaitsWhileWSLStillCompacts(t *testing.T) {
+	a, fake := testApp(t, func(int, string) bool { return false })
+	fake.List[0].Running = false
+	a.StatFile = func(p string) (winapi.FileInfo, error) {
+		fi, err := winapi.Stat(p)
+		fi.Held = true
+		return fi, err
+	}
+	if err := a.Journal.Begin(journal.Entry{PID: 1, Exe: "x", Disk: "Dev", Distro: "Dev", Step: "compact"}); err != nil {
+		t.Fatal(err)
+	}
+	if msg, err := a.Recover(context.Background()); err == nil || !strings.Contains(err.Error(), "still compacting Dev") {
+		t.Fatalf("recover: %q %v", msg, err)
+	}
+	if _, st, _ := a.Journal.Read(); st != journal.CutOff {
+		t.Fatalf("journal %v, want it kept", st)
+	}
+	// WSL is done: the disk reads cleanly, nothing was stopped to start.
+	a.StatFile = nil
+	if msg, err := a.Recover(context.Background()); err != nil || msg != "nothing was stopped" {
+		t.Fatalf("recover: %q %v", msg, err)
+	}
+	if _, st, _ := a.Journal.Read(); st != journal.None {
+		t.Fatalf("journal %v, want none", st)
+	}
+	// The distribution was never started by recover.
+	if calls := strings.Join(fake.CallList(), " "); strings.Contains(calls, "start:Dev") {
+		t.Fatalf("calls %s", calls)
 	}
 }

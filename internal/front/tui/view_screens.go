@@ -131,7 +131,10 @@ func (m model) runView() string {
 	// the data that stays in slate and what goes back in teal; after, the
 	// data alone, the expected size until the measured one is known.
 	var bars []string
-	if e := d.Estimate; e != nil {
+	// A run that failed before the disk was measured again has no after:
+	// the expected size would read as what it did. The outcome says that.
+	unmeasured := failed && res.File == nil
+	if e := d.Estimate; e != nil && !unmeasured {
 		// What the chosen items free comes off the data that stays, as the
 		// question before the run counted it.
 		var cleaned int64
@@ -144,7 +147,7 @@ func (m model) runView() string {
 		bw := min(m.width-30, 60)
 		before := t.Bar(bw, e.FileSize, ui.Part{Value: stays, Color: t.Stays}, ui.Part{Value: e.FileSize - stays, Color: t.Cat[ui.CatGain]})
 		afterSize, label := stays, i18n.T("run.expected")
-		if res := m.resultFor(d.Name); res != nil && res.File != nil {
+		if res != nil && res.File != nil {
 			afterSize, label = res.File.OnDisk, i18n.T("run.after")
 		}
 		after := t.Bar(bw, e.FileSize, ui.Part{Value: afterSize, Color: t.Stays})

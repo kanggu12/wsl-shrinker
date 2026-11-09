@@ -309,7 +309,7 @@ func widthOf(w io.Writer) int {
 		if tw, _, err := term.GetSize(f.Fd()); err == nil && tw > 0 {
 			return tw
 		}
-		if n, err := strconv.Atoi(os.Getenv("WSL_SHRINKER_COLUMNS")); relayed() && err == nil && n > 0 {
+		if n, err := strconv.Atoi(os.Getenv("WSL_SHRINKER_COLUMNS")); relayedFile(f) && err == nil && n > 0 {
 			return n
 		}
 	}

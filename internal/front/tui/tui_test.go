@@ -578,7 +578,10 @@ func TestFailedRunSaysWhereThingsStand(t *testing.T) {
 			{[]string{"down", "down", "s", "enter"}, map[i18n.Lang]string{i18n.English: "The disk was not changed.", i18n.Korean: "디스크는 그대로입니다."}},
 		} {
 			out := ansi.Strip(Snapshot(&failingRun{recording{Demo: demo()}}, 120, 30, true, c.keys, ""))
-			if !strings.Contains(out, c.want[lang]) || strings.Contains(out, "%!") || strings.Contains(out, "Shrank") {
+			// No size expected after it: nothing was measured, and the
+			// disk did not change.
+			expected := i18n.T("run.expected")
+			if !strings.Contains(out, c.want[lang]) || strings.Contains(out, "%!") || strings.Contains(out, "Shrank") || strings.Contains(out, " "+expected+" ") {
 				t.Errorf("%s %v:\n%s", lang, c.keys, out)
 			}
 		}

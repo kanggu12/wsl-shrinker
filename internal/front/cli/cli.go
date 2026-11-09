@@ -238,7 +238,7 @@ func newRoot(p *apps) *cobra.Command {
 			// A terminal WSL's launcher relays gets CLI mode's table, which
 			// needs no console; the launcher draws the screen and setup itself.
 			if !stdoutIsTerminal() {
-				if relayed() && len(run) == 0 && !reopened {
+				if relayed(1) && len(run) == 0 && !reopened {
 					return overview(ctx, app.Backend{A: a}, out, lookFor(out), widthOf(out))
 				}
 				return list(ctx, a, out, false)

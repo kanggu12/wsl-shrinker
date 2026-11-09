@@ -48,3 +48,24 @@ func TestPreflightListsEveryBlockMostPressingFirst(t *testing.T) {
 		t.Fatalf("a running distribution is blocked: %v", got)
 	}
 }
+
+func TestDockerDesktopsOwnDistributionsAreHeldWhileTheyRun(t *testing.T) {
+	// Docker Desktop runs docker-desktop and docker-desktop-data itself:
+	// while they run it holds them, as it holds its data disk. Stopped,
+	// they are distributions like any other.
+	for _, name := range []string{"docker-desktop", "Docker-Desktop-Data"} {
+		d := disks.Disk{Name: name, Distro: name, Running: true, File: winapi.FileInfo{Held: true}, Estimate: &estimate.Result{}}
+		if got := Preflight(d, true, false); !slices.Equal(got, []Block{BlockHeld}) || !strings.Contains(BlockHeld.Reason(d), "Docker Desktop") {
+			t.Fatalf("%s running: %v, %q", name, got, BlockHeld.Reason(d))
+		}
+		d.Running, d.File.Held = false, false
+		if got := Preflight(d, true, false); len(got) != 0 {
+			t.Fatalf("%s stopped: %v", name, got)
+		}
+	}
+	// A distribution of the person's own with a like name is theirs.
+	own := disks.Disk{Name: "docker-desktop-dev", Distro: "docker-desktop-dev", Running: true, File: winapi.FileInfo{Held: true}, Estimate: &estimate.Result{}}
+	if got := Preflight(own, true, false); len(got) != 0 {
+		t.Fatalf("own distribution: %v", got)
+	}
+}

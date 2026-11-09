@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -230,5 +231,62 @@ func TestTheBackendRefusesItemsOfAnotherDisk(t *testing.T) {
 	}
 	if slices.Contains(fake.CallList(), "compact:Dev") {
 		t.Fatalf("ran: %v", fake.CallList())
+	}
+}
+
+func TestShrinkJSONFromInsideIsRefusedBeforeTheQuestion(t *testing.T) {
+	// From a terminal inside Dev, a run of Dev moves to a new window, which
+	// --json cannot follow: that is said before anything is asked.
+	a, fake := flowApp(t)
+	a.TerminalIn = func(d string) bool { return d == "Dev" }
+	saved := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = saved })
+	code, out, errOut := shrinkWith(a, "shrink", "Dev", "--json")
+	if code != exitUsage || !strings.Contains(errOut, "--json cannot follow a run into a new window") || strings.Contains(errOut, "[y/N]") || out != "" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if calls := strings.Join(fake.CallList(), " "); strings.Contains(calls, "terminate:") || strings.Contains(calls, "compact:") {
+		t.Fatalf("calls %s", calls)
+	}
+}
+
+func TestListJSONSaysWhatStandsInTheWay(t *testing.T) {
+	// A script learns a disk is protected from the list, not from a
+	// shrink that fails.
+	a, _ := flowApp(t)
+	a.Config.Protect = []string{"dev"}
+	code, out, errOut := shrinkWith(a, "list", "--json")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	var got struct {
+		Disks []struct {
+			Name      string `json:"name"`
+			Protected bool   `json:"protected"`
+			Blocked   string `json:"blocked"`
+		} `json:"disks"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Disks) != 1 || got.Disks[0].Name != "Dev" || !got.Disks[0].Protected || got.Disks[0].Blocked != "protected" {
+		t.Fatalf("%v %+v\n%s", err, got, out)
+	}
+	// Nothing in the way: "" and false, never missing.
+	a.Config.Protect = nil
+	_, out, _ = shrinkWith(a, "list", "--json")
+	if !strings.Contains(out, `"protected": false`) || !strings.Contains(out, `"blocked": ""`) {
+		t.Fatalf("%s", out)
+	}
+	// The table says it in its state column.
+	a.Config.Protect = []string{"Dev"}
+	if _, out, _ = shrinkWith(a, "list"); !regexp.MustCompile(`(?m)^Dev\s+protected\s`).MatchString(out) {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestInsideJSONNamesTheDistributionAsWSLDoes(t *testing.T) {
+	a, _ := flowApp(t)
+	code, out, errOut := shrinkWith(a, "inside", "dev", "--json")
+	if code != exitOK || !strings.Contains(out, `"distribution": "Dev"`) {
+		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
 	}
 }

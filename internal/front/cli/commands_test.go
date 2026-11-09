@@ -211,7 +211,7 @@ func TestShrinkAsksAtATerminalWSLRelays(t *testing.T) {
 	// The launcher in WSL says a person is at its terminal: the question is
 	// asked there, though the .exe only sees pipes.
 	oldIn, oldRelay := stdinIsTerminal, relayed
-	stdinIsTerminal, relayed = func() bool { return false }, func() bool { return true }
+	stdinIsTerminal, relayed = func() bool { return false }, func(fd int) bool { return fd == 0 }
 	t.Cleanup(func() { stdinIsTerminal, relayed = oldIn, oldRelay })
 	_, _, errOut := runCLI(t, "shrink", "Ubuntu")
 	if strings.Contains(errOut, "no terminal to ask in") {

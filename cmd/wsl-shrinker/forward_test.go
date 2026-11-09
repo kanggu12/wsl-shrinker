@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +17,9 @@ import (
 	"testing"
 
 	"github.com/kanggu12/wsl-shrinker/internal/app/remote"
+	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
+	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 func TestWSLENV(t *testing.T) {
@@ -212,7 +216,7 @@ type stopped int
 func launch(t *testing.T, exe string, terminal bool, args ...string) (code int, started []string) {
 	t.Helper()
 	t.Setenv("WSL_DISTRO_NAME", "Test")
-	saved := []any{os.Args, locate, execve, exit, inTerminal, openRemote, runChild, watch, finish}
+	saved := []any{os.Args, locate, execve, exit, inTerminal, openRemote, runChild, watch, finish, terminals}
 	t.Cleanup(func() {
 		os.Args = saved[0].([]string)
 		locate, execve, exit = saved[1].(func() string), saved[2].(func(string, []string, []string) error), saved[3].(func(int))
@@ -220,6 +224,7 @@ func launch(t *testing.T, exe string, terminal bool, args ...string) (code int, 
 		openRemote = saved[5].(func(context.Context, remote.Runner, string, string) (*remote.Backend, error))
 		runChild = saved[6].(func(*exec.Cmd) error)
 		watch, finish = saved[7].(func() func()), saved[8].(func())
+		terminals = saved[9].(func() string)
 	})
 	// The screen here would keep its crashes in this PC's cache folder.
 	watch = func() func() {
@@ -229,6 +234,12 @@ func launch(t *testing.T, exe string, terminal bool, args ...string) (code int, 
 	os.Args = append([]string{"wsl-shrinker"}, args...)
 	locate = func() string { return exe }
 	inTerminal = func() bool { return terminal }
+	terminals = func() string {
+		if terminal {
+			return "012"
+		}
+		return ""
+	}
 	execve = func(argv0 string, _ []string, env []string) error {
 		launchedEnv = env
 		started = append(started, "exec "+argv0)
@@ -330,17 +341,30 @@ func TestAWindowsProgramThatCannotStartSaysWhy(t *testing.T) {
 }
 
 func TestSetupDrawnHereSavesThroughTheExesFlags(t *testing.T) {
-	// The flags carry every value, and the protection as what to add and
-	// drop against what is protected now, in any case.
-	got := strings.Join(setupArgs(tui.SetupChoice{Language: "ko", Theme: "auto", Mode: "cli", MinGainGB: 5, Protect: []string{"work", "Dev"}}, []string{"Work", "Old"}), " ")
-	want := "setup --language ko --theme auto --mode cli --min-gain 5 --protect Dev --unprotect Old"
-	if got != want {
+	// What changed is written, the protection as what to add and drop, in
+	// any case; a file written by hand keeps the rest as it is.
+	now := remote.Settings{LanguageSetting: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, Protect: []string{"Work", "Old"}}
+	choice := tui.SetupChoice{Language: "ko", Theme: "auto", Mode: "cli", MinGainGB: 5, Protect: []string{"work", "Dev"}}
+	if got, want := strings.Join(setupArgs(choice, now), " "), "setup --language ko --mode cli --min-gain 5 --protect Dev --unprotect Old"; got != want {
 		t.Fatalf("%s\nwant %s", got, want)
 	}
-	// Only setup alone, or with --lang, is drawn here; flags of its own go
+	// Nothing changed: nothing to write.
+	same := tui.SetupChoice{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, Protect: []string{"old", "work"}}
+	if got := setupArgs(same, now); got != nil {
+		t.Fatalf("nothing changed, yet %v", got)
+	}
+	// No settings file yet: every value, so all are there next time.
+	first := remote.Settings{LanguageSetting: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, First: true}
+	if got, want := strings.Join(setupArgs(tui.SetupChoice{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1}, first), " "),
+		"setup --language auto --theme auto --mode tui --min-gain 1"; got != want {
+		t.Fatalf("%s\nwant %s", got, want)
+	}
+	// Setup alone, with --lang before or after it, is drawn here; a choice
+	// given as a flag, a language it does not take, or anything else goes
 	// to the .exe.
-	for args, want := range map[string]bool{"setup": true, "setup --lang ko": true, "setup --lang=en": true,
-		"setup --mode cli": false, "setup --lang fr": false, "list": false, "": false} {
+	for args, want := range map[string]bool{"setup": true, "setup --lang ko": true, "setup --lang=en": true, "--lang ko setup": true,
+		"--lang=auto setup": true, "setup --mode cli": false, "setup --lang fr": false, "setup --lang": false, "setup setup": false,
+		"list": false, "": false, "--lang ko": false} {
 		if _, ok := setupOnly(strings.Fields(args)); ok != want {
 			t.Errorf("%q: %v", args, ok)
 		}
@@ -348,17 +372,137 @@ func TestSetupDrawnHereSavesThroughTheExesFlags(t *testing.T) {
 }
 
 func TestATerminalIsRelayedToTheExe(t *testing.T) {
-	// From a terminal the .exe is told a person is there, with the width;
-	// from a pipe it is not.
+	// Started from a terminal, the .exe is told which of its ends a person
+	// is at, and the width; from a pipe, nothing.
 	onHost(t, machineAMD64, 0, false)
 	exe := fakeExe(t, t.TempDir(), "x64.exe", machineAMD64)
 	for _, terminal := range []bool{true, false} {
 		launchedEnv = nil
 		launch(t, exe, terminal, "list")
 		joined := strings.Join(launchedEnv, "\n")
-		has := strings.Contains(joined, "WSL_SHRINKER_TTY=1") && strings.Contains(joined, "WSL_SHRINKER_TTY/w") && strings.Contains(joined, "WSL_SHRINKER_COLUMNS=")
+		has := strings.Contains(joined, "WSL_SHRINKER_TTY=012") && strings.Contains(joined, "WSL_SHRINKER_TTY/w") && strings.Contains(joined, "WSL_SHRINKER_COLUMNS=")
 		if has != terminal {
-			t.Errorf("terminal %v: relayed %v", terminal, has)
+			t.Errorf("terminal %v: relayed %v in %q", terminal, has, joined)
 		}
+	}
+	// One end alone: a script's output to a file, typed at a terminal.
+	env := relayEnv([]string{"WSLENV=A/w"}, "A/w", "02", 120)
+	if !slices.Contains(env, "WSL_SHRINKER_TTY=02") || !slices.Contains(env, "WSL_SHRINKER_COLUMNS=120") || !slices.Contains(env, "WSLENV=A/w:WSL_SHRINKER_TTY/w:WSL_SHRINKER_COLUMNS/w") {
+		t.Fatalf("%q", env)
+	}
+	if got := relayEnv([]string{"WSLENV=A/w"}, "A/w", "", 120); !slices.Equal(got, []string{"WSLENV=A/w"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+// fakeBackend is a wsl-shrinker.exe of this build that answers the screen's
+// questions with settings st and no disk.
+func fakeBackend(t *testing.T, st string) *remote.Backend {
+	t.Helper()
+	run := func(_ context.Context, args []string, out io.Writer) error {
+		switch strings.Join(args, " ") {
+		case "backend hello":
+			fmt.Fprintf(out, `{"schema":1,"version":%q}`, version.String())
+		case "backend settings":
+			fmt.Fprint(out, st)
+		case "list --json":
+			fmt.Fprint(out, `{"schema":1,"disks":[]}`)
+		default:
+			return fmt.Errorf("not asked in this test: %v", args)
+		}
+		return nil
+	}
+	b, err := remote.Open(context.Background(), run, "Test", version.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestSetupHere(t *testing.T) {
+	// Setup drawn here, as each way of leaving it ends: what the .exe is
+	// started with to write it, the exit code, and what is said.
+	savedScreen, savedChild := setupScreen, runChild
+	t.Cleanup(func() { setupScreen, runChild = savedScreen, savedChild })
+	const firstStart = `{"schema":1,"language":"en","theme":"auto","mode":"tui","protect":[],"first":true,"language_setting":"auto","auto_language":"en","min_gain_gb":1,"path":"C:\\x\\config.toml"}`
+	const later = `{"schema":1,"language":"en","theme":"dark","mode":"tui","protect":["Work"],"first":false,"language_setting":"en","auto_language":"en","min_gain_gb":5,"path":"C:\\x\\config.toml"}`
+	for _, c := range []struct {
+		name, st string
+		choice   tui.SetupChoice
+		saved    bool
+		err      error
+		code     int
+		started  string
+	}{
+		// Esc on a first start keeps the defaults, written down.
+		{"first, esc", firstStart, tui.SetupChoice{}, false, nil, 0, "setup --language auto --theme auto --mode tui --min-gain 1"},
+		// Ctrl+C writes nothing, and says so.
+		{"first, ctrl+c", firstStart, tui.SetupChoice{}, false, tui.ErrSetupCancelled, 1, ""},
+		// Esc later changes nothing.
+		{"later, esc", later, tui.SetupChoice{}, false, nil, 0, ""},
+		// Saved later: what changed.
+		{"later, saved", later, tui.SetupChoice{Language: "en", Theme: "dark", Mode: "cli", MinGainGB: 5, Protect: []string{"Work"}}, true, nil, 0, "setup --mode cli"},
+		// Saved as it was: nothing to write.
+		{"later, same", later, tui.SetupChoice{Language: "en", Theme: "dark", Mode: "tui", MinGainGB: 5, Protect: []string{"work"}}, true, nil, 0, ""},
+	} {
+		var started string
+		setupScreen = func(_ context.Context, start tui.SetupStart) (tui.SetupChoice, bool, error) {
+			return c.choice, c.saved, c.err
+		}
+		runChild = func(cmd *exec.Cmd) error {
+			started = strings.Join(cmd.Args[1:], " ")
+			return nil
+		}
+		code := setupHere(context.Background(), fakeBackend(t, c.st), "wsl-shrinker.exe", nil, "")
+		if code != c.code || started != c.started {
+			t.Errorf("%s: exit %d, started %q; want %d, %q", c.name, code, started, c.code, c.started)
+		}
+	}
+}
+
+func TestSetupHereStartsFromTheSettings(t *testing.T) {
+	// The wizard opens on the settings as they are, the language from
+	// --lang when given, and the language auto picks on Windows.
+	saved := setupScreen
+	t.Cleanup(func() { setupScreen = saved })
+	var got tui.SetupStart
+	setupScreen = func(_ context.Context, start tui.SetupStart) (tui.SetupChoice, bool, error) {
+		got = start
+		return tui.SetupChoice{}, false, nil
+	}
+	b := fakeBackend(t, `{"schema":1,"language":"ko","theme":"light","mode":"cli","protect":["Work"],"first":false,"language_setting":"auto","auto_language":"ko","min_gain_gb":5,"path":"C:\\x\\config.toml"}`)
+	setupHere(context.Background(), b, "wsl-shrinker.exe", nil, "")
+	if got.Language != "auto" || got.AutoLanguage != i18n.Korean || got.Theme != "light" || got.Mode != "cli" || got.MinGainGB != 5 ||
+		!slices.Equal(got.Protect, []string{"Work"}) || got.Path != `C:\x\config.toml` || got.First {
+		t.Fatalf("%+v", got)
+	}
+	setupHere(context.Background(), b, "wsl-shrinker.exe", nil, "en")
+	if got.Language != "en" {
+		t.Fatalf("--lang en opened on %q", got.Language)
+	}
+}
+
+func TestATestStartsNoProgram(t *testing.T) {
+	// The .exe as the launcher starts it, left as it is: in a test it is
+	// refused before anything runs, so a stand-in never reaches Windows,
+	// which would show its dialog on the person's screen. The program here
+	// only leaves a mark, should it ever run.
+	dir := t.TempDir()
+	mark := filepath.Join(dir, "ran")
+	prog := filepath.Join(dir, "prog")
+	if err := os.WriteFile(prog, []byte("#!/bin/sh\ntouch '"+mark+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code := runExe(prog, nil, []string{"setup"}); code != 1 {
+		t.Errorf("runExe: exit %d", code)
+	}
+	if err := execve(prog, []string{prog}, nil); !errors.Is(err, errNoProgramInTests) {
+		t.Errorf("execve: %v", err)
+	}
+	if err := remote.Exe(prog, nil)(context.Background(), []string{"backend", "hello"}, io.Discard); err == nil {
+		t.Errorf("remote.Exe ran")
+	}
+	if _, err := os.Stat(mark); err == nil {
+		t.Fatal("the program ran")
 	}
 }

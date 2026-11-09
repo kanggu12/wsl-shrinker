@@ -41,6 +41,10 @@ type App struct {
 	// (Hosts). Tests set it, as a test binary run from WSL looks started
 	// from WSL.
 	TerminalIn func(distro string) bool
+	// StatFile reads a disk file's size and whether a program holds it; nil
+	// asks Windows (winapi.Stat). Tests set it, to hold a file as WSL does
+	// while it compacts.
+	StatFile func(path string) (winapi.FileInfo, error)
 	// info is WSL's answer about itself, asked once.
 	info     wsl.Info
 	infoOnce sync.Once
@@ -68,7 +72,11 @@ func (a *App) Info(ctx context.Context) wsl.Info {
 
 // DisksEnv is what disk discovery reads from.
 func (a *App) DisksEnv() disks.Env {
-	return disks.Env{WSL: a.WSL, Stat: winapi.Stat, Open: disks.OpenFile,
+	stat := a.StatFile
+	if stat == nil {
+		stat = winapi.Stat
+	}
+	return disks.Env{WSL: a.WSL, Stat: stat, Open: disks.OpenFile,
 		LocalAppData: winapi.LocalAppData(), AppData: winapi.AppData(), Extra: a.Config.ExtraDisks}
 }
 

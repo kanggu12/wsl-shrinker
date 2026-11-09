@@ -55,7 +55,7 @@ func alive(pid int) bool {
 // what to do as the run ends: remove this run's file and, when a person
 // reads stderr, say where an earlier run's crash was kept, once.
 func WatchCrashes() (end func()) {
-	person := term.IsTerminal(os.Stderr.Fd()) || relayed()
+	person := term.IsTerminal(os.Stderr.Fd()) || relayed(2)
 	return watchCrashes(crashDir(), os.Getpid(), alive, person, lookFor(os.Stderr), os.Stderr)
 }
 

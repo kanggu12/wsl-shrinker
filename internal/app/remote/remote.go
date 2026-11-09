@@ -14,6 +14,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"testing"
 
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
@@ -34,6 +35,12 @@ type Runner func(ctx context.Context, args []string, out io.Writer) error
 // WSLENV carries this distribution's name and the language across).
 func Exe(path string, env []string) Runner {
 	return func(ctx context.Context, args []string, out io.Writer) error {
+		// A test never starts it: a stand-in .exe would put Windows' dialog
+		// for a program it cannot run on the person's screen. Tests answer
+		// with a Runner of their own.
+		if testing.Testing() {
+			return errors.New("a test starts no program; give the backend a Runner of its own")
+		}
 		cmd := exec.CommandContext(ctx, path, args...)
 		cmd.Env, cmd.Stdout = env, out
 		var errOut bytes.Buffer

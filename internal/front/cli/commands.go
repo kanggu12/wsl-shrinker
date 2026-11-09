@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,11 +36,12 @@ import (
 var (
 	stdinIsTerminal  = func() bool { return term.IsTerminal(os.Stdin.Fd()) }
 	stdoutIsTerminal = func() bool { return term.IsTerminal(os.Stdout.Fd()) }
-	// relayed reports a person at a terminal this program reaches only
-	// through pipes: WSL's launcher says so when it starts the .exe from a
-	// terminal Windows has no console for (zellij, tmux, any Linux one).
-	// A question, colors and CLI mode's table work then; a screen does not.
-	relayed    = func() bool { return os.Getenv("WSL_SHRINKER_TTY") == "1" }
+	// relayed reports whether WSL's launcher says a person is at the end fd
+	// of its terminal (0 stdin, 1 stdout, 2 stderr), which this program may
+	// reach only through a pipe: from tmux, zellij, or a terminal whose
+	// console is gone. A question, colors and CLI mode's table work then;
+	// a screen does not.
+	relayed    = func(fd int) bool { return strings.Contains(os.Getenv("WSL_SHRINKER_TTY"), strconv.Itoa(fd)) }
 	openScreen = tui.Run
 	openSetup  = tui.RunSetup
 )
@@ -223,7 +225,7 @@ func shrinkCmd(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The question needs someone to answer it: without a terminal and
 			// without --yes, stop before anything is read or asked.
-			if !yes && !stdinIsTerminal() && !relayed() {
+			if !yes && !stdinIsTerminal() && !relayed(0) {
 				return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to shrink without the question")
 			}
 			a, err := p.get()

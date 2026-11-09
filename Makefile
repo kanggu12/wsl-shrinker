@@ -46,11 +46,7 @@ vuln:
 ## fuzz: every fuzz target for FUZZTIME each (default 30s); failures land in testdata/fuzz
 FUZZTIME ?= 30s
 fuzz:
-	@for pkg in ./internal/machine/vhdx ./internal/machine/ext4; do \
-	  for f in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
-	    go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) $$pkg || exit 1; \
-	  done; \
-	done
+	@sh scripts/fuzz.sh $(FUZZTIME)
 
 ## test-windows: from WSL, the tests again as Windows programs (the Windows API code)
 test-windows:

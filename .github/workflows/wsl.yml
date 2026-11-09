@@ -165,12 +165,15 @@ jobs:
           $null = New-Item -ItemType Directory -Force -Path (Join-Path $state 'wsl-shrinker')
           "extra_disks = ['$(Join-Path $extra 'data.vhdx')']" | Set-Content -Path (Join-Path $state 'wsl-shrinker\config.toml')
           $all = (./wss.exe list --json | ConvertFrom-Json).disks
-          foreach ($w in @(@('Docker Desktop data', 'docker', $moved), @('docker_data.vhdx', 'docker', $default), @('data.vhdx', 'file', $extra))) {
+          # The disk where the settings moved it is Docker Desktop's; the one
+          # left in the default folder is numbered after it, never named by
+          # its file, which a file from the settings keeps.
+          foreach ($w in @(@('Docker Desktop data', 'docker', $moved), @('Docker Desktop data 2', 'docker', $default), @('data.vhdx', 'file', $extra))) {
             $d = $all | Where-Object name -eq $w[0]
             if (-not $d -or $d.kind -ne $w[1] -or -not $d.path.StartsWith($w[2], [StringComparison]::OrdinalIgnoreCase)) { $all | ConvertTo-Json -Depth 6; "$($w[0]) is not listed as a $($w[1]) disk in $($w[2])"; exit 1 }
             if (-not $d.estimate) { "$($w[0]) was not read"; exit 1 }
           }
-          $out = ./wss.exe shrink 'Docker Desktop data' docker_data.vhdx data.vhdx --yes --json
+          $out = ./wss.exe shrink 'Docker Desktop data' 'Docker Desktop data 2' data.vhdx --yes --json
           if ($LASTEXITCODE -ne 0) { $out; "shrink exited $LASTEXITCODE"; exit 1 }
           foreach ($r in ($out | ConvertFrom-Json).results) {
             $want = [int64]$r.before.reclaim_bytes

@@ -197,3 +197,43 @@ func TestDiskJSONKeys(t *testing.T) {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
 }
+
+func TestDockerDisksNeverTakeAFilesName(t *testing.T) {
+	// A file from the settings is listed, and protected, by its file name.
+	// A Docker Desktop disk an older release left behind, found later,
+	// takes a name of Docker Desktop's own: the file keeps its name, and
+	// with it its protection.
+	dir, local := t.TempDir(), t.TempDir()
+	extra := filepath.Join(dir, "a", "ext4.vhdx")
+	current := filepath.Join(local, `Docker\wsl\disk\docker_data.vhdx`)
+	old := filepath.Join(local, `Docker\wsl\data\ext4.vhdx`)
+	write := func(p string) {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		vhdxtest.Write(t, p, vhdxtest.Spec{VirtualSize: 4 << 20})
+	}
+	write(extra)
+	write(current)
+	names := func() map[string]string {
+		env := Env{WSL: &wsl.Fake{}, Stat: winapi.Stat, Open: OpenFile, LocalAppData: local, Extra: []string{extra}}
+		got, err := Find(context.Background(), env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]string{}
+		for _, d := range got {
+			m[d.Path] = d.Name
+		}
+		return m
+	}
+	before := names()
+	write(old)
+	after := names()
+	if before[extra] != "ext4.vhdx" || after[extra] != "ext4.vhdx" {
+		t.Fatalf("the file's name moved: %q, then %q", before[extra], after[extra])
+	}
+	if after[current] != "Docker Desktop data" || after[old] != "Docker Desktop data 2" {
+		t.Fatalf("%v", after)
+	}
+}

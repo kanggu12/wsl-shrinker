@@ -12,6 +12,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
+	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 )
 
 // settingsIn points the settings and the history at dir, on Windows and off
@@ -222,10 +223,73 @@ func TestShrinkAsksAtATerminalWSLRelays(t *testing.T) {
 func TestATypoSaysTheCommandMeant(t *testing.T) {
 	// The command meant, when one is near; the help, when none is.
 	for args, want := range map[string]string{"lst": "did you mean: wsl-shrinker list", "config pth": "did you mean: wsl-shrinker config path",
-		"zzzz": "wsl-shrinker --help lists the commands", "list extra": "wsl-shrinker list --help"} {
+		"zzzz": "wsl-shrinker --help lists the commands", "list extra": "wsl-shrinker list --help",
+		// help NAME, for a name that is no command, says so too.
+		"help bogus": "wsl-shrinker --help lists the commands", "help lst": "did you mean: wsl-shrinker help list",
+		"help config pth": "did you mean: wsl-shrinker help config path"} {
 		code, _, errOut := runCLI(t, strings.Fields(args)...)
 		if code != exitUsage || !strings.Contains(errOut, want) {
 			t.Errorf("%s: exit %d, %q", args, code, errOut)
 		}
+	}
+}
+
+func TestSetupPutsRightAValueTheFileHasWrong(t *testing.T) {
+	// A wrong value keeps every command from starting: each says which
+	// setup command puts it right, and that command does, keeping the rest
+	// of the file as it was written.
+	settingsIn(t, t.TempDir())
+	p := config.Path(winapi.AppData())
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(s string) {
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runHere := func(args ...string) (int, string, string) {
+		var o, e bytes.Buffer
+		code := run(args, &o, &e)
+		return code, o.String(), e.String()
+	}
+	write("# mine\nlanguage = \"fr\"\nmode = \"cli\"\n")
+	if code, _, errOut := runHere("history"); code != exitFail || !strings.Contains(errOut, "language must be auto, en or ko") ||
+		!strings.Contains(errOut, "wsl-shrinker setup --language auto puts it right") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	// Protecting adds to the list the file has, which cannot be read yet.
+	if code, _, errOut := runHere("setup", "--protect", "Dev"); code != exitFail || !strings.Contains(errOut, "language must be") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if code, out, errOut := runHere("setup", "--language", "auto"); code != exitOK || !strings.Contains(out, "saved: ") {
+		t.Fatalf("exit %d: %s%s", code, out, errOut)
+	}
+	if b, _ := os.ReadFile(p); !strings.Contains(string(b), "# mine") || !strings.Contains(string(b), `language = "auto"`) || !strings.Contains(string(b), `mode = "cli"`) {
+		t.Fatalf("%s", b)
+	}
+	// Two values wrong: putting one right says the other, with its own
+	// command, and writes nothing.
+	write("language = \"fr\"\ntheme = \"blue\"\n")
+	if code, _, errOut := runHere("setup", "--language", "en"); code != exitFail || !strings.Contains(errOut, "theme must be auto, dark or light") ||
+		!strings.Contains(errOut, "wsl-shrinker setup --theme auto puts it right") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if b, _ := os.ReadFile(p); strings.Contains(string(b), `language = "en"`) {
+		t.Fatalf("written: %s", b)
+	}
+}
+
+func TestVersionAndConfigHelpLeaveOutTheLanguage(t *testing.T) {
+	// --lang changes nothing they print; the commands that use it list it.
+	for args, want := range map[string]bool{"version --help": false, "config path --help": false, "config --help": false, "list --help": true} {
+		_, out, _ := runCLI(t, strings.Fields(args)...)
+		if strings.Contains(out, "--lang") != want {
+			t.Errorf("%s: --lang listed %v:\n%s", args, !want, out)
+		}
+	}
+	// help alone is the program's help.
+	if code, out, _ := runCLI(t, "help"); code != exitOK || !strings.Contains(out, "Available Commands") {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

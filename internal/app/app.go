@@ -60,8 +60,11 @@ func New() (*App, error) {
 		return nil, err
 	}
 	dir := filepath.Join(winapi.LocalAppData(), "wsl-shrinker")
+	// The journal asks Windows which process runs a run, and since when.
+	j := journal.Open(dir, winapi.Running)
+	j.Since = winapi.ProcessStart
 	return &App{Config: c, ConfigPath: path, WSL: wsl.New(),
-		History: history.Open(dir), Journal: journal.Open(dir, winapi.Running)}, nil
+		History: history.Open(dir), Journal: j}, nil
 }
 
 // Info asks WSL about itself, once.
@@ -103,29 +106,10 @@ func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit
 		res.Left = untouched(d)
 		return res
 	}
-	// The journal follows the steps that matter for a run cut off: the
-	// stop (from then on the distribution must run again) and the
-	// containers it stopped.
+	// The journal follows the steps that matter for a run cut off.
+	f := &follower{j: j, update: a.Journal.Update}
 	follow := func(e shrink.Event) {
-		changed := false
-		// The step reached, and from the stop on, that the distribution must
-		// run again.
-		if e.Status == shrink.Running && e.Step != shrink.StepCheck {
-			if j.Step != string(e.Step) {
-				j.Step, changed = string(e.Step), true
-			}
-			if e.Step == shrink.StepStop && !j.Stopped {
-				j.Stopped, changed = true, true
-			}
-		}
-		// The containers, as soon as the stop step names them: before they
-		// stop, so a run cut off while they stop starts them again.
-		if e.Step == shrink.StepStop && len(e.Containers) > 0 && !slices.Equal(j.Containers, e.Containers) {
-			j.Containers, changed = e.Containers, true
-		}
-		if changed {
-			_ = a.Journal.Update(j)
-		}
+		f.see(e)
 		if emit != nil {
 			emit(e)
 		}
@@ -253,6 +237,42 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return msg, nil
+}
+
+// follower keeps the journal in step with a run: the step reached, that
+// the distribution must run again from the stop on, and the containers the
+// stop step stopped. An update the file refuses (another program has it
+// open a moment longer than Update waits) is tried again with the next
+// event, so the journal says as soon as it can what a run cut off must
+// start again.
+type follower struct {
+	j      journal.Entry
+	update func(journal.Entry) error
+	// behind is set while the journal lacks a change it refused.
+	behind bool
+}
+
+// see takes one event of the run.
+func (f *follower) see(e shrink.Event) {
+	changed := false
+	// The step reached, and from the stop on, that the distribution must
+	// run again.
+	if e.Status == shrink.Running && e.Step != shrink.StepCheck {
+		if f.j.Step != string(e.Step) {
+			f.j.Step, changed = string(e.Step), true
+		}
+		if e.Step == shrink.StepStop && !f.j.Stopped {
+			f.j.Stopped, changed = true, true
+		}
+	}
+	// The containers, as soon as the stop step names them: before they
+	// stop, so a run cut off while they stop starts them again.
+	if e.Step == shrink.StepStop && len(e.Containers) > 0 && !slices.Equal(f.j.Containers, e.Containers) {
+		f.j.Containers, changed = e.Containers, true
+	}
+	if changed || f.behind {
+		f.behind = f.update(f.j) != nil
+	}
 }
 
 // Backend is the screen's view of the App.

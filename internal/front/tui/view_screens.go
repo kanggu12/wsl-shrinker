@@ -61,6 +61,14 @@ func (m model) runView() string {
 	default:
 		body = append(body, " "+bold.Render(title), "")
 	}
+	// A failure's reason takes up to six rows. In a window too short for
+	// all, where things stand comes first: the reason keeps the rows the
+	// outcome leaves, two at least, cut with an ellipsis.
+	detailRows := 6
+	if failed {
+		fixed := len(body) + len(shrink.Steps) + 1 + len(m.outcome(0))
+		detailRows = max(2, min(6, 1+m.bodyHeight()+1-fixed))
+	}
 	// One row per step: its mark, its name, what it found or did.
 	for _, s := range shrink.Steps {
 		e, seen := r.steps[s]
@@ -101,11 +109,19 @@ func (m model) runView() string {
 		// A failure says why in full: its lines wrap under the detail column,
 		// 22 cells in, up to a few of them.
 		if seen && e.Status == shrink.Failed {
-			wrapped := m.wrapTo(detail, m.width-22, "", ui.Fg(t.Muted))
-			wrapped = wrapped[:min(len(wrapped), 6)]
-			body = append(body, lead+wrapped[0])
-			for _, l := range wrapped[1:] {
-				body = append(body, strings.Repeat(" ", 22)+l)
+			wrapped := m.wrapTo(detail, m.width-22, "", lipgloss.NewStyle())
+			if len(wrapped) > detailRows {
+				wrapped = wrapped[:detailRows]
+				last := wrapped[detailRows-1]
+				// Fit ends what it cuts with an ellipsis.
+				wrapped[detailRows-1] = ui.Fit(last+"…", lipgloss.Width(last))
+			}
+			for i, l := range wrapped {
+				if i == 0 {
+					body = append(body, lead+ui.Fg(t.Muted).Render(l))
+					continue
+				}
+				body = append(body, strings.Repeat(" ", 22)+ui.Fg(t.Muted).Render(l))
 			}
 			continue
 		}
@@ -158,21 +174,25 @@ func (m model) runView() string {
 	// The outcome, once there is one, in the rows the steps left. What the
 	// run came to matters more than the bars: in a window too short for all
 	// of it, the bars go first.
+	status := " " + ui.Fg(t.Muted).Render(i18n.T("run.wait"))
 	if r.done {
-		room := m.bodyHeight() - len(body)
+		// Once it has ended, nothing waits to be said in the status row: the
+		// outcome may end there.
+		status = ""
+		room := m.bodyHeight() + 1 - len(body)
 		out := m.outcome(room - len(bars))
 		if all := m.outcome(room); len(bars) > 0 && (len(all) > len(out) || len(out) > room-len(bars)) {
 			bars, out = nil, all
 		}
 		body = append(append(body, bars...), out...)
+		if len(body) > m.bodyHeight() {
+			status, body = body[m.bodyHeight()], body[:m.bodyHeight()]
+		}
 	} else {
 		body = append(body, bars...)
 	}
 	keys := m.keyBar([][2]string{{"⏎", i18n.T("key.back")}, {"q", i18n.T("key.quit")}})
-	status := " " + ui.Fg(t.Muted).Render(i18n.T("run.wait"))
-	if r.done {
-		status = ""
-	} else {
+	if !r.done {
 		keys = " " + ui.Fg(t.Muted).Render(i18n.T("run.nokeys"))
 	}
 	return m.page(body, status, keys)
@@ -272,9 +292,13 @@ func (m model) outcome(room int) (lines []string) {
 			}
 		}
 		// The note goes in whole or not at all: in a window too short for
-		// it, a sentence cut in the middle would say less than none.
-		if notes := m.idleNotes(); len(notes) > 0 && len(lines)+len(notes) <= room {
-			lines = slices.Insert(lines, at, notes...)
+		// it, a sentence cut in the middle would say less than none. A
+		// shorter one says the same where the long one does not fit.
+		for _, short := range []bool{false, true} {
+			if notes := m.idleNotes(short); len(notes) > 0 && len(lines)+len(notes) <= room {
+				lines = slices.Insert(lines, at, notes...)
+				break
+			}
 		}
 	}()
 	// What the disks that went through gave back; a disk that failed says
@@ -322,10 +346,14 @@ func (m model) outcome(room int) (lines []string) {
 // run: as long as WSL keeps their distribution running, which it stops
 // once nothing from Windows runs in it (shrink.IdleNote). One note for
 // each disk whose run started containers again, in the muted color.
-func (m model) idleNotes() (lines []string) {
+func (m model) idleNotes(short bool) (lines []string) {
 	for _, res := range m.run.results {
 		if res.Left == shrink.LeftRunning && shrink.Idle(res.DistroStarted, res.ContainersStarted) {
-			lines = append(lines, m.wrap(i18n.T("run.idle", res.Disk), " ", ui.Fg(m.th.Muted))...)
+			note := i18n.T("run.idle", res.Disk)
+			if short {
+				note = i18n.T("run.idle.short", res.Disk)
+			}
+			lines = append(lines, m.wrap(note, " ", ui.Fg(m.th.Muted))...)
 		}
 	}
 	return lines
@@ -520,16 +548,17 @@ func (m model) pageLen() int {
 	return len(m.historyLines())
 }
 
-// pageOf lays out the help or the history: its title, the window of its
-// lines, where that window is when they do not all fit, and its keys.
-func (m model) pageOf(title string, lines []string, status string) string {
+// pageOf lays out the help or the history: its title, with the heads of
+// its columns under it when it has columns, the window of its lines, where
+// that window is when they do not all fit, and its keys.
+func (m model) pageOf(title, head string, lines []string, status string) string {
 	t := m.th
 	visible := m.pageVisible()
 	top := max(0, min(m.pageTop, len(lines)-visible))
 	// A page with no title (help) starts with lines of its own instead.
 	var body []string
 	if title != "" {
-		body = []string{" " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(title), ""}
+		body = []string{" " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(title), head}
 	}
 	body = append(body, lines[top:min(len(lines), top+visible)]...)
 	keys := [][2]string{{"esc", i18n.T("key.back")}, {"q", i18n.T("key.quit")}}
@@ -549,6 +578,7 @@ func (m model) pageOf(title string, lines []string, status string) string {
 
 // historyView lists past runs, newest first.
 func (m model) historyView() string {
+	t := m.th
 	var total int64
 	for _, e := range m.hist {
 		total += e.Freed
@@ -558,8 +588,19 @@ func (m model) historyView() string {
 	if len(m.hist) > 0 {
 		status = i18n.T("history.total", units.Bytes(total))
 	}
-	return m.pageOf(i18n.T("history.title"), m.historyLines(), status)
+	// The heads of the columns, which stay while the runs scroll.
+	head := ""
+	if len(m.hist) > 0 {
+		nw := m.historyNameWidth()
+		head = " " + ui.Fg(t.Muted).Render(ui.Fit(i18n.T("history.col.when"), 16)+"  "+ui.Fit(i18n.T("col.disk"), nw)+"  "+
+			ui.FitRight(i18n.T("history.col.freed"), 9)+"   "+i18n.T("history.col.sizes"))
+	}
+	return m.pageOf(i18n.T("history.title"), head, m.historyLines(), status)
 }
+
+// historyNameWidth is how wide the history's disk column is: 22 cells, less
+// in a narrow window, so the sizes and the time after them stay whole.
+func (m model) historyNameWidth() int { return max(12, min(22, m.width-60)) }
 
 // historyLines is one line per past run, newest first.
 func (m model) historyLines() []string {
@@ -578,14 +619,14 @@ func (m model) historyLines() []string {
 			what = ui.Fg(t.Cat[ui.CatDone]).Render(ui.FitRight(units.Bytes(e.Freed), 9)) + "   " +
 				ui.Fg(t.Muted).Render(units.Bytes(e.Before)+" → "+units.Bytes(e.After)+" · "+elapsed(time.Duration(e.Took*float64(time.Second))))
 		}
-		lines = append(lines, " "+when+"  "+ui.Fit(e.Disk, 22)+"  "+what)
+		lines = append(lines, " "+when+"  "+ui.Fit(e.Disk, m.historyNameWidth())+"  "+what)
 	}
 	return lines
 }
 
 // helpView explains the keys and what a shrink does.
 func (m model) helpView() string {
-	return m.pageOf("", m.helpLines(), "")
+	return m.pageOf("", "", m.helpLines(), "")
 }
 
 // helpLines is the help under its title: the keys, the clean list's keys,
@@ -643,7 +684,8 @@ func (m model) legend() []string {
 		ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("help.legend.bad")),
 	}
 	sep := ui.Fg(t.Muted).Render(" · ")
-	lines := []string{" " + ui.Fg(t.Muted).Render(i18n.T("help.legend"))}
+	// A heading like the help's others.
+	lines := []string{" " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("help.legend"))}
 	cur := " "
 	for _, p := range parts {
 		next := cur + p

@@ -477,3 +477,24 @@ func TestTheSetupProgramTellsCtrlCFromEsc(t *testing.T) {
 		t.Fatalf("ctrl+c: %v %v", saved, err)
 	}
 }
+
+func TestAPathBreaksOnlyAfterAFolder(t *testing.T) {
+	// The settings file's path, wider than its line: every line but the
+	// last ends at a separator, and together they are the path.
+	p := `C:\Users\ann\AppData\Roaming\wsl-shrinker\config.toml`
+	for _, w := range []int{20, 30, 40, 60} {
+		lines := pathLines(p, w)
+		if strings.Join(lines, "") != p {
+			t.Fatalf("%d: %q", w, lines)
+		}
+		for i, l := range lines {
+			if ansi.StringWidth(l) > w || (i < len(lines)-1 && !strings.HasSuffix(l, `\`)) {
+				t.Errorf("%d: line %d %q", w, i, l)
+			}
+		}
+	}
+	// A name wider than a line alone is broken where it must be.
+	if lines := pathLines(`C:\a-very-long-folder-name\x`, 10); strings.Join(lines, "") != `C:\a-very-long-folder-name\x` || ansi.StringWidth(lines[1]) > 10 {
+		t.Fatalf("%q", lines)
+	}
+}

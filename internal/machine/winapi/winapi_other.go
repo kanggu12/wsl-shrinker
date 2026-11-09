@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 )
@@ -46,6 +47,9 @@ func AppData() string {
 
 // CompactFile needs Windows' virtual disk service.
 func CompactFile(string) error { return ErrNotWindows }
+
+// ProcessStart cannot say off Windows.
+func ProcessStart(int) (time.Time, bool) { return time.Time{}, false }
 
 // Running reports whether process pid runs the program named exe, from
 // /proc: off Windows only the tests and the demo run, but the journal's

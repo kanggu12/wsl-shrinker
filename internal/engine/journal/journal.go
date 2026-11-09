@@ -59,6 +59,11 @@ type Store struct {
 	// Alive reports whether process pid runs the program named exe; the
 	// app gives the system's way, tests their own.
 	Alive func(pid int, exe string) bool
+	// Since says when process pid started, when the system says; nil
+	// leaves it unasked. A process that started after a run began is not
+	// the one that began it, but one given its id again, as after a
+	// restart of Windows: that run was cut off.
+	Since func(pid int) (time.Time, bool)
 }
 
 // Open returns the journal kept in dir.
@@ -87,11 +92,23 @@ func (s Store) Read() (Entry, State, error) {
 		}
 		return Entry{}, CutOff, nil
 	}
-	// A run still going is one whose process still runs this program.
-	if e.PID > 0 && s.Alive != nil && s.Alive(e.PID, e.Exe) {
+	// A run still going is one whose process still runs this program, and
+	// started before the run began.
+	if e.PID > 0 && s.Alive != nil && s.Alive(e.PID, e.Exe) && !s.reused(e) {
 		return e, Going, nil
 	}
 	return e, CutOff, nil
+}
+
+// reused reports whether e's process id now belongs to a process that
+// started after e's run began. A second of leeway covers the clocks'
+// rounding: the process that began a run started before it, always.
+func (s Store) reused(e Entry) bool {
+	if s.Since == nil || e.Started.IsZero() {
+		return false
+	}
+	t, ok := s.Since(e.PID)
+	return ok && t.After(e.Started.Add(time.Second))
 }
 
 // Begin claims the journal for a run. It is refused (ErrBusy) when another

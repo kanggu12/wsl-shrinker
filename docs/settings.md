@@ -5,7 +5,8 @@ Settings live in `%APPDATA%\wsl-shrinker\config.toml`, and every key is optional
 keys that changed and keeps the rest, comments included. With no file yet, it writes a whole commented file like the one
 below, here with example values. The first start and the installer open setup. `wsl-shrinker config init` writes every
 key at its default. A file that does not load stops wsl-shrinker with the reason and what to do, rather than running
-with settings you did not choose.
+with settings you did not choose; a wrong `language`, `theme`, `mode` or `min_gain_gb` is put right with the setup flag
+the message names, like `wsl-shrinker setup --language auto`, which edits the file as it is.
 
 ```toml
 # Language of the screen, setup and CLI mode's disks: "en", "ko", or "auto":

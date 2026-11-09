@@ -388,7 +388,7 @@ func shrinkCmd(p *apps) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the results as JSON")
-	cmd.Flags().StringArrayVar(&clean, "clean", nil, "NAME=ID,ID: remove these items inside NAME first")
+	cmd.Flags().StringArrayVar(&clean, "clean", nil, "remove items inside a disk first, as `DISK=ID,ID` with the ids wsl-shrinker inside lists; once per disk")
 	return cmd
 }
 

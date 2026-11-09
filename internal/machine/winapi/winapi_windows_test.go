@@ -79,3 +79,15 @@ func TestReopenOpensNoWindowFromATest(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestProcessStartIsWhenThisTestStarted(t *testing.T) {
+	// The journal's check for an id given again: this process started a
+	// moment ago, and an id no process has says nothing.
+	got, ok := ProcessStart(os.Getpid())
+	if !ok || got.After(time.Now()) || time.Since(got) > time.Hour {
+		t.Fatalf("%v %v", got, ok)
+	}
+	if _, ok := ProcessStart(0x7ffffff0); ok {
+		t.Fatal("an id no process has said when it started")
+	}
+}

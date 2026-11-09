@@ -51,7 +51,7 @@ func tuiCmd(p *apps) *cobra.Command {
 			return screen(cmd.Context(), a, theme, tui.Options{}, false, cmd.ErrOrStderr())
 		},
 	}
-	cmd.Flags().StringVar(&theme, "theme", "", "colors of the screen: auto, dark or light (default: the settings, then ask the terminal)")
+	cmd.Flags().StringVar(&theme, "theme", "", "the colors of the screen, `auto|dark|light` (default: the settings, then ask the terminal)")
 	return cmd
 }
 

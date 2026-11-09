@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -60,7 +62,7 @@ func doctorCmd(made *apps) *cobra.Command {
 			// The settings file.
 			p := config.Path(winapi.AppData())
 			if _, err := config.Load(p); err != nil {
-				line(false, "settings: "+err.Error(), "fix the file or move it away")
+				line(false, "settings: "+err.Error(), settingsHint(err))
 				return problems(bad)
 			}
 			line(true, settingsLine(p), "")
@@ -104,6 +106,13 @@ func doctorCmd(made *apps) *cobra.Command {
 			}
 			for _, d := range ds {
 				doctorDisk(d, info.CanCompact, a.Config.Protected(d.Name), line, note)
+			}
+			// A protected name no disk has protects nothing now: a typo, or
+			// a disk gone or listed under another name since.
+			for _, p := range a.Config.Protect {
+				if !slices.ContainsFunc(ds, func(d disks.Disk) bool { return strings.EqualFold(d.Name, p) }) {
+					note(fmt.Sprintf("protect names %q, which no disk is called now; wsl-shrinker list shows the names", p))
+				}
 			}
 			return problems(bad)
 		},

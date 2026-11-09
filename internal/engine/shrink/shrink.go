@@ -395,6 +395,12 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		// settled is set once settle ran, so a panic inside it is not
 		// followed by a second settle.
 		settled bool
+		// stoppedAlone is set when the run failed because the distribution
+		// stopped on its own, before the run stopped anything.
+		stoppedAlone bool
+		// cleaned is what the clean step removed, which the verify step
+		// allows for: nothing when it was skipped.
+		cleaned int64
 	)
 	sayE := func(e Event) {
 		e.At = time.Now()
@@ -425,6 +431,10 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		case d.Distro == "":
 			res.Left = LeftFile
 		case !ran:
+			res.Left = LeftStopped
+		case !touched && stoppedAlone:
+			// It stopped by itself, as during the clean step: nothing here
+			// stopped it, and it is not started again.
 			res.Left = LeftStopped
 		case !touched:
 			// Nothing was stopped yet: it runs as it did.
@@ -465,6 +475,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		}
 		sayE(e)
 		res.Err, res.FailedAt = err.Error(), s
+		stoppedAlone = errors.Is(err, wsl.ErrNotRunning)
 		settle(suspect)
 		return res
 	}
@@ -536,8 +547,10 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 			return fail(StepClean, err, false)
 		} else if strings.Contains(out, "failed: ") {
 			// One item failing does not stop the run; the rest was removed.
+			cleaned = n
 			sayE(Event{Step: StepClean, Status: Warned, Detail: fmt.Sprintf("%d items, some failed", len(opt.Clean)), Count: len(opt.Clean), Bytes: n})
 		} else {
+			cleaned = n
 			sayE(Event{Step: StepClean, Status: Done, Detail: fmt.Sprintf("%d items, about %s", len(opt.Clean), units.Bytes(n)), Count: len(opt.Clean), Bytes: n})
 		}
 	}
@@ -636,7 +649,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	// disk that does not read as before stays stopped; one that could not
 	// be read just then (another program had the file a moment) does not.
 	say(StepVerify, Running, "")
-	if v := verify(env, d, opt, base); v.msg != "" {
+	if v := verify(env, d, cleaned, base); v.msg != "" {
 		return fail(StepVerify, errors.New(v.msg), v.suspect)
 	}
 	after := d
@@ -780,7 +793,9 @@ type verdict struct {
 }
 
 // verify reads the disk after compaction and compares it with the baseline.
-func verify(env Env, d disks.Disk, opt Options, base baseline) verdict {
+// cleaned is what the clean step removed inside: the filesystem may use that
+// much less, and no more.
+func verify(env Env, d disks.Disk, cleaned int64, base baseline) verdict {
 	// Opening can fail for a moment (another program has the file): that
 	// says nothing about the disk.
 	f, size, err := env.Disks.Open(d.Path)
@@ -818,10 +833,8 @@ func verify(env Env, d disks.Disk, opt Options, base baseline) verdict {
 	// not show the clean yet, so what was cleaned stays allowed: taking it
 	// out would fail good runs and leave their distribution stopped. A
 	// block gone that the filesystem still uses is caught below anyway.
-	var cleaned int64
-	for _, it := range opt.Clean {
-		cleaned += it.Bytes
-	}
+	// What was chosen but not removed, as in a distribution that was not
+	// running, is not allowed for.
 	usedAfter := int64(fs.UsedBlocks) * fs.BlockSize
 	slack := base.used/200 + 32<<20
 	if usedAfter < base.used-cleaned-slack {

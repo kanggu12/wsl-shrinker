@@ -143,8 +143,10 @@ func Find(ctx context.Context, env Env) ([]Disk, error) {
 	// Docker Desktop's data disks that exist and WSL does not register:
 	// where its settings moved the disk, then where it keeps disks by
 	// default. The first found is "Docker Desktop data"; another one, as a
-	// disk an older release left behind, is named after its file, so every
-	// name stays one disk's.
+	// disk an older release left behind, is "Docker Desktop data 2". Their
+	// names are Docker Desktop's own, never a file's: a file from the
+	// settings keeps its name whatever Docker Desktop leaves behind, and a
+	// disk protected by name stays the one protected.
 	var docker []string
 	if p := movedDockerDisk(env.AppData); p != "" {
 		docker = append(docker, p)
@@ -160,8 +162,8 @@ func Find(ctx context.Context, env Env) ([]Disk, error) {
 		}
 		if _, err := env.Stat(p); err == nil {
 			name := "Docker Desktop data"
-			if slices.ContainsFunc(out, func(d Disk) bool { return d.Kind == KindDocker }) {
-				name = uniqueName(out, p)
+			if n := 1 + len(slices.DeleteFunc(slices.Clone(out), func(d Disk) bool { return d.Kind != KindDocker })); n > 1 {
+				name = fmt.Sprintf("%s %d", name, n)
 			}
 			out = append(out, Disk{Name: name, Kind: KindDocker, Path: p})
 			seen[strings.ToLower(p)] = true

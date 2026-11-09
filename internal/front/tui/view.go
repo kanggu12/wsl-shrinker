@@ -153,6 +153,16 @@ func (m model) driveFree() string {
 func (m model) mainView() string {
 	t := m.th
 	h := m.bodyHeight()
+	// A message too long for the status row takes the row above it as
+	// well: its end says what to do. The body gives that row up.
+	status := []string{m.statusLine()}
+	if text, st, ok := m.message(); ok && lipgloss.Width(text)+1 > m.width {
+		status = m.wrapTo(text, m.width, " ", st)
+		if len(status) > 2 {
+			status = status[:2]
+		}
+		h -= len(status) - 1
+	}
 	var body []string
 	switch {
 	case !m.loaded:
@@ -200,7 +210,15 @@ func (m model) mainView() string {
 			body = append(body, " "+l)
 		}
 	}
-	screen := m.page(body, m.statusLine(), m.footer())
+	// The first row of a message of two goes where the body ends.
+	if len(status) == 2 {
+		for len(body) < h {
+			body = append(body, "")
+		}
+		body = append(body[:h], status[0])
+		status = status[1:]
+	}
+	screen := m.page(body, status[0], m.footer())
 	if m.mode == modeConfirm {
 		return m.overlay(screen, m.confirmBox())
 	}
@@ -514,13 +532,19 @@ func (m model) details(w, h int) []string {
 		rows := h - len(lines) - 4
 		if inside := m.inside(d, w, rows); rows >= 3 || len(inside) <= rows+1 {
 			add(append([]string{section(i18n.T("details.inside"))}, inside...))
-		} else if s := m.surveys[d.Distro]; d.Running && s != nil && !s.loading && len(s.r.Items) > 0 {
-			// No room for the list: one line still says it is there.
-			var found int64
-			for _, it := range s.r.Items {
-				found += it.Bytes
+		} else if s := m.surveys[d.Distro]; d.Running && s != nil && !s.loading {
+			// No room for the list: one line still says it is there, or that
+			// the look failed, which nothing else on the screen says.
+			switch {
+			case s.err != nil:
+				add([]string{ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("inside.failed.short"))})
+			case len(s.r.Items) > 0:
+				var found int64
+				for _, it := range s.r.Items {
+					found += it.Bytes
+				}
+				add([]string{ui.Fg(t.Muted).Render(i18n.T("inside.summary", units.Bytes(found)))})
 			}
-			add([]string{ui.Fg(t.Muted).Render(i18n.T("inside.summary", units.Bytes(found)))})
 		}
 	}
 	add([]string{ui.Fg(t.Muted).Render(ui.Middle(d.Path, w))})
@@ -687,25 +711,38 @@ func itemLabel(it survey.Item) string {
 	return i18n.T("item.owner", name, owner)
 }
 
-// statusLine is the summary, or a passing message.
-func (m model) statusLine() string {
+// message is what the status row says instead of the counts: a passing
+// message, or a run that has not ended, in its color; ok is false when
+// there is none.
+func (m model) message() (text string, st lipgloss.Style, ok bool) {
 	t := m.th
 	if m.toast != "" && time.Now().Before(m.toastUntil) {
-		return " " + ui.Fg(t.Cat[m.toastCat]).Render(m.toast)
+		return m.toast, ui.Fg(t.Cat[m.toastCat]), true
 	}
 	if !m.loaded || m.err != nil || len(m.list) == 0 {
-		return ""
+		return "", st, false
 	}
 	// A run that has not ended matters more than the counts.
 	switch m.unfinishedState {
 	case journal.CutOff:
-		step := i18n.T("step." + m.unfinished.Step)
 		if m.unfinished.Step == "" || m.unfinished.Disk == "" {
-			return " " + ui.Fg(t.Cat[ui.CatWarn]).Render(i18n.T("unfinished.unknown"))
+			return i18n.T("unfinished.unknown"), ui.Fg(t.Cat[ui.CatWarn]), true
 		}
-		return " " + ui.Fg(t.Cat[ui.CatWarn]).Render(i18n.T("unfinished.cutoff", m.unfinished.Disk, step))
+		return i18n.T("unfinished.cutoff", m.unfinished.Disk, i18n.T("step."+m.unfinished.Step)), ui.Fg(t.Cat[ui.CatWarn]), true
 	case journal.Going:
-		return " " + ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("unfinished.going", m.unfinished.Disk))
+		return i18n.T("unfinished.going", m.unfinished.Disk), ui.Fg(t.Cat[ui.CatLive]), true
+	}
+	return "", st, false
+}
+
+// statusLine is the summary, or a message in its place.
+func (m model) statusLine() string {
+	t := m.th
+	if text, st, ok := m.message(); ok {
+		return " " + st.Render(text)
+	}
+	if !m.loaded || m.err != nil || len(m.list) == 0 {
+		return ""
 	}
 	worth := 0
 	for _, d := range m.list {
@@ -785,9 +822,21 @@ func (m model) overlay(screen, box string) string {
 	for i, r := range rows {
 		rows[i] = ui.Fg(m.th.Rule).Render(ansi.Strip(r))
 	}
-	x := max(0, (m.width-lipgloss.Width(box))/2)
-	y := max(0, (m.height-lipgloss.Height(box))/2)
-	out := lipgloss.NewCompositor(lipgloss.NewLayer(strings.Join(rows, "\n")), lipgloss.NewLayer(box).X(x).Y(y).Z(1)).Render()
+	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
+	x := max(0, (m.width-bw)/2)
+	y := max(0, (m.height-bh)/2)
+	// A cell of space around the box, so nothing behind it touches its
+	// border; where a few cells are all that is left beside it, those go
+	// too, rather than show pieces of words. The keys at the bottom stay.
+	cx, cw := max(0, x-1), bw+2
+	if x <= 6 {
+		cx, cw = 0, m.width
+	}
+	cy := max(0, y-1)
+	end := max(y+bh, min(y+bh+1, m.height-2))
+	space := strings.TrimSuffix(strings.Repeat(strings.Repeat(" ", min(cw, m.width-cx))+"\n", end-cy), "\n")
+	out := lipgloss.NewCompositor(lipgloss.NewLayer(strings.Join(rows, "\n")),
+		lipgloss.NewLayer(space).X(cx).Y(cy).Z(1), lipgloss.NewLayer(box).X(x).Y(y).Z(2)).Render()
 	return m.frame(strings.Split(out, "\n"))
 }
 

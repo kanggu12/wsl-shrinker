@@ -68,3 +68,34 @@ func TestRecoverWaitsWhileWSLStillCompacts(t *testing.T) {
 		t.Fatalf("calls %s", calls)
 	}
 }
+
+// An update of the journal the file refuses (another program has run.json
+// open a moment longer than Update waits) is tried again with the next
+// event: the stop is on record before the compaction, where a run cut off
+// would need it.
+func TestAJournalUpdateRefusedIsTriedAgain(t *testing.T) {
+	var written []journal.Entry
+	refuse := 1
+	f := &follower{j: journal.Entry{Disk: "Dev", Distro: "Dev", Step: "check"}, update: func(e journal.Entry) error {
+		if refuse > 0 {
+			refuse--
+			return errors.New("the file is in use")
+		}
+		written = append(written, e)
+		return nil
+	}}
+	f.see(shrink.Event{Step: shrink.StepStop, Status: shrink.Running})
+	if len(written) != 0 {
+		t.Fatalf("written %v", written)
+	}
+	// The next event changes nothing, yet the stop goes on record now.
+	f.see(shrink.Event{Step: shrink.StepStop, Status: shrink.Done})
+	if len(written) != 1 || !written[0].Stopped || written[0].Step != "stop" {
+		t.Fatalf("written %+v", written)
+	}
+	// Up to date: an event that changes nothing writes nothing.
+	f.see(shrink.Event{Step: shrink.StepStop, Status: shrink.Done})
+	if len(written) != 1 {
+		t.Fatalf("written again: %+v", written)
+	}
+}

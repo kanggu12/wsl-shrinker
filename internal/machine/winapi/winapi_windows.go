@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -232,6 +233,21 @@ func Running(pid int, exe string) bool {
 		return false
 	}
 	return strings.EqualFold(filepath.Base(windows.UTF16ToString(buf[:n])), exe)
+}
+
+// ProcessStart is when process pid started, and false when Windows does not
+// say (no such process, or no right to ask).
+func ProcessStart(pid int) (time.Time, bool) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer windows.CloseHandle(h)
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(0, created.Nanoseconds()), true
 }
 
 // stillActive is the exit code of a process that has not ended (STILL_ACTIVE).

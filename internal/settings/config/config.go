@@ -64,33 +64,41 @@ func parse(path string, b []byte) (Config, error) {
 	}
 	// A key this version does not know is a typo more often than not.
 	if und := md.Undecoded(); len(und) > 0 {
-		return Default(), fmt.Errorf("%s: unknown setting %q", path, und[0].String())
+		return Default(), &KeyError{path, und[0].String(), fmt.Sprintf("unknown setting %q", und[0].String())}
 	}
 	return c, c.check(path)
 }
 
+// KeyError is a setting in the file at Path the program cannot use: Key
+// names it, for the fronts to say how to put it right.
+type KeyError struct{ Path, Key, Msg string }
+
+// Error says it with the file's path in front, the file the person knows.
+func (e *KeyError) Error() string { return e.Path + ": " + e.Msg }
+
 // check rejects values the program cannot use.
 func (c Config) check(path string) error {
+	bad := func(key, format string, a ...any) error { return &KeyError{path, key, fmt.Sprintf(format, a...)} }
 	switch {
 	case !oneOf(c.Language, "auto", "en", "ko"):
-		return fmt.Errorf("%s: language must be auto, en or ko", path)
+		return bad("language", "language must be auto, en or ko")
 	case !oneOf(c.Theme, "auto", "dark", "light"):
-		return fmt.Errorf("%s: theme must be auto, dark or light", path)
+		return bad("theme", "theme must be auto, dark or light")
 	case !oneOf(c.Mode, "tui", "cli"):
-		return fmt.Errorf("%s: mode must be tui or cli", path)
+		return bad("mode", "mode must be tui or cli")
 	case c.MinGainGB < 0:
-		return fmt.Errorf("%s: min_gain_gb cannot be negative", path)
+		return bad("min_gain_gb", "min_gain_gb cannot be negative")
 	case math.IsNaN(c.MinGainGB) || c.MinGainGB > maxGainGB:
 		// Not a number, or more bytes than a count holds: every disk would
 		// read as worth shrinking.
-		return fmt.Errorf("%s: min_gain_gb must be a number from 0 to %d", path, maxGainGB)
+		return bad("min_gain_gb", "min_gain_gb must be a number from 0 to %d", maxGainGB)
 	}
 	for _, p := range c.ExtraDisks {
 		if !strings.EqualFold(filepath.Ext(p), ".vhdx") {
-			return fmt.Errorf("%s: extra_disks takes .vhdx files, not %q", path, p)
+			return bad("extra_disks", "extra_disks takes .vhdx files, not %q", p)
 		}
 		if !windowsAbs(p) {
-			return fmt.Errorf("%s: extra_disks takes full Windows paths (C:\\...\\disk.vhdx), not %q", path, p)
+			return bad("extra_disks", "extra_disks takes full Windows paths (C:\\...\\disk.vhdx), not %q", p)
 		}
 	}
 	return nil

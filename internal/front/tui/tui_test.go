@@ -133,7 +133,7 @@ func TestRunPlaysToTheEnd(t *testing.T) {
 	}
 	// Mid-run, the compaction shows as running and the later steps wait.
 	mid := ansi.Strip(Snapshot(demo(), 110, 30, true, []string{"s", "enter"}, "compact"))
-	if !strings.Contains(mid, "Compacting; this cannot be paused") || strings.Contains(mid, "Shrank") {
+	if !strings.Contains(mid, "Compacting · cannot stop") || strings.Contains(mid, "Shrank") {
 		t.Fatalf("mid-run:\n%s", mid)
 	}
 }

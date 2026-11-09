@@ -117,3 +117,30 @@ func TestBeginWritesTheEntryWhole(t *testing.T) {
 		t.Fatalf("left %v", left)
 	}
 }
+
+func TestAReusedProcessIDIsNotTheRunGoingOn(t *testing.T) {
+	// After a restart of Windows another wsl-shrinker, this one or another,
+	// may get the id the journal names: it started after the run began, so
+	// it is not that run, which was cut off.
+	began := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name    string
+		started time.Time
+		known   bool
+		want    State
+	}{
+		{"the process that began it", began.Add(-time.Minute), true, Going},
+		{"a process given its id later", began.Add(time.Hour), true, CutOff},
+		{"rounding at the second", began.Add(500 * time.Millisecond), true, Going},
+		{"the system does not say", began.Add(time.Hour), false, Going},
+	} {
+		s := Store{Path: filepath.Join(t.TempDir(), "run.json"), Alive: func(int, string) bool { return true },
+			Since: func(int) (time.Time, bool) { return c.started, c.known }}
+		if err := s.Begin(Entry{PID: 100, Exe: "wsl-shrinker.exe", Started: began, Disk: "Dev", Step: "compact"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, st, err := s.Read(); err != nil || st != c.want {
+			t.Errorf("%s: %v %v, want %v", c.name, st, err, c.want)
+		}
+	}
+}

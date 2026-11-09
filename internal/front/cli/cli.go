@@ -23,6 +23,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
+	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
@@ -58,10 +59,30 @@ func (p *apps) get() (*app.App, error) {
 	p.once.Do(func() {
 		p.a, p.err = p.make()
 		if p.err != nil {
-			p.err = hint(p.err, "fix the file, or move it away to start from the defaults")
+			p.err = hint(p.err, settingsHint(p.err))
 		}
 	})
 	return p.a, p.err
+}
+
+// settingsHint is what to do about a settings file that does not load: the
+// setup command that puts the value right, where one does, or else to fix
+// the file by hand.
+func settingsHint(err error) string {
+	var ke *config.KeyError
+	if errors.As(err, &ke) {
+		switch ke.Key {
+		case "language":
+			return "wsl-shrinker setup --language auto puts it right"
+		case "theme":
+			return "wsl-shrinker setup --theme auto puts it right"
+		case "mode":
+			return "wsl-shrinker setup --mode tui puts it right"
+		case "min_gain_gb":
+			return "wsl-shrinker setup --min-gain 1 puts it right"
+		}
+	}
+	return "fix the file, or move it away to start from the defaults"
 }
 
 // errUsage marks an error in how the command was called.
@@ -266,10 +287,10 @@ func newRoot(p *apps) *cobra.Command {
 		},
 	}
 	root.Flags().BoolVar(&demo, "demo", false, "open the screen on a made-up PC; nothing real is read or changed")
-	root.Flags().StringVar(&theme, "theme", "", "colors of the screen: auto, dark or light (default: the settings, then ask the terminal)")
+	root.Flags().StringVar(&theme, "theme", "", "the colors of the screen, `auto|dark|light` (default: the settings, then ask the terminal)")
 	// The commands print English; the flag is on every command so a run that
 	// moves to a new window keeps the language of the screen there.
-	root.PersistentFlags().StringVar(&lang, "lang", "", "language of the screen, setup and CLI mode; the other commands print English: auto, en or ko (default: the settings, then WSL_SHRINKER_LANG, then Windows)")
+	root.PersistentFlags().StringVar(&lang, "lang", "", "the language of the screen, setup and CLI mode, `auto|en|ko`; the other commands print English (default: the settings, then WSL_SHRINKER_LANG, then Windows)")
 	root.Flags().StringVar(&snapshot, "snapshot", "", "print one frame WIDTHxHEIGHT of the demo and exit")
 	root.Flags().StringVar(&keys, "keys", "", "keys to press before --snapshot prints, like \"c space enter\"")
 	root.Flags().StringVar(&stopAt, "stop-at", "", "with --snapshot, stop a run while this step runs")
@@ -286,7 +307,73 @@ func newRoot(p *apps) *cobra.Command {
 	// only what this program does.
 	root.CompletionOptions.HiddenDefaultCmd = true
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return fmt.Errorf("%w: %w", errUsage, err) })
+	root.SetHelpCommand(helpCmd())
+	// --lang changes nothing version and config print: their help leaves
+	// it out.
+	for _, c := range root.Commands() {
+		if c.Name() == "version" || c.Name() == "config" {
+			withoutGlobalFlags(c)
+		}
+	}
 	return root
+}
+
+// helpCmd is help, and help NAME, NAME's help. A name that is no command is
+// a mistake in the command line, as anywhere else in it, said with the
+// command meant, not answered with the program's help and exit 0.
+func helpCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "help [command]",
+		Short: "Help about any command",
+		RunE: func(c *cobra.Command, args []string) error {
+			cmd, rest, err := c.Root().Find(args)
+			if err == nil && len(rest) == 0 {
+				return cmd.Help()
+			}
+			mistake := fmt.Errorf("%w: no command %q", errUsage, strings.Join(args, " "))
+			parent, word := c.Root(), args[0]
+			if err == nil {
+				parent, word = cmd, rest[0]
+			}
+			// The command meant, as for a mistyped one: two letters off is
+			// cobra's own distance.
+			parent.SuggestionsMinimumDistance = 2
+			if sug := parent.SuggestionsFor(word); len(sug) > 0 {
+				path := strings.TrimSpace(strings.TrimPrefix(parent.CommandPath(), c.Root().Name()) + " " + sug[0])
+				return hint(mistake, "did you mean: "+c.Root().Name()+" help "+path)
+			}
+			return hint(mistake, c.Root().Name()+" --help lists the commands")
+		},
+		// The commands, for shell completion, as cobra's own help offers them.
+		ValidArgsFunction: func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			cmd, _, err := c.Root().Find(args)
+			if err != nil || cmd == nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var names []string
+			for _, sub := range cmd.Commands() {
+				if sub.IsAvailableCommand() && strings.HasPrefix(sub.Name(), toComplete) {
+					names = append(names, sub.Name()+"\t"+sub.Short)
+				}
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
+	}
+}
+
+// withoutGlobalFlags leaves the flags every command takes out of cmd's help,
+// and its commands'.
+func withoutGlobalFlags(cmd *cobra.Command) {
+	t := cmd.UsageTemplate()
+	start := strings.Index(t, "{{if .HasAvailableInheritedFlags}}")
+	if start < 0 {
+		return
+	}
+	end := strings.Index(t[start:], "{{end}}")
+	if end < 0 {
+		return
+	}
+	cmd.SetUsageTemplate(t[:start] + t[start+end+len("{{end}}"):])
 }
 
 // cobraUsage reports whether an error is cobra's own about how the command

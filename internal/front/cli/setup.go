@@ -66,13 +66,19 @@ wsl-shrinker opens this screen by itself the first time it starts in a terminal.
 				fmt.Fprintln(cmd.OutOrStdout(), tui.SetupSnapshot(demoSetup(), w, h, f.theme != "light", tui.ParseKeys(keys)))
 				return nil
 			}
+			// Choices given as flags: no screen, so no terminal needed. They
+			// go into the file as it is, so they also put right a value the
+			// file has wrong, which keeps every other command from starting.
+			if setFlags(cmd) {
+				a, err := p.get()
+				if err != nil {
+					return writeChoicesOver(cmd, err, f)
+				}
+				return writeChoices(cmd, a.ConfigPath, a.Config.Protect, f)
+			}
 			a, err := p.get()
 			if err != nil {
 				return err
-			}
-			// Choices given as flags: no screen, so no terminal needed.
-			if setFlags(cmd) {
-				return writeChoices(cmd, a, f)
 			}
 			if !stdinIsTerminal() || !stdoutIsTerminal() {
 				return hint(fmt.Errorf("%w: setup needs a terminal for its screen", errUsage), "or give the choices as flags: wsl-shrinker setup --mode cli")
@@ -89,12 +95,12 @@ wsl-shrinker opens this screen by itself the first time it starts in a terminal.
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&f.lang, "language", "", "language of the screen: auto, en or ko")
-	cmd.Flags().StringVar(&f.theme, "theme", "", "colors: auto, dark or light")
-	cmd.Flags().StringVar(&f.mode, "mode", "", "what wsl-shrinker opens in a terminal: tui (the screen) or cli (the disks and the commands)")
-	cmd.Flags().Float64Var(&f.minGain, "min-gain", 0, "GB a disk must give back to be worth shrinking")
-	cmd.Flags().StringArrayVar(&f.protect, "protect", nil, "a disk to protect, by name; once per disk")
-	cmd.Flags().StringArrayVar(&f.unprotect, "unprotect", nil, "a disk to protect no more, by name; once per disk")
+	cmd.Flags().StringVar(&f.lang, "language", "", "the language of the screen, `auto|en|ko`")
+	cmd.Flags().StringVar(&f.theme, "theme", "", "the colors, `auto|dark|light`")
+	cmd.Flags().StringVar(&f.mode, "mode", "", "what wsl-shrinker opens in a terminal, `tui|cli`: the screen, or the disks and the commands")
+	cmd.Flags().Float64Var(&f.minGain, "min-gain", 0, "`GB` a disk must give back to be worth shrinking")
+	cmd.Flags().StringArrayVar(&f.protect, "protect", nil, "a disk to protect, by its `NAME`; once per disk")
+	cmd.Flags().StringArrayVar(&f.unprotect, "unprotect", nil, "a disk to protect no more, by its `NAME`; once per disk")
 	cmd.Flags().BoolVar(&installer, "installer", false, "opened by the installer")
 	cmd.Flags().StringVar(&snapshot, "snapshot", "", "print one frame WIDTHxHEIGHT of the screen on the made-up PC")
 	cmd.Flags().StringVar(&keys, "keys", "", "keys to press before --snapshot prints")
@@ -114,9 +120,28 @@ func setFlags(cmd *cobra.Command) bool {
 	return false
 }
 
-// writeChoices writes the choices given as flags. A value no setting takes
-// is a mistake in the command line; a file that cannot be written is not.
-func writeChoices(cmd *cobra.Command, a *app.App, f setupFlags) error {
+// writeChoicesOver writes the choices given as flags into a settings file
+// that does not load (loadErr), as it is: a wrong value they set is put
+// right. The disks to protect are added to the list the file has, which
+// cannot be read, so those flags wait until it loads.
+func writeChoicesOver(cmd *cobra.Command, loadErr error, f setupFlags) error {
+	if cmd.Flags().Changed("protect") || cmd.Flags().Changed("unprotect") {
+		return loadErr
+	}
+	err := writeChoices(cmd, config.Path(winapi.AppData()), nil, f)
+	// Still not loading: another value is wrong, and said with what puts it
+	// right. The command line was not the mistake.
+	var invalid *config.InvalidError
+	if errors.As(err, &invalid) {
+		return hint(invalid.Err, settingsHint(invalid.Err))
+	}
+	return err
+}
+
+// writeChoices writes the choices given as flags into the settings file at
+// path, whose protected disks are now. A value no setting takes is a
+// mistake in the command line; a file that cannot be written is not.
+func writeChoices(cmd *cobra.Command, path string, now []string, f setupFlags) error {
 	// --lang, the language of this run, names the language to keep too,
 	// unless --language does: "setup --lang ko --mode cli" keeps Korean.
 	if l := cmd.Flag("lang").Value.String(); l != "" && !cmd.Flags().Changed("language") {
@@ -155,9 +180,9 @@ func writeChoices(cmd *cobra.Command, a *app.App, f setupFlags) error {
 		values["min_gain_gb"] = strconv.FormatFloat(f.minGain, 'f', -1, 64)
 	}
 	if cmd.Flags().Changed("protect") || cmd.Flags().Changed("unprotect") {
-		values["protect"] = config.QuoteList(protectList(a.Config.Protect, f.protect, f.unprotect))
+		values["protect"] = config.QuoteList(protectList(now, f.protect, f.unprotect))
 	}
-	if err := config.SetKeys(a.ConfigPath, values); err != nil {
+	if err := config.SetKeys(path, values); err != nil {
 		// A value the settings refuse, as too large a size, is the command
 		// line's mistake; anything else is the file's.
 		var invalid *config.InvalidError
@@ -166,7 +191,7 @@ func writeChoices(cmd *cobra.Command, a *app.App, f setupFlags) error {
 		}
 		return err
 	}
-	return saidSaved(cmd.OutOrStdout(), a.ConfigPath)
+	return saidSaved(cmd.OutOrStdout(), path)
 }
 
 // orList joins values as English lists them: "tui or cli", "auto, en or ko".

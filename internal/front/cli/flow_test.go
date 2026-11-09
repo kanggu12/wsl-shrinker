@@ -290,3 +290,14 @@ func TestInsideJSONNamesTheDistributionAsWSLDoes(t *testing.T) {
 		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
 	}
 }
+
+func TestDoctorSaysAProtectedNameNoDiskHas(t *testing.T) {
+	// "Gone" protects nothing: a typo, or a disk gone. Dev, in another
+	// letter case, is a disk's.
+	a, _ := flowApp(t)
+	a.Config.Protect = []string{"dev", "Gone"}
+	_, out, _ := shrinkWith(a, "doctor")
+	if !strings.Contains(out, `protect names "Gone", which no disk is called now`) || strings.Contains(out, `protect names "dev"`) {
+		t.Fatalf("%s", out)
+	}
+}

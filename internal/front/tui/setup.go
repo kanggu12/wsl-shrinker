@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kanggu12/wsl-shrinker/internal/core/units"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
@@ -542,11 +543,14 @@ func (m setupModel) card(w, h int) []string {
 		add(0, "")
 		add(0, m.summary(inner)...)
 		// Where they go, the path on a line of its own, so a long one
-		// breaks no sentence. Saying where goes whole or not at all: in a
-		// window too short for the path, "writes them to" alone says less.
+		// breaks no sentence, and broken only after a folder's name, never
+		// inside one. Saying where goes whole or not at all: in a window too
+		// short for the path, "writes them to" alone says less.
 		add(1, "")
 		text(1, i18n.T("setup.saves"), muted)
-		text(1, m.start.Path, lipgloss.NewStyle().Foreground(t.Ink))
+		for _, l := range pathLines(m.start.Path, inner) {
+			add(1, lipgloss.NewStyle().Foreground(t.Ink).Render(l))
+		}
 	}
 	// A page taller than the room loses its extras, the last part first;
 	// then its bottom, the question and the choice coming first.
@@ -712,6 +716,11 @@ func (m setupModel) gainPreview(w int) []string {
 	// " ▪ ", the name, two spaces, then what a shrink gives back at its
 	// longest.
 	nameW = min(nameW, max(4, w-5-lipgloss.Width(i18n.T("setup.disk.gives", "1023.9 GB"))))
+	// The disks the line above counts come first, each with a check, so it
+	// says which they are by more than their color.
+	slices.SortStableFunc(ds, func(a, b disks.Disk) int {
+		return cmp.Compare(boolRank(m.category(b) == ui.CatGain), boolRank(m.category(a) == ui.CatGain))
+	})
 	for _, d := range ds[:min(5, len(ds))] {
 		c := m.category(d)
 		what := i18n.T("setup.disk.gives", units.Bytes(d.Estimate.Reclaim))
@@ -723,7 +732,11 @@ func (m setupModel) gainPreview(w int) []string {
 		case ui.CatBad:
 			what = i18n.T("setup.disk.cannot")
 		}
-		out = append(out, " "+t.Dot(c)+" "+lipgloss.NewStyle().Foreground(t.Ink).Render(ui.Fit(d.Name, nameW))+
+		mark := t.Dot(c)
+		if c == ui.CatGain {
+			mark = ui.Fg(t.Cat[c]).Render("✓")
+		}
+		out = append(out, " "+mark+" "+lipgloss.NewStyle().Foreground(t.Ink).Render(ui.Fit(d.Name, nameW))+
 			"  "+ui.Fg(t.Cat[c]).Render(what))
 	}
 	return out
@@ -824,6 +837,10 @@ func (m setupModel) diskRow(d disks.Disk, cols diskCols) string {
 		box, what = "[✓]", i18n.T("setup.disk.protected")
 	case d.Estimate == nil || d.Err != "":
 		what = i18n.T("setup.disk.unreadable")
+	case cat == ui.CatLive && d.Distro == "":
+		// Docker Desktop's disk while it runs, as step 4 and the screen say:
+		// it gives back nothing until the program lets go of it.
+		what = i18n.T("state.inuse")
 	default:
 		what = i18n.T("setup.disk.gives", units.Bytes(d.Estimate.Reclaim))
 	}
@@ -882,3 +899,32 @@ func wrapLines(s string, w int, indent string, st lipgloss.Style) []string {
 
 // gainWords is a number of GB as the settings file writes it.
 func gainWords(gb float64) string { return strconv.FormatFloat(gb, 'f', -1, 64) }
+
+// pathLines is a path in lines w cells wide, broken after a separator so
+// every folder's name stays whole; a name wider than a line alone is broken
+// where it must be.
+func pathLines(p string, w int) []string {
+	var lines []string
+	line := ""
+	for _, part := range strings.SplitAfter(p, `\`) {
+		if line != "" && lipgloss.Width(line+part) > w {
+			lines = append(lines, line)
+			line = ""
+		}
+		line += part
+		for lipgloss.Width(line) > w {
+			cut := ansi.Truncate(line, w, "")
+			lines = append(lines, cut)
+			line = line[len(cut):]
+		}
+	}
+	return append(lines, line)
+}
+
+// boolRank is 1 for true, for sorting by a test.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

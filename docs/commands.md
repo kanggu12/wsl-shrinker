@@ -7,7 +7,7 @@ terminal's own; `WSL_SHRINKER_SCREEN=windows` keeps it in `wsl-shrinker.exe`.
 | Command | What it does |
 |:---|:---|
 | `wsl-shrinker` | in a terminal, the screen (TUI mode) or the disks and commands to use (CLI mode), after `setup` on the first start. Without a terminal it prints `list` |
-| `wsl-shrinker tui [--theme dark\|light]` | the screen, in either mode |
+| `wsl-shrinker tui [--theme auto\|dark\|light]` | the screen, in either mode |
 | `wsl-shrinker setup [flags]` | choose the language, colors, mode, size worth shrinking and protected disks, on a screen or with flags |
 | `wsl-shrinker list [--json]` | every disk: its state, file size, size after a shrink, and what that gives back |
 | `wsl-shrinker inside DISTRO [--json]` | what can be removed inside a running distribution, each item with its id |
@@ -24,10 +24,10 @@ numbers, Docker, and the `items` with their ids). Each disk in `list --json` say
 `blocked` the first thing that stands in the way of a shrink now (`protected`, `held`, ...), `""` for none. Sizes are in bytes and times in seconds, as keys like `after_bytes`
 and `took_seconds` say. A change to this shape raises the schema number.
 
-Every command takes `--lang en|ko`, the language of the screen, setup and CLI mode's disks (default: the settings, then
-`WSL_SHRINKER_LANG`, then Windows' display language); other commands print English. The screen takes
-`--theme dark|light` (default: the settings, then ask the terminal), and `wsl-shrinker --demo` shows a made-up PC where
-nothing real is read or changed. [Settings](settings.md#environment) lists the environment variables for the look.
+Every command takes `--lang auto|en|ko`, the language of the screen, setup and CLI mode's disks (default: the settings,
+then `WSL_SHRINKER_LANG`, then Windows' display language); other commands print English. The screen takes
+`--theme auto|dark|light` (default: the settings, then ask the terminal), and `wsl-shrinker --demo` shows a made-up PC
+where nothing real is read or changed. [Settings](settings.md#environment) lists the environment variables for the look.
 
 In a terminal, the commands mark how things went with `✓`, `✗` and `!`, in the terminal's own colors and with the
 screen's meanings. A mistake says what went wrong and, under it, what to do:

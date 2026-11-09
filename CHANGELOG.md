@@ -6,6 +6,31 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-10
+
+### Fixed
+
+- A journal update another program held off is written with the next step, so a run cut off still knows what it
+  stopped. A run is no longer taken for one going on when Windows has given its process id to another process since,
+  as after a restart: it reads as cut off, and `recover` finishes it.
+- A disk from `extra_disks` keeps its name, and with it its protection, when Docker Desktop leaves a second data disk
+  behind: that one is listed as `Docker Desktop data 2`, never under a file's name. `doctor` names a protected name no
+  disk has.
+- The verify step allows for what the clean step removed, not for items it skipped. A distribution that stops by itself
+  during the clean step is reported as stopped, not running.
+- A settings file with a wrong value is put right with the setup flag the error names, like
+  `wsl-shrinker setup --language auto`; it used to fail on the same file.
+- `help NAME` for a name that is no command says so, with the command meant, and exits with 2. Help shows what each
+  flag takes (`--min-gain GB`, `--lang auto|en|ko`), and `version` and `config` no longer list `--lang`.
+- The installer says why it failed in one red line in a PowerShell window; a script that runs it still gets the error,
+  and exit code 1.
+- The screen says a look inside failed where there is no room for its list, with `r` to try again, and wraps a message
+  too long for the status row onto the row above rather than cut what to do. In a small window a failed step's reason
+  is cut before what the run left, and the note about WSL stopping the distribution fits. The question's box has clear
+  cells around it, setup's last page breaks the settings path only between folders, and the history names its columns
+  and keeps its times whole. Setup's size page marks the disks it counts and its protect page shows Docker Desktop's
+  disk as in use, as the screen does. `c` is "clean inside" in English, so `h history` fits 80 columns.
+
 ## [0.5.0] - 2026-11-10
 
 The numbers 0.3 and 0.4 were used before the version numbers started over at 0.1.0, and stay retracted: this release
@@ -138,7 +163,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.1
 [0.5.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.0
 [0.2.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.2
 [0.2.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.1

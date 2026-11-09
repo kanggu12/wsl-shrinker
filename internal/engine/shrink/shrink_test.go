@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -441,5 +443,57 @@ func TestCancelAfterStopStillFinishes(t *testing.T) {
 	r := Run(ctx, w.env, w.disk(), Options{}, nil)
 	if r.Err != "" || statuses(r)[StepRestart] != Done || !w.fake.List[0].Running {
 		t.Fatalf("%q %v", r.Err, statuses(r))
+	}
+}
+
+func TestVerifyAllowsOnlyWhatWasCleaned(t *testing.T) {
+	// Items chosen in a distribution that was not running are not removed:
+	// the clean step skips them, and a compaction that loses data is not
+	// excused by their size.
+	blocks := ext4Blocks(t)
+	w := newWorld(t)
+	vhdxtest.Write(t, w.path, vhdxtest.Spec{VirtualSize: 256 << 20, Blocks: blocks})
+	w.fake.List[0].Running = false
+	d := w.disk()
+	w.fake.OnCompact = func(string) error {
+		// Group 0's block bitmaps cleared: 200 MiB the filesystem no longer
+		// counts, as in TestVerifyCatchesLostData.
+		lost := map[int64][]byte{}
+		maps.Copy(lost, blocks)
+		bm := slices.Clone(blocks[0])
+		at := bitmapBlock(t, blocks[0])
+		clear(bm[at*4096 : at*4096+2*4096])
+		lost[0] = bm
+		vhdxtest.Write(t, w.path, vhdxtest.Spec{VirtualSize: 256 << 20, Blocks: lost})
+		w.pad = 0
+		return nil
+	}
+	items := []survey.Item{{ID: "cache", What: "cache", Bytes: 300 << 20, Command: "true"}}
+	r := Run(context.Background(), w.env, d, Options{Clean: items}, nil)
+	s := statuses(r)
+	if s[StepClean] != Skipped || s[StepVerify] != Failed || !strings.Contains(r.Err, "more went than was cleaned") {
+		t.Fatalf("lost data passed on what was never removed: %q %v", r.Err, s)
+	}
+}
+
+func TestADistributionThatStopsDuringTheCleanIsLeftStopped(t *testing.T) {
+	// It stopped on its own while the items were being removed: the run
+	// stopped nothing, starts nothing, and says it is stopped.
+	w := newWorld(t)
+	inner := w.fake.Script
+	w.fake.Script = func(a, b, s string) (string, error) {
+		if strings.Contains(s, "apt-get clean") {
+			w.fake.List[0].Running = false
+			return "", fmt.Errorf("Dev is %w", wsl.ErrNotRunning)
+		}
+		return inner(a, b, s)
+	}
+	items := []survey.Item{{ID: "apt", What: "apt", Bytes: 1 << 20, Command: "apt-get clean"}}
+	r := Run(context.Background(), w.env, w.disk(), Options{Clean: items}, nil)
+	if r.FailedAt != StepClean || r.Left != LeftStopped {
+		t.Fatalf("failed at %q, left %q: %s", r.FailedAt, r.Left, r.Err)
+	}
+	if calls := strings.Join(w.fake.CallList(), " "); strings.Contains(calls, "start:") || strings.Contains(calls, "terminate:") {
+		t.Fatalf("calls %s", calls)
 	}
 }

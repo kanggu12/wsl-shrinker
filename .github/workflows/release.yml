@@ -74,9 +74,11 @@ jobs:
           # "latest", which install.ps1, its one-line install and Scoop
           # follow, skips it; any other release becomes the latest.
           case "$GITHUB_REF_NAME" in *-*) set -- --prerelease ;; *) set -- --latest ;; esac
+          # The release is named by its tag alone (v0.6.2), as the sibling
+          # projects' releases are.
           # shellcheck disable=SC2086
           gh release create "$GITHUB_REF_NAME" $assets \
-            --title "wsl-shrinker ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" "$@"
+            --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "$@"
 
   # The demo image: the screen on a made-up PC, without installing anything.
   demo-image:

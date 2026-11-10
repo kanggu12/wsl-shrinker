@@ -335,7 +335,7 @@ func TestUninstallWaitsForARunNotEnded(t *testing.T) {
 
 func TestUninstallLeavesAScoopInstallToScoop(t *testing.T) {
 	f := installed(t, filepath.Join("scoop", "apps", "wsl-shrinker", "current"))
-	write(t, filepath.Join(f.dir, "manifest.json"), "{}")
+	write(t, filepath.Join(f.dir, "scoop-manifest.json"), "{}")
 	noTerminal(t)
 	code, _, errOut := uninstallWith("uninstall", "--yes")
 	if code != exitFail || !strings.Contains(errOut, "this wsl-shrinker was installed with Scoop") ||
@@ -697,7 +697,7 @@ func TestUninstallTakesNoFolderByAProgramFilesNameForTheProgram(t *testing.T) {
 
 func TestUninstallSaysWhenScoopsInstallHasNothingToPurge(t *testing.T) {
 	f := installed(t, filepath.Join("scoop", "apps", "wsl-shrinker", "current"))
-	write(t, filepath.Join(f.dir, "manifest.json"), "{}")
+	write(t, filepath.Join(f.dir, "scoop-manifest.json"), "{}")
 	for _, p := range []string{filepath.Join(f.settings, "config.toml"), filepath.Join(f.state, "history.jsonl")} {
 		if err := os.Remove(p); err != nil {
 			t.Fatal(err)
@@ -707,5 +707,21 @@ func TestUninstallSaysWhenScoopsInstallHasNothingToPurge(t *testing.T) {
 	code, out, errOut := uninstallWith("uninstall", "--purge", "--yes")
 	if want := "found no settings or history to remove\nnote: scoop uninstall wsl-shrinker removes the program\n"; code != exitOK || out != want {
 		t.Fatalf("exit %d:\n%s%s\nwant:\n%s", code, out, errOut, want)
+	}
+}
+
+func TestUninstallKnowsScoopsFilesOldAndNew(t *testing.T) {
+	// Scoop writes scoop-manifest.json and scoop-install.json beside the
+	// app; an older Scoop wrote manifest.json and install.json. Any of them
+	// in apps\wsl-shrinker\VERSION is Scoop's install.
+	for _, name := range []string{"scoop-manifest.json", "scoop-install.json", "manifest.json", "install.json"} {
+		f := installed(t, filepath.Join("scoop", "apps", "wsl-shrinker", "0.6.0"))
+		write(t, filepath.Join(f.dir, name), "{}")
+		noTerminal(t)
+		code, _, errOut := uninstallWith("uninstall", "--yes")
+		if code != exitFail || !strings.Contains(errOut, "this wsl-shrinker was installed with Scoop") {
+			t.Fatalf("%s: exit %d, %q", name, code, errOut)
+		}
+		f.untouched(t)
 	}
 }

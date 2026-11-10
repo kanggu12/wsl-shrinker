@@ -382,12 +382,24 @@ func filled(settings, state string) []string {
 
 // byScoop reports whether Scoop installed the program in dir: Scoop keeps
 // an app in apps\NAME\VERSION (or apps\NAME\current, the link to it), with
-// the manifest it installed from beside the program.
+// the manifest it installed from and its own record beside the program.
 func byScoop(dir string) bool {
 	app, apps := filepath.Dir(dir), filepath.Dir(filepath.Dir(dir))
-	return strings.EqualFold(filepath.Base(app), "wsl-shrinker") && strings.EqualFold(filepath.Base(apps), "apps") &&
-		exists(filepath.Join(dir, "manifest.json"))
+	if !strings.EqualFold(filepath.Base(app), "wsl-shrinker") || !strings.EqualFold(filepath.Base(apps), "apps") {
+		return false
+	}
+	// Scoop names them scoop-manifest.json and scoop-install.json; an
+	// install by an older Scoop has manifest.json and install.json.
+	for _, f := range scoopFiles {
+		if exists(filepath.Join(dir, f)) {
+			return true
+		}
+	}
+	return false
 }
+
+// scoopFiles are the files Scoop writes beside an app it installed.
+var scoopFiles = []string{"scoop-manifest.json", "scoop-install.json", "manifest.json", "install.json"}
 
 // purgeDir removes the files in dir whose names one of names matches, but
 // keep, then dir itself once nothing is left in it. It returns dir when

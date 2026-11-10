@@ -6,6 +6,14 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-10
+
+### Fixed
+
+- `uninstall` did not see that Scoop had installed wsl-shrinker: current Scoop names its files beside an app
+  `scoop-manifest.json` and `scoop-install.json`, not `manifest.json`. It removed the launcher and the program from
+  Scoop's folder instead of leaving them to `scoop uninstall`. It knows both names now.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added
@@ -202,7 +210,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.1
 [0.6.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.0
 [0.5.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.1
 [0.5.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.0

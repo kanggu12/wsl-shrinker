@@ -4,6 +4,10 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 )
 
 func TestFitCutsRightAfterTheLastWordKept(t *testing.T) {
@@ -82,6 +86,33 @@ func TestPlainMarksKeepEachMarksWidth(t *testing.T) {
 		// The words themselves, Korean included, pass as they are.
 		if got := Marks("Ubuntu-24.04 줄일 만한 크기"); got != "Ubuntu-24.04 줄일 만한 크기" {
 			t.Errorf("set %d: %q", c.set, got)
+		}
+	}
+}
+
+func TestEveryFrontColorsADiskByOneRule(t *testing.T) {
+	gb := int64(1 << 30)
+	worth := disks.Disk{Estimate: &estimate.Result{Reclaim: 5 * gb}}
+	little := disks.Disk{Estimate: &estimate.Result{Reclaim: gb / 2}}
+	for _, c := range []struct {
+		d    disks.Disk
+		b    shrink.Block
+		want Category
+	}{
+		{worth, "", CatGain},
+		{little, "", CatSmall},
+		// Exactly the size worth shrinking is worth it, as the engine has it.
+		{disks.Disk{Estimate: &estimate.Result{Reclaim: gb}}, "", CatGain},
+		// No estimate, though nothing is said in the way: never worth it.
+		{disks.Disk{}, "", CatSmall},
+		{worth, shrink.BlockProtected, CatSafe},
+		{worth, shrink.BlockHeld, CatLive},
+		{worth, shrink.BlockFixed, CatBad},
+		{worth, shrink.BlockNoCompact, CatBad},
+		{worth, shrink.BlockUnreadable, CatBad},
+	} {
+		if got := CategoryOf(c.d, c.b, gb); got != c.want {
+			t.Errorf("%q, reclaim %v: %v, want %v", c.b, c.d.Estimate, got, c.want)
 		}
 	}
 }

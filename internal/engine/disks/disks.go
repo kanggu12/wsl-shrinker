@@ -117,11 +117,31 @@ func movedDockerDisk(appData string) string {
 	}
 	// A folder that is not a whole path would be looked for wherever this
 	// program runs, and could find a file that is not Docker's there.
-	if json.Unmarshal(b, &s) != nil || !filepath.IsAbs(s.CustomWslDistroDir) {
+	if json.Unmarshal(b, &s) != nil || !filepath.IsAbs(s.CustomWslDistroDir) || !localDrive(s.CustomWslDistroDir, remoteDrive) {
 		return ""
 	}
 	return filepath.Join(s.CustomWslDistroDir, "disk", "docker_data.vhdx")
 }
+
+// localDrive reports whether p is on a drive of this PC ("D:\...", also
+// written "\\?\D:\..." or "\\.\D:\..."), not a network share, which
+// Windows would reach with the person's credentials: "\\host\share\..."
+// or a drive letter remote says Windows maps to one. Off Windows no path
+// has a drive: every whole path counts as local, for the tests.
+func localDrive(p string, remote func(root string) bool) bool {
+	v := filepath.VolumeName(p)
+	if v == "" {
+		return true
+	}
+	// A drive letter, after the prefix of a Windows device path if any.
+	for _, prefix := range []string{`\\?\`, `\\.\`} {
+		v = strings.TrimPrefix(v, prefix)
+	}
+	return len(v) == 2 && v[1] == ':' && !remote(v+`\`)
+}
+
+// remoteDrive reports whether Windows maps the drive at root to a share.
+var remoteDrive = winapi.RemoteDrive
 
 // Find lists every disk with its estimate, the default distribution first,
 // then by how much each gives back.
@@ -246,7 +266,7 @@ func inspect(env Env, d *Disk) {
 		return
 	}
 	// A disk without ext4 still gets an estimate, from its blocks alone.
-	fs, _ := ext4.Read(vd.Contents(), vd.VirtualSize)
+	fs, _ := ext4.Read(vd.Contents(), vd.VirtualSize, int64(vd.BlockSize))
 	// A distribution's disk is compacted by WSL, which trims first; any
 	// other file by Windows alone, which does not.
 	var r estimate.Result

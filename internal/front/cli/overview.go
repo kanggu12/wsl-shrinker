@@ -23,10 +23,11 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 )
 
 // themes are the values --theme takes; "" is the settings' own.
-var themes = []string{"", "auto", "dark", "light"}
+var themes = append([]string{""}, config.Themes...)
 
 // tuiCmd opens the screen, whatever the mode says.
 func tuiCmd(p *apps) *cobra.Command {
@@ -38,7 +39,7 @@ func tuiCmd(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A wrong value stops before anything is read.
 			if !slices.Contains(themes, theme) {
-				return fmt.Errorf("%w: --theme takes auto, dark or light", errUsage)
+				return fmt.Errorf("%w: --theme takes %s", errUsage, orList(config.Themes))
 			}
 			// The screen draws on a terminal; a pipe gets nothing it can use.
 			if !stdoutIsTerminal() {
@@ -273,42 +274,38 @@ func fitTable(rows [][]string, right []bool, width int) ([][]string, []bool) {
 // what stands in its way: pink protected, indigo in use, teal worth
 // shrinking, grey little to give back, red cannot be shrunk now.
 func overviewLook(l look, d disks.Disk, block shrink.Block, minGain int64) (func(string) string, string) {
+	// The color, by the rule every front shares; the note, CLI mode's own.
+	paint := l.cat(ui.CategoryOf(d, block, minGain))
 	switch block {
 	case shrink.BlockProtected:
 		// The state says "protected" already: the note says what to do.
-		return l.safe, l.muted(i18n.T("overview.protected", d.Name))
+		return paint, l.muted(i18n.T("overview.protected", d.Name))
 	case shrink.BlockHeld:
 		// A disk a program keeps for itself, or a file another program has
 		// open. The state says "in use" already: the note says what to do.
 		switch shrink.OwnerOf(d) {
 		case shrink.OwnerDocker:
-			return l.live, l.muted(i18n.T("overview.held"))
+			return paint, l.muted(i18n.T("overview.held"))
 		case shrink.OwnerRancher:
-			return l.live, l.muted(i18n.T("overview.held.rancher"))
+			return paint, l.muted(i18n.T("overview.held.rancher"))
 		case shrink.OwnerPodman:
-			return l.live, l.muted(i18n.T("overview.held.podman"))
+			return paint, l.muted(i18n.T("overview.held.podman"))
 		}
-		return l.live, l.muted(i18n.T("overview.held.file"))
+		return paint, l.muted(i18n.T("overview.held.file"))
 	case shrink.BlockUnreadable:
-		return l.bad, l.bad(i18n.T("check.unreadable", d.Err))
+		return paint, l.bad(i18n.T("check.unreadable", d.Err))
 	case shrink.BlockEncrypted:
-		return l.bad, l.bad(i18n.T("check.encrypted"))
+		return paint, l.bad(i18n.T("check.encrypted"))
 	case shrink.BlockFSErrors:
-		return l.bad, l.bad(i18n.T("check.fserrors"))
+		return paint, l.bad(i18n.T("check.fserrors"))
 	case shrink.BlockFixed:
 		// The state says "fixed" already: the note says why that ends it,
 		// short enough to stay beside the row.
-		return l.bad, l.bad(i18n.T("overview.fixed"))
-	case shrink.BlockNoCompact:
-		// Said once, in the headline.
-		return l.bad, ""
-	case "":
-		if d.Estimate.Reclaim >= minGain {
-			return l.gain, ""
-		}
-		return l.muted, ""
+		return paint, l.bad(i18n.T("overview.fixed"))
 	}
-	return l.bad, ""
+	// Nothing in the way says nothing more; nor does a WSL that cannot
+	// compact, which the headline says once.
+	return paint, ""
 }
 
 // widthOf is the width of the terminal w writes to, 100 when it is none. A

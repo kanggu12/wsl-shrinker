@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -239,5 +240,88 @@ func TestCrashFilesAreKeptWithinBounds(t *testing.T) {
 	watchCrashes(dir, 1, alive, false, look{}, io.Discard)()
 	if n := len(crashes(t, dir, true)); n != keptCrashes {
 		t.Fatalf("%d said crashes kept", n)
+	}
+}
+
+func TestTheCrashWatchKeepsToAFolderOfItsOwn(t *testing.T) {
+	noRuntime(t)
+	// No folder named for it (an empty LOCALAPPDATA, no home): nothing is
+	// written where the program was started.
+	here := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(here); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if os.Chdir(old) != nil {
+			_ = os.Chdir(os.TempDir())
+		}
+	})
+	// Looked at while the watch is on: its end would tidy a folder away.
+	end := watchCrashes("wsl-shrinker", os.Getpid(), notAlive, false, look{}, io.Discard)
+	entries, _ := os.ReadDir(here)
+	end()
+	if len(entries) != 0 {
+		t.Fatalf("written where it was started: %v", entries)
+	}
+	// Its own folder, and its own file in it, for its owner alone: inside
+	// WSL a home folder may be read by the distribution's other users.
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir := filepath.Join(t.TempDir(), "wsl-shrinker")
+	end = watchCrashes(dir, os.Getpid(), notAlive, false, look{}, io.Discard)
+	st, err := os.Stat(dir)
+	if err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("folder %v %v", st, err)
+	}
+	if st, err := os.Stat(ownCrash); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("file %v %v", st, err)
+	}
+	end()
+}
+
+func TestAFolderThatIsNotItsOwnIsLeftAsItWas(t *testing.T) {
+	noRuntime(t)
+	// A folder named for it where the program was started, with crash
+	// files of runs that are gone: with no folder of its own, the watch
+	// and the backend's claim leave them as they are.
+	here := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(here); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if os.Chdir(old) != nil {
+			_ = os.Chdir(os.TempDir())
+		}
+	})
+	dir := filepath.Join(here, "wsl-shrinker")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	empty, kept := filepath.Join(dir, "crash-999997-1.txt"), filepath.Join(dir, "crash-999998-1.txt")
+	if os.WriteFile(empty, nil, 0o600) != nil || os.WriteFile(kept, []byte("panic: x"), 0o600) != nil {
+		t.Fatal("could not write the crash files")
+	}
+	var said bytes.Buffer
+	watchCrashes("wsl-shrinker", os.Getpid(), notAlive, true, look{}, &said)()
+	if got := claimIn("wsl-shrinker", os.Getpid(), notAlive, ""); got != nil {
+		t.Fatalf("claimed %v", got)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 || said.Len() != 0 {
+		t.Fatalf("the folder now holds %v; said %q", entries, said.String())
+	}
+	for _, f := range []string{empty, kept} {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

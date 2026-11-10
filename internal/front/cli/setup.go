@@ -204,9 +204,9 @@ func orList(vs []string) string {
 
 // The values setup's flags take, as the screen offers them.
 var (
-	setupLanguages = []string{"auto", "en", "ko"}
-	setupThemes    = []string{"auto", "dark", "light"}
-	setupModes     = []string{"tui", "cli"}
+	setupLanguages = config.Languages
+	setupThemes    = config.Themes
+	setupModes     = config.Modes
 )
 
 // protectList is now's protected disks, with add put on and drop taken off,

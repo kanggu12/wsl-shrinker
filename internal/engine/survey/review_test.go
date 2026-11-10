@@ -106,17 +106,21 @@ func TestAMountInsideACacheLeavesItWhole(t *testing.T) {
 	if err := os.WriteFile(remove, []byte(removeContents(cache)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := "mount --bind " + data + " " + filepath.Join(cache, "inner") + " && PATH=" + tools + " " + sh + " " + remove
-	out, err := exec.Command("unshare", "-m", "--propagation", "private", "sh", "-c", script).CombinedOutput()
-	if strings.Contains(string(out), "Operation not permitted") {
-		t.Skipf("no mount namespace here: %s", out)
-	}
-	if err == nil || !strings.Contains(string(out), "something is mounted inside") {
-		t.Fatalf("went on: %v %s", err, out)
-	}
-	for _, f := range []string{filepath.Join(data, "keep.txt"), filepath.Join(cache, "a.whl")} {
-		if _, err := os.Stat(f); err != nil {
-			t.Fatalf("%s went", f)
+	// Inside the folder, and on the folder itself: emptying the folder
+	// would empty what is mounted there.
+	for _, at := range []string{filepath.Join(cache, "inner"), cache} {
+		script := "mount --bind " + data + " " + at + " && PATH=" + tools + " " + sh + " " + remove
+		out, err := exec.Command("unshare", "-m", "--propagation", "private", "sh", "-c", script).CombinedOutput()
+		if strings.Contains(string(out), "Operation not permitted") {
+			t.Skipf("no mount namespace here: %s", out)
+		}
+		if err == nil || !strings.Contains(string(out), "something is mounted inside") {
+			t.Fatalf("mounted at %s: went on: %v %s", at, err, out)
+		}
+		for _, f := range []string{filepath.Join(data, "keep.txt"), filepath.Join(cache, "a.whl")} {
+			if _, err := os.Stat(f); err != nil {
+				t.Fatalf("mounted at %s: %s went", at, f)
+			}
 		}
 	}
 }

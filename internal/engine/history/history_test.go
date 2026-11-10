@@ -15,10 +15,22 @@ func TestAddAndCap(t *testing.T) {
 	if all, err := s.All(); err != nil || len(all) != 0 {
 		t.Fatalf("%v %v", all, err)
 	}
-	for i := range maxEntries + 20 {
-		if err := s.Add(Entry{At: time.Unix(int64(i), 0), Disk: "d", Freed: int64(i)}); err != nil {
+	// A full history and then some, written as Add writes it, and one Add
+	// more: every Add writes the file whole and waits for the drive, so
+	// adding them one by one is what would take the time.
+	var lines []byte
+	for i := range maxEntries + 19 {
+		b, err := json.Marshal(Entry{At: time.Unix(int64(i), 0), Disk: "d", Freed: int64(i)})
+		if err != nil {
 			t.Fatal(err)
 		}
+		lines = append(append(lines, b...), '\n')
+	}
+	if err := os.WriteFile(s.Path, lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Add(Entry{At: time.Unix(int64(maxEntries+19), 0), Disk: "d", Freed: int64(maxEntries + 19)}); err != nil {
+		t.Fatal(err)
 	}
 	all, err := s.All()
 	if err != nil {

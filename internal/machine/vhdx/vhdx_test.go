@@ -362,3 +362,33 @@ func TestAFixedSizeDiskIsToldFromOneThatGrows(t *testing.T) {
 		t.Fatalf("read %v, %v", got, err)
 	}
 }
+
+func TestTheLogsSequenceSearchHasABudget(t *testing.T) {
+	// A damaged log: a long chain of entries from offset 0, and as many
+	// heads off the chain that name its start as their tail. Each head
+	// walks the whole chain and fails at its end: without a budget that
+	// is the chain's length times the heads, quadratic in the log.
+	const n = 2048
+	entries := map[int64]*logEntry{}
+	for i := int64(0); i < n; i++ {
+		entries[i*logSector] = &logEntry{at: i * logSector, length: logSector, tail: 0, seq: uint64(i)}
+	}
+	logLen := int64(4 * n * logSector)
+	for i := int64(0); i < n; i++ {
+		at := (n + 1 + i) * logSector
+		entries[at] = &logEntry{at: at, length: logSector, tail: 0, seq: uint64(10*n + i)}
+	}
+	// The search gives up, and says the log is damaged, long before every
+	// head has walked the chain.
+	if run, err := activeSequence(entries, logLen); err == nil || !strings.Contains(err.Error(), "form no sequence") {
+		t.Fatalf("the search walked every head to the end: %d entries, %v", len(run), err)
+	}
+	// A real log: its newest head follows the chain, found in one walk.
+	good := map[int64]*logEntry{}
+	for i := int64(0); i < n; i++ {
+		good[i*logSector] = &logEntry{at: i * logSector, length: logSector, tail: 0, seq: uint64(i)}
+	}
+	if run, err := activeSequence(good, logLen); err != nil || len(run) != n || run[n-1] != good[(n-1)*logSector] {
+		t.Fatalf("a real log: %d entries, %v", len(run), err)
+	}
+}

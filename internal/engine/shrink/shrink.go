@@ -400,8 +400,20 @@ func (r *Result) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// ErrCheck wraps a reason found before anything changed.
-var ErrCheck = errors.New("not started")
+// Untouched is how a run refused before it changed anything leaves a disk:
+// as it found it.
+func Untouched(d disks.Disk) Left {
+	switch {
+	case d.Distro == "":
+		return LeftFile
+	case d.Running:
+		return LeftRunning
+	}
+	return LeftStopped
+}
+
+// errCheck wraps a reason found before anything changed.
+var errCheck = errors.New("not started")
 
 // listScript names the containers the stop step is to stop, before any of
 // them stops: the running ones, unless Docker Desktop's integration runs
@@ -533,7 +545,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 			} else {
 				// Those that ran before, less those that did not start, and
 				// whether the distribution itself had stopped.
-				res.ContainersStarted, res.DistroStarted = e.Count-e.NotRestarted, e.DistroStarted
+				res.restarted(e)
 			}
 			sayE(e)
 		}
@@ -597,15 +609,13 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	// 1. check: everything that would stop the run, before anything changes.
 	say(StepCheck, Running, "")
 	if err := check(ctx, env, &d); err != nil {
-		return fail(StepCheck, fmt.Errorf("%w: %w", ErrCheck, err), false)
+		return fail(StepCheck, fmt.Errorf("%w: %w", errCheck, err), false)
 	}
 	// What it gives back with what was chosen to remove inside, as the
 	// question before the run said.
 	gain := reclaimOf(d)
 	if d.Running {
-		for _, it := range opt.Clean {
-			gain += it.Bytes
-		}
+		gain += chosenBytes(opt.Clean)
 	}
 	sayE(Event{Step: StepCheck, Status: Done, Detail: checkDetail(d, gain), Bytes: gain})
 
@@ -620,10 +630,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		sayE(Event{Step: StepClean, Status: Skipped, Detail: "not running", Count: len(opt.Clean)})
 	default:
 		say(StepClean, Running, "")
-		var n int64
-		for _, it := range opt.Clean {
-			n += it.Bytes
-		}
+		n := chosenBytes(opt.Clean)
 		if out, err := survey.Clean(ctx, sys, d.Distro, opt.Clean); err != nil {
 			return fail(StepClean, err, false)
 		} else if strings.Contains(out, "failed: ") {
@@ -668,17 +675,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		}
 		out, err := sys.Run(within(ctx, stopLimit), d.Distro, "root", stopScript(restartIDs))
 		// Read what the script said even when it failed.
-		hooks, failed := 0, 0
-		for line := range strings.SplitSeq(out, "\n") {
-			f := strings.Split(strings.TrimSpace(line), "|")
-			switch {
-			case f[0] == "hook" && len(f) == 3:
-				hooks++
-				if f[1] == "failed" {
-					failed++
-				}
-			}
-		}
+		hooks, failed := readHooks(out)
 		res.Notes["containers"] = strings.Join(restartIDs, " ")
 		if err != nil {
 			// The distribution still runs (only the compaction stops it):
@@ -751,7 +748,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	res.Left, res.ContainersNotStarted = LeftRunning, e.NotRestarted
 	// Those that ran before, less those that did not start, and whether the
 	// distribution itself had stopped.
-	res.ContainersStarted, res.DistroStarted = e.Count-e.NotRestarted, e.DistroStarted
+	res.restarted(e)
 	res.Took = time.Since(start)
 	sayE(e)
 	return res
@@ -851,7 +848,7 @@ func readBaseline(env Env, d disks.Disk) baseline {
 	for i, x := range vd.Blocks {
 		b.stored[i] = x.Present()
 	}
-	if fs, err := ext4.Read(vd.Contents(), vd.VirtualSize); err == nil {
+	if fs, err := ext4.Read(vd.Contents(), vd.VirtualSize, int64(vd.BlockSize)); err == nil {
 		b.fs, b.used, b.errors = true, int64(fs.UsedBlocks)*fs.BlockSize, fs.HasErrors
 	}
 	return b
@@ -891,7 +888,7 @@ func verify(env Env, d disks.Disk, cleaned int64, base baseline) verdict {
 		return verdict{}
 	}
 	// The filesystem must still be there, without recorded errors.
-	fs, err := ext4.Read(vd.Contents(), vd.VirtualSize)
+	fs, err := ext4.Read(vd.Contents(), vd.VirtualSize, int64(vd.BlockSize))
 	if err != nil {
 		return bad("the filesystem cannot be read after compacting: %v", err)
 	}
@@ -1023,6 +1020,38 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		}
 	}
 	return e, nil
+}
+
+// restarted records what the start-again step e started: the containers
+// that ran before and run again, and whether the distribution itself was
+// started (stopped by the run, not by itself).
+func (r *Result) restarted(e Event) {
+	r.ContainersStarted, r.DistroStarted = e.Count-e.NotRestarted, e.DistroStarted
+}
+
+// chosenBytes is what the items chosen to remove inside take, together.
+func chosenBytes(items []survey.Item) int64 {
+	var n int64
+	for _, it := range items {
+		n += it.Bytes
+	}
+	return n
+}
+
+// readHooks reads what the stop script said of the person's pre-stop
+// scripts: how many ran, and how many of them failed. A line of its is
+// "hook|ok|NAME" or "hook|failed|NAME"; any other line is not about them.
+func readHooks(out string) (hooks, failed int) {
+	for line := range strings.SplitSeq(out, "\n") {
+		f := strings.Split(strings.TrimSpace(line), "|")
+		if f[0] == "hook" && len(f) == 3 {
+			hooks++
+			if f[1] == "failed" {
+				failed++
+			}
+		}
+	}
+	return hooks, failed
 }
 
 // startTries are the waits before each start of a distribution a run

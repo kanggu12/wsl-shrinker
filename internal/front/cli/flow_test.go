@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +73,26 @@ func shrinkWith(a *app.App, args ...string) (int, string, string) {
 	var o, e bytes.Buffer
 	code := runWith(args, &o, &e, func() (*app.App, error) { return a, nil })
 	return code, o.String(), e.String()
+}
+
+// inProcess is wsl-shrinker.exe for the screen's remote side, run in this
+// test on a: one command line at a time, as separate programs are, which
+// share nothing (the command line's language is the process's own).
+func inProcess(a *app.App) remote.Runner {
+	var one sync.Mutex
+	return func(_ context.Context, args []string, out io.Writer) error {
+		one.Lock()
+		defer one.Unlock()
+		var e bytes.Buffer
+		if code := runWith(args, out, &e, func() (*app.App, error) { return a, nil }); code != exitOK {
+			// The same words back as wsl-shrinker.exe's give.
+			if err := remote.ErrorFrom(e.String()); err != nil {
+				return err
+			}
+			return errors.New("exit status " + strconv.Itoa(code))
+		}
+		return nil
+	}
 }
 
 func TestShrinkFromStartToEnd(t *testing.T) {
@@ -176,17 +199,39 @@ func TestTheLinuxScreenTalksToTheProgram(t *testing.T) {
 	// through the backend command. Here both ends run in this test: the
 	// remote side, and the command line on the fake PC.
 	a, fake := flowApp(t)
-	run := func(_ context.Context, args []string, out io.Writer) error {
-		var e bytes.Buffer
-		if code := runWith(args, out, &e, func() (*app.App, error) { return a, nil }); code != exitOK {
-			return errors.New(strings.TrimSpace(strings.TrimPrefix(e.String(), "wsl-shrinker:")))
-		}
-		return nil
-	}
+	run := inProcess(a)
 	ctx := context.Background()
-	b, err := remote.Open(ctx, run, "Other", version.String())
+	// What the backend asks, counted: the screen later asks from several
+	// goroutines at once, hence the lock.
+	var (
+		asked []string
+		mu    sync.Mutex
+	)
+	counted := func(ctx context.Context, args []string, out io.Writer) error {
+		mu.Lock()
+		asked = append(asked, strings.Join(args, " "))
+		mu.Unlock()
+		return run(ctx, args, out)
+	}
+	b, err := remote.Open(ctx, counted, "Other", version.String())
 	if err != nil {
 		t.Fatal(err)
+	}
+	// One start of wsl-shrinker.exe: hello brings the settings with it, the
+	// same as settings says them.
+	mu.Lock()
+	opened := slices.Clone(asked)
+	mu.Unlock()
+	if len(opened) != 1 || opened[0] != "backend hello" {
+		t.Fatalf("opening asked %q", opened)
+	}
+	var said remote.Settings
+	var out bytes.Buffer
+	if err := run(ctx, []string{"backend", "settings"}, &out); err != nil || json.Unmarshal(out.Bytes(), &said) != nil {
+		t.Fatalf("settings: %v\n%s", err, out.String())
+	}
+	if !reflect.DeepEqual(said, b.Settings()) {
+		t.Fatalf("hello's settings %+v, settings says %+v", b.Settings(), said)
 	}
 	if info := b.Info(ctx); !info.CanCompact {
 		t.Fatalf("info %+v", info)

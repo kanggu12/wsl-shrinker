@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 )
 
@@ -43,7 +44,7 @@ var (
 const keptCrashes = 10
 
 // crashDir is where the crash files go: next to the history.
-func crashDir() string { return filepath.Join(winapi.LocalAppData(), "wsl-shrinker") }
+func crashDir() string { return app.StateDir() }
 
 // alive reports whether a process of this program runs with the id pid.
 func alive(pid int) bool {
@@ -65,13 +66,18 @@ var ownCrash string
 // watchCrashes is WatchCrashes in dir, for the run pid; person says whether
 // someone reads errOut, in the look l.
 func watchCrashes(dir string, pid int, alive func(int) bool, person bool, l look, errOut io.Writer) func() {
+	// No folder of its own (an empty LOCALAPPDATA, no home): nothing is
+	// written, renamed or removed where the program was started.
+	if !filepath.IsAbs(dir) {
+		return func() {}
+	}
 	crashed := crashScan(dir, pid, alive, "")
 	// This run's own, which the runtime writes only if it crashes.
 	own := filepath.Join(dir, fmt.Sprintf("crash-%d-%d.txt", pid, time.Now().UnixNano()))
 	ownCrash = own
 	watching := false
-	if os.MkdirAll(dir, 0o755) == nil {
-		if f, err := os.Create(own); err == nil {
+	if os.MkdirAll(dir, 0o700) == nil {
+		if f, err := os.OpenFile(own, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
 			watching = crashOutput(f, debug.CrashOptions{}) == nil
 			// The runtime keeps a copy of its own.
 			f.Close()
@@ -175,11 +181,20 @@ func sayCrashes(errOut io.Writer, l look, shown []string) {
 // screen asks wsl-shrinker.exe for its own as it ends.
 func SayCrashes(errOut io.Writer, shown []string) { sayCrashes(errOut, lookFor(errOut), shown) }
 
-// ClaimCrashes takes the crashes this PC's runs kept and did not say yet,
+// claimKept takes the crashes this PC's runs kept and did not say yet,
 // as watchCrashes does at a run's end: for the launcher's screen, through
 // the backend.
-func ClaimCrashes() []string {
-	return claimCrashes(crashScan(crashDir(), os.Getpid(), alive, ownCrash))
+func claimKept() []string {
+	return claimIn(crashDir(), os.Getpid(), alive, ownCrash)
+}
+
+// claimIn is claimKept in dir, for the run pid with its own file own:
+// nothing in a folder that is not one of its own.
+func claimIn(dir string, pid int, alive func(int) bool, own string) []string {
+	if !filepath.IsAbs(dir) {
+		return nil
+	}
+	return claimCrashes(crashScan(dir, pid, alive, own))
 }
 
 // modTime is when a file was last written.

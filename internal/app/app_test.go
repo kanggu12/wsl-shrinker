@@ -254,7 +254,7 @@ func TestAWSLThatDidNotAnswerIsAskedAgainAndNotTakenForAnOldOne(t *testing.T) {
 	}
 	// What it can do is not known: a run is not refused for an old WSL,
 	// and its own calls to WSL say what is wrong.
-	if !a.ShrinkEnv(ctx).CanCompact {
+	if !a.shrinkEnv(ctx).CanCompact {
 		t.Fatal("a WSL that did not answer was taken for one that cannot compact")
 	}
 	// Answered the next time, the answer is the one kept.

@@ -106,8 +106,10 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toast = ""
 		m.mode = modeForget
 	case "h":
-		m.hist = m.b.History()
+		// The runs read with the disks show at once; read again, any run
+		// since takes its place.
 		m.mode, m.pageTop = modeHistory, 0
+		return m, m.loadHistory()
 	case "?":
 		m.mode, m.pageTop = modeHelp, 0
 	}

@@ -48,6 +48,9 @@ func AppData() string {
 // CompactFile needs Windows' virtual disk service.
 func CompactFile(string) error { return ErrNotWindows }
 
+// RemoteDrive is false off Windows, where no path has a drive.
+func RemoteDrive(string) bool { return false }
+
 // ProcessStart cannot say off Windows.
 func ProcessStart(int) (time.Time, bool) { return time.Time{}, false }
 

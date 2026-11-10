@@ -111,22 +111,9 @@ func replay(r io.ReaderAt, size int64, logID []byte, logOff, logLen int64) (io.R
 			entries[at] = e
 		}
 	}
-	// The active sequence is the valid one whose head has the highest
-	// sequence number: from the head's tail, each entry follows the one
-	// before it in the log with the next sequence number, up to the head.
-	// Heads are tried from the highest number down, so the first valid
-	// sequence is the one wanted and the rest are never walked.
-	heads := make([]*logEntry, 0, len(entries))
-	for _, e := range entries {
-		heads = append(heads, e)
-	}
-	sort.Slice(heads, func(i, j int) bool { return heads[i].seq > heads[j].seq })
-	var best []*logEntry
-	for _, head := range heads {
-		if seqs := sequence(entries, head, logLen); seqs != nil {
-			best = seqs
-			break
-		}
+	best, err := activeSequence(entries, logLen)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 	if best == nil {
 		return r, size, 0, nil
@@ -171,29 +158,61 @@ func replay(r io.ReaderAt, size int64, logID []byte, logOff, logLen int64) (io.R
 	return o, o.size, len(best), nil
 }
 
+// activeSequence is the log's active sequence, the entries to replay; nil
+// when there is none. It is the valid sequence whose head has the highest
+// sequence number: from the head's tail, each entry follows the one before
+// it in the log with the next sequence number, up to the head. Heads are
+// tried from the highest number down, so the first valid sequence is the
+// one wanted and the rest are never walked.
+func activeSequence(entries map[int64]*logEntry, logLen int64) ([]*logEntry, error) {
+	heads := make([]*logEntry, 0, len(entries))
+	for _, e := range entries {
+		heads = append(heads, e)
+	}
+	sort.Slice(heads, func(i, j int) bool { return heads[i].seq > heads[j].seq })
+	// A real log's newest head is valid, and found in one walk of its
+	// sequence. A damaged one can make every head walk most of the log and
+	// fail at its end: the walks share a budget of four times the entries.
+	steps := 4 * len(entries)
+	for _, head := range heads {
+		seqs, ok := sequence(entries, head, logLen, &steps)
+		if !ok {
+			return nil, errors.New("vhdx: the log is damaged (its entries form no sequence it can replay)")
+		}
+		if seqs != nil {
+			return seqs, nil
+		}
+	}
+	return nil, nil
+}
+
 // sequence returns the entries from head's tail up to head, or nil when
 // they do not form an unbroken run.
-func sequence(entries map[int64]*logEntry, head *logEntry, logLen int64) []*logEntry {
+func sequence(entries map[int64]*logEntry, head *logEntry, logLen int64, steps *int) ([]*logEntry, bool) {
 	var run []*logEntry
 	at := head.tail
 	// A run is at most as many entries as fit in the log.
 	for range logLen / logSector {
+		// Each step is charged to the search's budget; spent, it stops.
+		if *steps--; *steps < 0 {
+			return nil, false
+		}
 		e, ok := entries[at]
 		if !ok {
-			return nil
+			return nil, true
 		}
 		// Each entry's sequence number follows the one before it.
 		if len(run) > 0 && e.seq != run[len(run)-1].seq+1 {
-			return nil
+			return nil, true
 		}
 		run = append(run, e)
 		if e == head {
-			return run
+			return run, true
 		}
 		// The next entry starts right after this one, wrapping around.
 		at = (at + e.length) % logLen
 	}
-	return nil
+	return nil, true
 }
 
 // parseEntry reads the entry at offset at of the log. It returns nil if

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -785,5 +786,37 @@ func TestARunEndedWhileTheQuestionStoodIsSaidSo(t *testing.T) {
 		if m.toast != i18n.T("toast.forgot.gone") || m.unfinishedState != journal.None || m.recoverFailed {
 			t.Fatalf("%s: toast %q, state %v", lang, m.toast, m.unfinishedState)
 		}
+	}
+}
+
+func TestTheClockSlowsDownWhenNothingMoves(t *testing.T) {
+	// Idle, the screen is drawn twice a second, not eight times: often
+	// enough for a passing message to go on time.
+	m := loaded(t, demo(), 120, 30)
+	if m.moving() || frameDelay(m.moving()) != 500*time.Millisecond {
+		t.Fatalf("idle: moving %v", m.moving())
+	}
+	// Anything with a spinner or a clock on the screen keeps the quick
+	// frames.
+	for name, f := range map[string]func(*model){
+		"disks loading":     func(m *model) { m.loading = true },
+		"a look inside":     func(m *model) { m.surveys["Ubuntu-24.04"] = &surveyState{loading: true} },
+		"a run going":       func(m *model) { m.run = &runState{} },
+		"R or F at work":    func(m *model) { m.settling = true },
+		"a run's preparing": func(m *model) { m.preparing = true },
+		"a new window":      func(m *model) { m.reopening = true },
+	} {
+		c := m
+		c.surveys = map[string]*surveyState{}
+		f(&c)
+		if !c.moving() || frameDelay(c.moving()) != 120*time.Millisecond {
+			t.Errorf("%s: moving %v", name, c.moving())
+		}
+	}
+	// A run that has ended has nothing moving.
+	c := m
+	c.run = &runState{done: true}
+	if c.moving() {
+		t.Error("an ended run keeps the quick frames")
 	}
 }

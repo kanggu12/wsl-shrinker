@@ -18,7 +18,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app/remote"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
+	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
@@ -717,8 +720,10 @@ type silentWSL struct {
 
 func (s *silentWSL) Disks(context.Context) ([]disks.Disk, error) {
 	err := fmt.Errorf("asking WSL which distributions run: %w: wsl --list --running --quiet ran for 1m0s", wsl.ErrNoAnswer)
+	// As wsl-shrinker.exe's words come back to the screen in WSL: through
+	// remote.ErrorFrom, which knows the error they name.
 	if s.words {
-		return nil, errors.New(err.Error())
+		return nil, remote.ErrorFrom("wsl-shrinker: " + err.Error() + "\n")
 	}
 	return nil, err
 }
@@ -746,5 +751,102 @@ func TestAWSLThatDidNotAnswerIsSaidSoAndAskedAgain(t *testing.T) {
 		if msgs != 2 {
 			t.Fatalf("r asked %d questions, want the disks and WSL's version", msgs)
 		}
+	}
+}
+
+// moreRuns is a PC on which a run ends after the screen read the history.
+type moreRuns struct {
+	*Demo
+	runs []history.Entry
+}
+
+func (m *moreRuns) History() []history.Entry { return m.runs }
+
+func TestTheHistoryIsReadAgainForItsPage(t *testing.T) {
+	b := &moreRuns{Demo: NewDemo()}
+	m := playKeys(t, b, nil)
+	// A run since, from another window: h shows it.
+	b.runs = []history.Entry{{At: time.Now(), Disk: "Dev", Freed: 1 << 30}}
+	next, cmd := m.Update(snapshotKey("h"))
+	if next.(model).mode != modeHistory || cmd == nil {
+		t.Fatal("h read nothing again")
+	}
+	msg := cmd()
+	if _, ok := msg.(histMsg); !ok {
+		t.Fatalf("h asked %T", msg)
+	}
+	after, _ := next.Update(msg)
+	if h := after.(model).hist; len(h) != 1 || h[0].Disk != "Dev" {
+		t.Fatalf("history %+v", h)
+	}
+}
+
+// buggyReads is a PC whose program has a bug in reading a run not ended, or in
+// reading the history: the reads that go alongside the disks'.
+type buggyReads struct {
+	*Demo
+	in string
+}
+
+func (b *buggyReads) Pending() (journal.Entry, journal.State) {
+	if b.in == "pending" {
+		panic("bug in pending")
+	}
+	return b.Demo.Pending()
+}
+
+func (b *buggyReads) History() []history.Entry {
+	if b.in == "history" {
+		panic("bug in history")
+	}
+	return b.Demo.History()
+}
+
+func TestABugInAReadAlongsideTheDisksEndsTheScreenAndIsSaid(t *testing.T) {
+	for _, in := range []string{"pending", "history"} {
+		m := newModel(context.Background(), &buggyReads{Demo: NewDemo(), in: in})
+		// Run as Bubble Tea runs a command: a bug that escaped would end
+		// the test binary here.
+		msg := m.loadDisks()()
+		bug, ok := msg.(bugMsg)
+		if !ok || fmt.Sprint(bug.Value) != "bug in "+in || len(bug.Stack) == 0 {
+			t.Fatalf("%s: %T %v", in, msg, msg)
+		}
+		next, cmd := m.Update(msg)
+		if next.(model).bug == nil || cmd == nil {
+			t.Fatalf("%s: the screen did not end on it", in)
+		}
+	}
+}
+
+func TestAnOlderReadOfTheHistoryDoesNotHideANewerOne(t *testing.T) {
+	m := playKeys(t, &recording{Demo: NewDemo()}, nil)
+	now := time.Now()
+	newer := []history.Entry{{At: now, Disk: "Dev", Freed: 1 << 30}}
+	// h's read, begun after the disks' load began, comes back first; the
+	// load, with its older read of the history, after it.
+	next, _ := m.Update(histMsg{at: now, list: newer})
+	next, _ = next.(model).Update(disksMsg{list: m.list, histAt: now.Add(-time.Second)})
+	if h := next.(model).hist; len(h) != 1 || h[0].Disk != "Dev" {
+		t.Fatalf("the older read took the newer one's place: %+v", h)
+	}
+	// A read begun later still takes its place, an empty one too.
+	next, _ = next.(model).Update(histMsg{at: now.Add(time.Second)})
+	if h := next.(model).hist; len(h) != 0 {
+		t.Fatalf("a newer read was not taken: %+v", h)
+	}
+}
+
+func TestTheHistoryReadAgainWithTheDisksIsTakenAfterH(t *testing.T) {
+	b := &moreRuns{Demo: NewDemo()}
+	m := playKeys(t, b, nil)
+	// h reads the history; a run then ends, and the disks are read again
+	// with the history: the newer read shows.
+	next, cmd := m.Update(snapshotKey("h"))
+	next, _ = next.(model).Update(cmd())
+	b.runs = []history.Entry{{At: time.Now(), Disk: "Dev", Freed: 1 << 30}}
+	next, _ = next.(model).Update(next.(model).loadDisks()())
+	if h := next.(model).hist; len(h) != 1 || h[0].Disk != "Dev" {
+		t.Fatalf("history %+v", h)
 	}
 }

@@ -361,7 +361,7 @@ func removeContents(path string) string {
 	return "p=" + q + "; d=$(stat -c %d /); " +
 		"if [ -z \"$d\" ]; then echo \"skipped $p: stat gave no answer\"; false; " +
 		"elif cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$d\" ]; then " +
-		"m=$(while read -r x x x x at x; do case $at in (\"$p\"/*) echo inside; break ;; esac; done < /proc/self/mountinfo && echo read); " +
+		"m=$(while read -r x x x x at x; do case $at in (\"$p\"|\"$p\"/*) echo inside; break ;; esac; done < /proc/self/mountinfo && echo read); " +
 		"case $m in " +
 		"(read) find . -xdev -mindepth 1 -delete ;; " +
 		"(inside*) echo \"skipped $p: something is mounted inside\"; false ;; " +

@@ -293,23 +293,9 @@ func (m model) logoBlock() []string {
 	return lines
 }
 
-// category says what a disk's color means.
+// category says what a disk's color means, by the rule every front shares.
 func (m model) category(d disks.Disk) ui.Category {
-	switch m.block(d) {
-	case shrink.BlockProtected:
-		return ui.CatSafe
-	case shrink.BlockHeld:
-		// In use by its program: it can be shrunk once that program stops.
-		return ui.CatLive
-	case "":
-		// Nothing in the way: what it gives back decides.
-		if d.Estimate.Reclaim >= m.b.MinGain() {
-			return ui.CatGain
-		}
-		return ui.CatSmall
-	}
-	// Any other reason is one it cannot be shrunk for now.
-	return ui.CatBad
+	return ui.CategoryOf(d, m.block(d), m.b.MinGain())
 }
 
 // sizeW and barW are the widths of a size column and of a row's bar.
@@ -1283,9 +1269,7 @@ func notEnabled(err error) bool {
 
 // noAnswer reports whether err is WSL not answering in time. From inside
 // WSL the error is wsl-shrinker.exe's words, so they are matched too.
-func noAnswer(err error) bool {
-	return errors.Is(err, wsl.ErrNoAnswer) || strings.Contains(err.Error(), wsl.ErrNoAnswer.Error())
-}
+func noAnswer(err error) bool { return errors.Is(err, wsl.ErrNoAnswer) }
 
 // shrinkKey says what s shrinks: the marked disks, by count, when there are.
 func (m model) shrinkKey() string {

@@ -80,11 +80,11 @@ func (e *KeyError) Error() string { return e.Path + ": " + e.Msg }
 func (c Config) check(path string) error {
 	bad := func(key, format string, a ...any) error { return &KeyError{path, key, fmt.Sprintf(format, a...)} }
 	switch {
-	case !oneOf(c.Language, "auto", "en", "ko"):
+	case !oneOf(c.Language, Languages...):
 		return bad("language", "language must be auto, en or ko")
-	case !oneOf(c.Theme, "auto", "dark", "light"):
+	case !oneOf(c.Theme, Themes...):
 		return bad("theme", "theme must be auto, dark or light")
-	case !oneOf(c.Mode, "tui", "cli"):
+	case !oneOf(c.Mode, Modes...):
 		return bad("mode", "mode must be tui or cli")
 	case c.MinGainGB < 0:
 		return bad("min_gain_gb", "min_gain_gb cannot be negative")
@@ -129,6 +129,14 @@ func (c Config) Protected(name string) bool {
 	}
 	return false
 }
+
+// Languages, Themes and Modes are the values the settings take, in the
+// order setup offers them; every front checks and offers these.
+var (
+	Languages = []string{"auto", "en", "ko"}
+	Themes    = []string{"auto", "dark", "light"}
+	Modes     = []string{"tui", "cli"}
+)
 
 // oneOf reports whether v is one of the choices.
 func oneOf(v string, choices ...string) bool {

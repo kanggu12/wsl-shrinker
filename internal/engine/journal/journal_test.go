@@ -144,3 +144,56 @@ func TestAReusedProcessIDIsNotTheRunGoingOn(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWordsForARunSayOnlyWhatIsKnown(t *testing.T) {
+	for _, c := range []struct {
+		e         Entry
+		st        State
+		what, fix string
+	}{
+		{Entry{Disk: "Dev", Step: "compact"}, Going, "Dev is being shrunk by another wsl-shrinker", "let it finish"},
+		{Entry{}, Going, "a disk is being shrunk by another wsl-shrinker", "let it finish"},
+		{Entry{Disk: "Dev", Step: "compact"}, CutOff, "the run of Dev was cut off at compact", "wsl-shrinker recover finishes it"},
+		// A journal that says only part of it: never "the run of  was cut
+		// off at ", nor a disk with no step.
+		{Entry{Disk: "Dev"}, CutOff, "a run was cut off", "wsl-shrinker recover finishes it"},
+		{Entry{Step: "compact"}, CutOff, "a run was cut off", "wsl-shrinker recover finishes it"},
+		// No run: nothing to say.
+		{Entry{Disk: "Dev", Step: "compact"}, None, "", ""},
+	} {
+		if what, fix := Words(c.e, c.st); what != c.what || fix != c.fix {
+			t.Errorf("%+v, %v: %q, %q", c.e, c.st, what, fix)
+		}
+	}
+}
+
+func TestARunThatEndsAsAnotherStartsLetsItStart(t *testing.T) {
+	dir := t.TempDir()
+	// Another run holds the journal when this one tries to start, and ends
+	// before its journal is read: this one starts on the next try, and no
+	// error in no words is said.
+	other := Open(dir, alive(100, 200))
+	if err := other.Begin(Entry{PID: 100, Exe: "wsl-shrinker.exe", Disk: "Work", Step: "compact"}); err != nil {
+		t.Fatal(err)
+	}
+	s := Open(dir, alive(100, 200))
+	tries := 0
+	raced = func() {
+		if tries++; tries == 1 {
+			if err := os.Remove(s.Path); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(func() { raced = func() {} })
+	if err := s.Begin(Entry{PID: 200, Exe: "wsl-shrinker.exe", Disk: "Dev", Step: "check"}); err != nil {
+		t.Fatalf("not started once the other run had ended: %v", err)
+	}
+	if e, st, err := s.Read(); err != nil || st != Going || e.Disk != "Dev" {
+		t.Fatalf("%+v %v %v", e, st, err)
+	}
+	// No journal at all is never a journal that is taken.
+	if err := Open(t.TempDir(), alive()).busy(); !errors.Is(err, errEnded) {
+		t.Fatalf("busy with no journal: %v", err)
+	}
+}

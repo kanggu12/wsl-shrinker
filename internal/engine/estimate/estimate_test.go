@@ -76,7 +76,7 @@ func TestStoredButFree(t *testing.T) {
 		}
 	}
 	d, size := disk(t, vhdxtest.Spec{VirtualSize: 64 << 20, Blocks: blocks})
-	fs, err := ext4.Read(d.Contents(), d.VirtualSize)
+	fs, err := ext4.Read(d.Contents(), d.VirtualSize, int64(d.BlockSize))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func ext4DiskAs(t *testing.T, extra map[int64][]byte, shape func(*vhdxtest.Spec)
 		shape(&spec)
 	}
 	d, size := disk(t, spec)
-	fs, err := ext4.Read(d.Contents(), d.VirtualSize)
+	fs, err := ext4.Read(d.Contents(), d.VirtualSize, int64(d.BlockSize))
 	if err != nil {
 		t.Fatal(err)
 	}

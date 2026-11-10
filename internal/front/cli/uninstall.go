@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
@@ -88,8 +89,8 @@ func uninstall(cmd *cobra.Command, purge, yes bool) error {
 	}
 	// The question needs someone to answer it: without a terminal and
 	// without --yes, stop before anything is looked at.
-	if !yes && !stdinIsTerminal() && !relayed(0) {
-		return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to uninstall without the question")
+	if err := needAnswer(yes, "uninstall"); err != nil {
+		return err
 	}
 	exe, err := executable()
 	if err != nil {
@@ -104,7 +105,7 @@ func uninstall(cmd *cobra.Command, purge, yes bool) error {
 		return errors.New("APPDATA and LOCALAPPDATA must name folders: without them the settings and the history cannot be found")
 	}
 	settings := filepath.Dir(config.Path(appData))
-	state := filepath.Join(localAppData, "wsl-shrinker")
+	state := app.StateDir()
 	// Scoop keeps the program in a folder of its own and knows it: removed
 	// behind its back, it would still list it. The settings and the
 	// history are no business of Scoop's.
@@ -112,22 +113,22 @@ func uninstall(cmd *cobra.Command, purge, yes bool) error {
 	if scoop && !purge {
 		return hint(errors.New("this wsl-shrinker was installed with Scoop"), "scoop uninstall wsl-shrinker removes it; wsl-shrinker uninstall --purge removes the settings and the history first")
 	}
-	if err := uninstallBlocked(exe, dir, state, scoop); err != nil {
+	plan := uninstallPlan{exe: exe, dir: dir, settings: settings, state: state, scoop: scoop, purge: purge}
+	if err := plan.blocked(); err != nil {
 		return err
 	}
 	// The folder goes, and its PATH entry with it, only when it is the
 	// install's own: named for the program, with nothing else in it. Scoop's
 	// never is: its manifest is in it.
-	own, why := ownFolder(dir)
+	plan.own, plan.why = ownFolder(dir)
 	if !yes {
 		// Whether the PATH has an entry for the folder, for the plan to say;
 		// read only.
-		inPath := false
-		if value, _, err := userPath(); own && err == nil {
+		if value, _, err := userPath(); plan.own && err == nil {
 			_, n := pathWithout(value, dir, os.LookupEnv)
-			inPath = n > 0
+			plan.inPath = n > 0
 		}
-		sayPlan(cmd.ErrOrStderr(), exe, dir, settings, state, scoop, own, inPath, why, purge)
+		plan.say(cmd.ErrOrStderr())
 		q := "Uninstall? [y/N] "
 		if scoop {
 			q = "Remove them? [y/N] "
@@ -137,34 +138,40 @@ func uninstall(cmd *cobra.Command, purge, yes bool) error {
 		}
 		// The question may have waited long: a run, another copy of the
 		// program or a screen may have started meanwhile.
-		if err := uninstallBlocked(exe, dir, state, scoop); err != nil {
+		if err := plan.blocked(); err != nil {
 			return err
 		}
 	}
-	return uninstallNow(cmd.OutOrStdout(), exe, dir, settings, state, scoop, own, why, purge)
+	return plan.now(cmd.OutOrStdout())
+}
+
+// uninstallPlan is what an uninstall works on, worked out once: the
+// program and its folder, the settings and history folders, whether Scoop
+// installed it, whether the folder is the install's own (why not, if not)
+// and has a PATH entry, and whether --purge was given.
+type uninstallPlan struct {
+	exe, dir, settings, state, why string
+	scoop, own, inPath, purge      bool
 }
 
 // recoverFirst is what to do about a run cut off before an uninstall: only
 // this program starts again what that run stopped.
 const recoverFirst = "wsl-shrinker recover finishes it, or wsl-shrinker recover --forget closes it as it is; then uninstall"
 
-// uninstallBlocked says what stands in the way of an uninstall now: a run
+// blocked says what stands in the way of an uninstall now: a run
 // not ended, which holds a distribution and needs the program; and, for a
 // program not Scoop's, a copy of it still running, or a screen open in WSL.
-func uninstallBlocked(exe, dir, state string, scoop bool) error {
-	j := journal.Open(state, journalAlive)
-	j.Since = winapi.ProcessStart
-	e, st, err := j.Read()
+func (p uninstallPlan) blocked() error {
+	exe, dir, state, scoop := p.exe, p.dir, p.state, p.scoop
+	e, st, err := app.OpenJournal(state, journalAlive).Read()
 	if err != nil {
 		return err
 	}
-	switch {
-	case st == journal.Going:
-		return hint(fmt.Errorf("%s is being shrunk by another wsl-shrinker", e.Name()), "let it finish, then uninstall")
-	case st == journal.CutOff && e.Disk == "":
-		return hint(errors.New("a run was cut off"), recoverFirst)
-	case st == journal.CutOff:
-		return hint(fmt.Errorf("the run of %s was cut off at %s", e.Disk, e.Step), recoverFirst)
+	switch what, _ := journal.Words(e, st); st {
+	case journal.Going:
+		return hint(errors.New(what), "let it finish, then uninstall")
+	case journal.CutOff:
+		return hint(errors.New(what), recoverFirst)
 	}
 	if scoop {
 		return nil
@@ -186,12 +193,13 @@ func uninstallBlocked(exe, dir, state string, scoop bool) error {
 	return nil
 }
 
-// uninstallNow removes what the plan said, in the order that leaves the
+// now removes what the plan said, in the order that leaves the
 // least behind should a step fail: the PATH entry first, the one step
 // Windows may refuse, while all of the program is there to try again; then
 // the files beside the program, the settings and the history, and last the
 // program itself, which goes once it has ended.
-func uninstallNow(out io.Writer, exe, dir, settings, state string, scoop, own bool, why string, purge bool) error {
+func (p uninstallPlan) now(out io.Writer) error {
+	exe, dir, settings, state, scoop, own, why, purge := p.exe, p.dir, p.settings, p.state, p.scoop, p.own, p.why, p.purge
 	var notes []string
 	// What the settings and the history folders hold before anything goes.
 	kept := filled(settings, state)
@@ -296,10 +304,11 @@ func inside(dir string) bool {
 	return wd == dir || strings.HasPrefix(wd, dir+string(filepath.Separator))
 }
 
-// sayPlan says what an uninstall removes and what it keeps, one thing to a
+// say says what an uninstall removes and what it keeps, one thing to a
 // line, before the question. inPath says whether the PATH has an entry for
 // an install's own folder.
-func sayPlan(w io.Writer, exe, dir, settings, state string, scoop, own, inPath bool, why string, purge bool) {
+func (p uninstallPlan) say(w io.Writer) {
+	exe, dir, settings, state, scoop, own, inPath, why, purge := p.exe, p.dir, p.settings, p.state, p.scoop, p.own, p.inPath, p.why, p.purge
 	l := lookFor(w)
 	line := func(verb, what string) { fmt.Fprintf(w, "  %s  %s\n", l.muted(verb), what) }
 	fmt.Fprintln(w, "wsl-shrinker uninstall:")

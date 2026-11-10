@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +270,29 @@ func TestTheScreensForgetSaysARunThatEndedMeanwhile(t *testing.T) {
 	}
 	if err := (Backend{A: a}).Forget(context.Background(), stoppedDev); err != nil {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAJournalThatCannotBeWrittenIsNotSaidToBeAnotherRun(t *testing.T) {
+	// The journal's folder cannot be made (a file stands where it would
+	// be): the run is refused with that reason, not as one waiting for
+	// another run, which the screen would say instead.
+	a, _ := testApp(t, func(int, string) bool { return false })
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.Journal = journal.Open(filepath.Join(blocker, "wsl-shrinker"), func(int, string) bool { return false })
+	res := a.Shrink(context.Background(), dev(t, a), shrink.Options{}, nil)
+	if len(res.Events) != 1 || res.Events[0].Code != "" || res.Err == "" || strings.Contains(res.Err, "not finished") {
+		t.Fatalf("events %+v, err %q", res.Events, res.Err)
+	}
+	// Another run, cut off, is said as one.
+	b, _ := testApp(t, func(int, string) bool { return false })
+	if err := b.Journal.Begin(stoppedDev); err != nil {
+		t.Fatal(err)
+	}
+	if res := b.Shrink(context.Background(), dev(t, b), shrink.Options{}, nil); len(res.Events) != 1 || res.Events[0].Code != shrink.CodeBusy {
+		t.Fatalf("a run cut off: events %+v", res.Events)
 	}
 }

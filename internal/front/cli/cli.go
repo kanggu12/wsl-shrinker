@@ -225,7 +225,7 @@ func newRoot(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A wrong theme is refused like a wrong language, before anything is read.
 			if !slices.Contains(themes, theme) {
-				return fmt.Errorf("%w: --theme takes auto, dark or light", errUsage)
+				return fmt.Errorf("%w: --theme takes %s", errUsage, orList(config.Themes))
 			}
 			// The clean choices are checked first too: a mistake stops before the screen.
 			cleanMap, err := parseScreenClean(clean)

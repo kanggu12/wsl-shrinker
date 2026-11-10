@@ -11,8 +11,9 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 )
 
-// Backend is what the screen asks of the rest of the program. The real one
-// reaches WSL and Windows; the demo one plays a made-up PC.
+// Backend is what the screen asks of the rest of the program. app.Backend
+// reaches WSL and Windows itself; remote.Backend asks wsl-shrinker.exe,
+// for the screen in a WSL terminal; the demo plays a made-up PC.
 type Backend interface {
 	// Info is WSL's version and whether it can compact.
 	Info(ctx context.Context) wsl.Info

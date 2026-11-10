@@ -43,43 +43,57 @@ type FS struct {
 	// HasErrors is set when the kernel recorded filesystem errors (s_state
 	// bit 2): fsck should look at it before anything else touches it.
 	HasErrors bool
-	// used has one bit per block, set for a block in use.
+	// per is how many blocks a chunk holds: the chunk Read was given, in
+	// blocks, a power of two.
+	per uint64
+	// used has one bit per chunk, set when a block in it is in use.
 	used []uint64
 }
 
-// InUse reports whether block b is in use.
+// InUse reports whether block b's chunk holds a block in use: block b
+// itself when Read was given chunks of one block.
 func (fs *FS) InUse(b uint64) bool {
 	// Blocks past the end are not part of the filesystem.
 	if b >= fs.Blocks {
 		return false
 	}
-	return fs.used[b/64]&(1<<(b%64)) != 0
+	c := b / fs.per
+	return fs.used[c/64]&(1<<(c%64)) != 0
 }
 
-// AnyInUse reports whether any block in [from, to) is in use.
+// AnyInUse reports whether any chunk that overlaps blocks [from, to) holds
+// a block in use: exactly whether a block in [from, to) is in use when the
+// range is whole chunks, as a VHDX block is.
 func (fs *FS) AnyInUse(from, to uint64) bool {
-	// Clip the range to the filesystem.
+	// Clip the range to the filesystem, then to the chunks it touches.
 	to = min(to, fs.Blocks)
-	for b := from; b < to; {
+	if from >= to {
+		return false
+	}
+	first, last := from/fs.per, (to-1)/fs.per+1
+	for c := first; c < last; {
 		// Test a whole word at once when the range covers it.
-		if b%64 == 0 && b+64 <= to {
-			if fs.used[b/64] != 0 {
+		if c%64 == 0 && c+64 <= last {
+			if fs.used[c/64] != 0 {
 				return true
 			}
-			b += 64
+			c += 64
 			continue
 		}
-		if fs.InUse(b) {
+		if fs.used[c/64]&(1<<(c%64)) != 0 {
 			return true
 		}
-		b++
+		c++
 	}
 	return false
 }
 
-// Read reads the filesystem at the start of r, a device of size bytes. The
-// size bounds what a damaged superblock can make it allocate.
-func Read(r io.ReaderAt, size int64) (*FS, error) {
+// Read reads the filesystem at the start of r, a device of size bytes. It
+// records what is in use per chunk of chunk bytes, the unit the caller asks
+// about: a VHDX block, so a disk of any size takes at most a bit per VHDX
+// block of memory. A chunk below the block size is one block. The size
+// bounds what a damaged superblock can make it read.
+func Read(r io.ReaderAt, size, chunk int64) (*FS, error) {
 	// The superblock is 1024 bytes at offset 1024, whatever the block size.
 	sb := make([]byte, 1024)
 	if _, err := r.ReadAt(sb, superblockOffset); err != nil {
@@ -94,6 +108,11 @@ func Read(r io.ReaderAt, size int64) (*FS, error) {
 		return nil, fmt.Errorf("ext4: block size 2^%d KiB", logBS)
 	}
 	fs := &FS{BlockSize: 1024 << logBS}
+	// A chunk is a power of two and at least a block: a VHDX block is both.
+	if chunk < fs.BlockSize || chunk&(chunk-1) != 0 {
+		chunk = fs.BlockSize
+	}
+	fs.per = uint64(chunk / fs.BlockSize)
 	compat := binary.LittleEndian.Uint32(sb[0x5C:])
 	incompat := binary.LittleEndian.Uint32(sb[0x60:])
 	roCompat := binary.LittleEndian.Uint32(sb[0x64:])
@@ -160,35 +179,60 @@ func Read(r io.ReaderAt, size int64) (*FS, error) {
 	backup2 := uint64(binary.LittleEndian.Uint32(sb[0x250:]))
 	reservedGDT := uint64(binary.LittleEndian.Uint16(sb[0xCE:]))
 	groups := (fs.Blocks - firstData + perGroup - 1) / perGroup
-	// The descriptor table starts in the block after the superblock's.
+	// The descriptor table starts in the block after the superblock's. It
+	// is read a block at a time as the groups go: its whole size follows a
+	// number the superblock makes up when it is damaged.
 	gdtBlock := firstData + 1
 	gdtBlocks := (groups*descSize + uint64(fs.BlockSize) - 1) / uint64(fs.BlockSize)
-	gdt := make([]byte, gdtBlocks*uint64(fs.BlockSize))
-	if _, err := r.ReadAt(gdt, int64(gdtBlock)*fs.BlockSize); err != nil {
-		return nil, fmt.Errorf("ext4: reading the group descriptors: %w", err)
-	}
-	fs.used = make([]uint64, (fs.Blocks+63)/64)
+	perGDTBlock := uint64(fs.BlockSize) / descSize
+	gdt := make([]byte, fs.BlockSize)
+	loaded := ^uint64(0)
+	// One bit per chunk: at most a bit per VHDX block for any superblock.
+	chunks := (fs.Blocks + fs.per - 1) / fs.per
+	fs.used = make([]uint64, (chunks+63)/64)
 	// Blocks before the first group (block 0 with 1 KiB blocks) are in use.
 	for b := range firstData {
 		fs.mark(b)
 	}
+	fs.UsedBlocks = firstData
 	bitmap := make([]byte, fs.BlockSize)
+	// own marks an uninitialised group's blocks once each, to count them:
+	// a group is at most a bitmap's worth of blocks.
+	own := make([]uint64, (perGroup+63)/64)
 	for g := range groups {
 		// This group's first block and its number of blocks (the last one
 		// may be short).
 		start := firstData + g*perGroup
 		count := min(perGroup, fs.Blocks-start)
-		d := gdt[g*descSize : (g+1)*descSize]
+		// The descriptor table's block that holds this group's.
+		if b := g / perGDTBlock; b != loaded {
+			if _, err := r.ReadAt(gdt, int64(gdtBlock+b)*fs.BlockSize); err != nil {
+				return nil, fmt.Errorf("ext4: reading the group descriptors: %w", err)
+			}
+			loaded = b
+		}
+		d := gdt[(g%perGDTBlock)*descSize : (g%perGDTBlock+1)*descSize]
 		flags := binary.LittleEndian.Uint16(d[0x12:])
 		if flags&bgBlockUninit != 0 && uninitOK {
 			// The bitmap was never written: in use are the group's copy of
 			// the superblock and descriptors, and the group's own block and
-			// inode bitmaps and inode table, wherever they are (in this
-			// group without flex_bg, in another with it, where they are
-			// marked twice, which changes nothing).
+			// inode bitmaps and inode table, wherever they are: in this
+			// group without flex_bg, in another with it. In another group
+			// they are in that group's bitmap and counted with it; in this
+			// one they are counted here, each once. A damaged table can
+			// name blocks in another group whose bitmap does not mark them:
+			// AnyInUse still sees them, UsedBlocks does not count them. A
+			// shrink's check and its verify read the table the same way.
+			clear(own)
+			mine := func(b uint64) {
+				fs.mark(b)
+				if b >= start && b < start+count {
+					own[(b-start)/64] |= 1 << ((b - start) % 64)
+				}
+			}
 			if hasBackup(g, sparse, sparse2, backup1, backup2) {
 				for b := range min(1+gdtBlocks+reservedGDT, count) {
-					fs.mark(start + b)
+					mine(start + b)
 				}
 			}
 			field := func(lo, hi int) uint64 {
@@ -200,8 +244,11 @@ func Read(r io.ReaderAt, size int64) (*FS, error) {
 			}
 			for _, m := range []struct{ at, n uint64 }{{field(0x0, 0x20), 1}, {field(0x4, 0x24), 1}, {field(0x8, 0x28), itableBlocks}} {
 				for b := m.at; b < m.at+m.n && b < fs.Blocks; b++ {
-					fs.mark(b)
+					mine(b)
 				}
+			}
+			for _, w := range own {
+				fs.UsedBlocks += uint64(bits.OnesCount64(w))
 			}
 			continue
 		}
@@ -216,22 +263,53 @@ func Read(r io.ReaderAt, size int64) (*FS, error) {
 		if _, err := r.ReadAt(bitmap, int64(at)*fs.BlockSize); err != nil {
 			return nil, fmt.Errorf("ext4: reading group %d's bitmap: %w", g, err)
 		}
-		// Copy the group's bits into the filesystem-wide set.
-		for b := range count {
-			if bitmap[b/8]&(1<<(b%8)) != 0 {
-				fs.mark(start + b)
-			}
-		}
-	}
-	// Count what was marked.
-	for _, w := range fs.used {
-		fs.UsedBlocks += uint64(bits.OnesCount64(w))
+		fs.fold(bitmap, start, count)
 	}
 	return fs, nil
 }
 
-// mark records block b as in use.
-func (fs *FS) mark(b uint64) { fs.used[b/64] |= 1 << (b % 64) }
+// fold counts the blocks a group's bitmap marks in use, of its first count
+// bits, and marks their chunks: a 64-bit word at a time (the bitmap is
+// little-endian, bit b of the group in byte b/8), and within a word one
+// mark per chunk it touches.
+func (fs *FS) fold(bitmap []byte, start, count uint64) {
+	for i := uint64(0); i < count; i += 64 {
+		var w uint64
+		if i+64 <= uint64(len(bitmap))*8 {
+			w = binary.LittleEndian.Uint64(bitmap[i/8:])
+		} else {
+			// A bitmap shorter than a word (a 1 KiB block holds 128 words):
+			// the bytes that are there.
+			for j := i / 8; j < uint64(len(bitmap)); j++ {
+				w |= uint64(bitmap[j]) << (8 * (j - i/8))
+			}
+		}
+		// Bits past the group's end (a short last group) are not blocks.
+		if n := count - i; n < 64 {
+			w &= 1<<n - 1
+		}
+		fs.UsedBlocks += uint64(bits.OnesCount64(w))
+		// Each chunk the word touches is marked once: past the lowest bit
+		// set, the bits of its chunk are cleared, and the next one found.
+		base := start + i
+		for w != 0 {
+			b := base + uint64(bits.TrailingZeros64(w))
+			c := b / fs.per
+			fs.used[c/64] |= 1 << (c % 64)
+			next := (c + 1) * fs.per
+			if next-base >= 64 {
+				break
+			}
+			w &^= 1<<(next-base) - 1
+		}
+	}
+}
+
+// mark records block b's chunk as in use.
+func (fs *FS) mark(b uint64) {
+	c := b / fs.per
+	fs.used[c/64] |= 1 << (c % 64)
+}
 
 // hasBackup reports whether group g holds a backup of the superblock and
 // descriptors (group 0 holds the primary copy).

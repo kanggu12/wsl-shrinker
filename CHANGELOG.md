@@ -6,6 +6,37 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-10
+
+### Changed
+
+- Listing the disks reads each ext4 filesystem up to about 15 times faster, with a fraction of the memory, and asks
+  WSL for its version and its help at once. On a disk of several hundred gigabytes, `list --json` took about 0.2 s
+  instead of 0.4 s, with the same numbers.
+- The check for empty blocks on Docker Desktop's disk and `extra_disks` files runs about four times faster.
+- From a WSL terminal, the screen starts `wsl-shrinker.exe` once fewer before it draws, reads a run not ended and the
+  history alongside the disks, and no longer stops to read the history on `h` or after a run.
+- The screen draws twice a second while nothing on it moves, instead of eight times.
+
+### Fixed
+
+- A run refused because its journal could not be written, as on a full drive, was said as "another run is not
+  finished"; it now says why.
+- `doctor` said "a run of  was cut off at " when the journal of a run cut off could not be read.
+- Each run started on the screen added another clock to it, so after a few runs it drew every frame several times.
+
+### Security
+
+- Reading a disk's ext4 filesystem keeps at most one bit per VHDX block in memory, whatever its superblock claims. A
+  made-up 64 TiB filesystem of 1 KiB blocks used to take gigabytes before it was refused.
+- A damaged VHDX log whose entries form no sequence is refused after a bounded search, instead of a walk per entry.
+- A cache folder that is itself a mount point is left alone, as one with a mount inside it already was.
+- Docker Desktop's folder is taken from its settings only on a drive of the PC, never on a network share or a drive
+  letter mapped to one, which Windows would reach with the person's credentials.
+- `cmd.exe` is started from Windows' own folder. When APPDATA or LOCALAPPDATA is empty, the state folders come from
+  Windows instead of the current folder. Inside WSL, crash files can be read by their owner only.
+- The release job builds without a shared cache and keeps no token in its checkout.
+
 ## [0.6.1] - 2026-11-10
 
 ### Fixed
@@ -214,7 +245,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.2
 [0.6.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.1
 [0.6.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.0
 [0.5.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.1

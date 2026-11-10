@@ -65,12 +65,22 @@ func New() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(winapi.LocalAppData(), "wsl-shrinker")
-	// The journal asks Windows which process runs a run, and since when.
-	j := journal.Open(dir, winapi.Running)
-	j.Since = winapi.ProcessStart
+	dir := StateDir()
 	return &App{Config: c, ConfigPath: path, WSL: wsl.New(),
-		History: history.Open(dir), Journal: j}, nil
+		History: history.Open(dir), Journal: OpenJournal(dir, winapi.Running)}, nil
+}
+
+// StateDir is the folder of the program's own files: the journal, the
+// history, a new window's receipts and the crash files.
+func StateDir() string { return filepath.Join(winapi.LocalAppData(), "wsl-shrinker") }
+
+// OpenJournal is the journal in dir, which asks alive whether the process
+// that wrote it still runs, and Windows since when, so a process id given
+// again is not taken for the run's own.
+func OpenJournal(dir string, alive func(pid int, exe string) bool) journal.Store {
+	j := journal.Open(dir, alive)
+	j.Since = winapi.ProcessStart
+	return j
 }
 
 // Info asks WSL about itself, once it answers. A WSL that did not answer in
@@ -100,7 +110,7 @@ func (a *App) DisksEnv() disks.Env {
 }
 
 // ShrinkEnv is what a run uses.
-func (a *App) ShrinkEnv(ctx context.Context) shrink.Env {
+func (a *App) shrinkEnv(ctx context.Context) shrink.Env {
 	// A WSL that did not answer is not refused for an old one: the run's
 	// own calls to it say what is wrong, in WSL's words or as no answer.
 	info := a.Info(ctx)
@@ -118,12 +128,15 @@ func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit
 	if err := a.Journal.Begin(j); err != nil {
 		// Refused before anything ran: said as the check's failure, with a
 		// code the screen has words for.
-		e := shrink.Event{Step: shrink.StepCheck, Status: shrink.Failed, Detail: err.Error(), Code: shrink.CodeBusy, At: timeNow()}
+		e := shrink.Event{Step: shrink.StepCheck, Status: shrink.Failed, Detail: err.Error(), At: timeNow()}
+		if errors.Is(err, journal.ErrBusy) {
+			e.Code = shrink.CodeBusy
+		}
 		if emit != nil {
 			emit(e)
 		}
 		res := shrink.Result{Disk: d.Name, Before: d.Estimate, Events: []shrink.Event{e}, Err: err.Error(), FailedAt: shrink.StepCheck}
-		res.Left = untouched(d)
+		res.Left = shrink.Untouched(d)
 		return res
 	}
 	// The journal follows the steps that matter for a run cut off.
@@ -134,7 +147,7 @@ func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit
 			emit(e)
 		}
 	}
-	res := shrink.Run(ctx, a.ShrinkEnv(ctx), d, opt, follow)
+	res := shrink.Run(ctx, a.shrinkEnv(ctx), d, opt, follow)
 	// Run returns only once it settled what it stopped: nothing is left to
 	// recover. The journal goes last, after the history line, so the
 	// history is written under the same lock as the run.
@@ -163,17 +176,6 @@ func (a *App) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, emit
 		}
 	}
 	return res
-}
-
-// untouched is how a run refused before its first step leaves a disk.
-func untouched(d disks.Disk) shrink.Left {
-	switch {
-	case d.Distro == "":
-		return shrink.LeftFile
-	case d.Running:
-		return shrink.LeftRunning
-	}
-	return shrink.LeftStopped
 }
 
 // Pending is a run that has not ended: one going on in another process, or
@@ -248,7 +250,7 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 		if !e.Stopped {
 			break
 		}
-		ev, err := shrink.StartAgain(ctx, a.ShrinkEnv(ctx), e.Distro, e.Containers)
+		ev, err := shrink.StartAgain(ctx, a.shrinkEnv(ctx), e.Distro, e.Containers)
 		if err != nil {
 			// The journal stays, for another try.
 			return "", StillCutOff{err}
@@ -499,7 +501,7 @@ func dropStaleReceipts(dir string, before time.Time) {
 
 // receiptPath is where the receipt for token goes, next to the history.
 func receiptPath(token string) string {
-	return filepath.Join(winapi.LocalAppData(), "wsl-shrinker", "handoff-"+token)
+	return filepath.Join(StateDir(), "handoff-"+token)
 }
 
 // randomToken names one handoff, so two never take each other's receipt.

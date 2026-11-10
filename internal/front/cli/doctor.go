@@ -72,11 +72,13 @@ func doctorCmd(made *apps) *cobra.Command {
 				return err
 			}
 			// A run cut off is the first thing to fix; one going on is news.
-			switch e, st := a.Pending(); {
-			case st == journal.CutOff:
-				line(false, "a run of "+e.Disk+" was cut off at "+e.Step, "wsl-shrinker recover finishes it")
-			case st == journal.Going:
-				note(e.Name() + " is being shrunk by another wsl-shrinker")
+			switch e, st := a.Pending(); st {
+			case journal.CutOff:
+				what, fix := journal.Words(e, st)
+				line(false, what, fix)
+			case journal.Going:
+				what, _ := journal.Words(e, st)
+				note(what)
 			}
 			ctx := cmd.Context()
 			info := a.Info(ctx)

@@ -49,15 +49,47 @@ func Exe(path string, env []string) Runner {
 		var errOut bytes.Buffer
 		cmd.Stderr = &errOut
 		if err := cmd.Run(); err != nil {
-			// The program's own words, without its name in front.
-			if msg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(errOut.String()), "wsl-shrinker:")); msg != "" {
-				return errors.New(msg)
+			if e := ErrorFrom(errOut.String()); e != nil {
+				return e
 			}
 			return err
 		}
 		return nil
 	}
 }
+
+// known are the errors the program's words may name that the screen tells
+// apart: they come back as themselves, for errors.Is.
+var known = []error{app.ErrNothingToForget, app.ErrRunChanged, wsl.ErrNoAnswer}
+
+// ErrorFrom is the error the program said on stderr, its own words without
+// its name in front; nil when it said nothing. When the words name one of
+// the known errors, errors.Is finds it: both ends are the same build, so the
+// words are the same.
+func ErrorFrom(stderr string) error {
+	msg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(stderr), "wsl-shrinker:"))
+	if msg == "" {
+		return nil
+	}
+	for _, k := range known {
+		if strings.Contains(msg, k.Error()) {
+			return saidError{msg, k}
+		}
+	}
+	return errors.New(msg)
+}
+
+// saidError is the program's words, which name a known error.
+type saidError struct {
+	msg   string
+	known error
+}
+
+// Error is the program's words.
+func (e saidError) Error() string { return e.msg }
+
+// Unwrap is the known error they name.
+func (e saidError) Unwrap() error { return e.known }
 
 // Settings are what the screen needs from the settings file, with the
 // language chosen already.
@@ -100,6 +132,10 @@ func Open(ctx context.Context, run Runner, distro, version string) (*Backend, er
 	var hello struct {
 		Schema  int    `json:"schema"`
 		Version string `json:"version"`
+		// Settings come with hello from the same build: one start of the
+		// program fewer. Without them (a settings file that does not
+		// load), settings is asked, and says why.
+		Settings *Settings `json:"settings"`
 	}
 	if err := b.ask(ctx, &hello, "backend", "hello"); err != nil {
 		// An older build has no backend: it answers with its usage error.
@@ -107,6 +143,10 @@ func Open(ctx context.Context, run Runner, distro, version string) (*Backend, er
 	}
 	if hello.Schema != schema || hello.Version != version {
 		return nil, fmt.Errorf("%w: %s, this is %s", ErrOtherBuild, hello.Version, version)
+	}
+	if hello.Settings != nil {
+		b.settings = *hello.Settings
+		return b, nil
 	}
 	if err := b.ask(ctx, &b.settings, "backend", "settings"); err != nil {
 		return nil, err
@@ -210,7 +250,7 @@ func (b *Backend) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, 
 		return *res
 	}
 	// No result: refused before the run, or the program ended on the way.
-	r := shrink.Result{Disk: d.Name, Before: d.Estimate, FailedAt: shrink.StepCheck, Left: untouched(d)}
+	r := shrink.Result{Disk: d.Name, Before: d.Estimate, FailedAt: shrink.StepCheck, Left: shrink.Untouched(d)}
 	if last != "" {
 		// It ended mid-run: what it left is not known here, and its journal
 		// says what to start again.
@@ -221,17 +261,6 @@ func (b *Backend) Shrink(ctx context.Context, d disks.Disk, opt shrink.Options, 
 		r.Err = err.Error()
 	}
 	return r
-}
-
-// untouched is how a run refused before it began leaves a disk.
-func untouched(d disks.Disk) shrink.Left {
-	switch {
-	case d.Distro == "":
-		return shrink.LeftFile
-	case d.Running:
-		return shrink.LeftRunning
-	}
-	return shrink.LeftStopped
 }
 
 // History is the past runs, oldest first; none when they cannot be read.
@@ -315,11 +344,8 @@ func (b *Backend) Recover(ctx context.Context) (string, error) {
 func (b *Backend) Forget(ctx context.Context, run journal.Entry) error {
 	err := b.run(ctx, []string{"backend", "forget", "--pid=" + strconv.Itoa(run.PID),
 		"--started=" + run.Started.Format(time.RFC3339Nano), "--disk=" + run.Disk}, io.Discard)
-	// The same build says it in the same words: a run that ended meanwhile
-	// comes back as itself, for the screen to tell it apart.
-	if err != nil && strings.Contains(err.Error(), app.ErrNothingToForget.Error()) {
-		return app.ErrNothingToForget
-	}
+	// A run that ended meanwhile comes back as itself (ErrorFrom), for the
+	// screen to tell it apart.
 	return err
 }
 

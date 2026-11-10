@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -352,13 +351,7 @@ func TestTheLinuxScreenForgetsThroughTheProgram(t *testing.T) {
 	fake.List[0].Running = false
 	cutOffDev(t, a)
 	fake.Fail = map[string]error{"start:Dev": errors.New("the root filesystem stays read-only")}
-	run := func(ctx context.Context, args []string, out io.Writer) error {
-		var e bytes.Buffer
-		if code := runWith(args, out, &e, func() (*app.App, error) { return a, nil }); code != exitOK {
-			return errors.New(strings.TrimSpace(strings.TrimPrefix(e.String(), "wsl-shrinker:")))
-		}
-		return nil
-	}
+	run := inProcess(a)
 	ctx := context.Background()
 	b, err := remote.Open(ctx, run, "Other", version.String())
 	if err != nil {

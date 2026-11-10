@@ -108,6 +108,23 @@ func (l look) warn(s string) string  { return l.paint("3", s) }
 func (l look) bad(s string) string   { return l.paint("1", s) }
 func (l look) muted(s string) string { return l.paint("8", s) }
 
+// cat is the paint for a disk's category, the screen's colors in the
+// terminal's own: worth it teal, in use blue, protected magenta, cannot
+// red, and little grey.
+func (l look) cat(c ui.Category) func(string) string {
+	switch c {
+	case ui.CatGain:
+		return l.gain
+	case ui.CatLive:
+		return l.live
+	case ui.CatSafe:
+		return l.safe
+	case ui.CatSmall:
+		return l.muted
+	}
+	return l.bad
+}
+
 // done is s after a teal check mark on a terminal, plain otherwise.
 func (l look) done(s string) string {
 	if !l.on {

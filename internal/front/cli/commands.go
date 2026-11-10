@@ -227,8 +227,8 @@ func shrinkCmd(p *apps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The question needs someone to answer it: without a terminal and
 			// without --yes, stop before anything is read or asked.
-			if !yes && !stdinIsTerminal() && !relayed(0) {
-				return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to shrink without the question")
+			if err := needAnswer(yes, "shrink"); err != nil {
+				return err
 			}
 			a, err := p.get()
 			if err != nil {
@@ -293,13 +293,10 @@ func shrinkCmd(p *apps) *cobra.Command {
 					}
 					fmt.Fprintln(talk)
 				}
-				ok, err := ask(ctx, cmd.InOrStdin(), talk, "Shrink? [y/N] ")
-				if err != nil {
-					// Ctrl+C at the question ends it like a no.
-					return fmt.Errorf("not shrunk: cancelled")
-				}
-				if !ok {
-					return fmt.Errorf("not shrunk")
+				// Ctrl+C at the question ends it like a no; a bug in reading
+				// the answer is said as one.
+				if err := confirm(cmd, "Shrink? [y/N] ", "not shrunk"); err != nil {
+					return err
 				}
 			}
 			if moves {
@@ -614,8 +611,8 @@ func recoverCmd(p *apps) *cobra.Command {
 func forgetRun(cmd *cobra.Command, p *apps, yes bool) error {
 	// The question needs someone to answer it: without a terminal and
 	// without --yes, stop before anything is read.
-	if !yes && !stdinIsTerminal() && !relayed(0) {
-		return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to forget it without the question")
+	if err := needAnswer(yes, "forget it"); err != nil {
+		return err
 	}
 	a, err := p.get()
 	if err != nil {
@@ -691,6 +688,16 @@ func forgetRun(cmd *cobra.Command, p *apps, yes bool) error {
 	return nil
 }
 
+// needAnswer stops a command that would ask a question no one can answer:
+// no terminal, none the launcher relays, and no --yes. what is what --yes
+// does without the question.
+func needAnswer(yes bool, what string) error {
+	if yes || stdinIsTerminal() || relayed(0) {
+		return nil
+	}
+	return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to "+what+" without the question")
+}
+
 // counted is n of a thing, named for one or for several.
 func counted(n int, thing string) string {
 	if n == 1 {
@@ -729,17 +736,7 @@ func sayDone(out io.Writer, text string) {
 // unfinished says why a run cannot start while another has not ended, and
 // what to do about it, from the journal's entry and state; "" when none is
 // pending.
-func unfinished(e journal.Entry, st journal.State) (string, string) {
-	switch {
-	case st == journal.Going:
-		return e.Name() + " is being shrunk by another wsl-shrinker", "let it finish"
-	case st == journal.CutOff && e.Disk == "":
-		return "a run was cut off", "wsl-shrinker recover finishes it"
-	case st == journal.CutOff:
-		return "the run of " + e.Disk + " was cut off at " + e.Step, "wsl-shrinker recover finishes it"
-	}
-	return "", ""
-}
+func unfinished(e journal.Entry, st journal.State) (string, string) { return journal.Words(e, st) }
 
 // insideHint adds what to do to a look inside that failed.
 func insideHint(err error, name string) error {
@@ -838,8 +835,8 @@ func historyCmd(p *apps) *cobra.Command {
 func clearHistory(cmd *cobra.Command, p *apps, yes bool) error {
 	// The question needs someone to answer it: without a terminal and
 	// without --yes, stop before anything is read.
-	if !yes && !stdinIsTerminal() && !relayed(0) {
-		return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to clear it without the question")
+	if err := needAnswer(yes, "clear it"); err != nil {
+		return err
 	}
 	a, err := p.get()
 	if err != nil {

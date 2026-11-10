@@ -202,21 +202,10 @@ func (m model) runView() string {
 // language, from the code the engine gave it; anything else in the
 // engine's words, which are WSL's or Windows' own.
 func (m model) failWords(e shrink.Event, d disks.Disk) string {
+	if s, ok := knownBlockWords(d, shrink.Block(e.Code)); ok {
+		return s
+	}
 	switch e.Code {
-	case string(shrink.BlockProtected):
-		return i18n.T("toast.protected", d.Name)
-	case string(shrink.BlockUnreadable):
-		return i18n.T("toast.unreadable", d.Name)
-	case string(shrink.BlockEncrypted):
-		return i18n.T("toast.encrypted", d.Name)
-	case string(shrink.BlockFSErrors):
-		return i18n.T("toast.fserrors", d.Name)
-	case string(shrink.BlockFixed):
-		return i18n.T("toast.fixed", d.Name)
-	case string(shrink.BlockHeld):
-		return i18n.T(heldKey(d, "toast.held"), d.Name)
-	case string(shrink.BlockNoCompact):
-		return i18n.T("toast.nocompact")
 	case shrink.CodeNoDistro:
 		return i18n.T("check.fail.nodistro", d.Name)
 	case shrink.CodeBusy:

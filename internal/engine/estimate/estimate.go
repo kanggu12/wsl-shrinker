@@ -12,6 +12,7 @@
 package estimate
 
 import (
+	"bytes"
 	"io"
 
 	"github.com/kanggu12/wsl-shrinker/internal/machine/ext4"
@@ -53,6 +54,9 @@ type Result struct {
 	// and nothing counts as trimmable.
 	Fixed bool `json:"fixed"`
 }
+
+// zero is what a chunk of an empty block reads as.
+var zero [1 << 20]byte
 
 // zeroScanLimit is how many bytes OfUntrimmed reads, per disk, looking for
 // blocks of zeros. A block with data stops the read at its first non-zero
@@ -102,7 +106,9 @@ func OfUntrimmed(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 	keep := 0
 	budget := zeroScanLimit
 	rd := d.Contents()
-	buf := make([]byte, 64<<10)
+	// After a block's first page, the rest is read a MiB at a time: a disk
+	// of 1 MiB blocks reads each empty one in two reads, not seventeen.
+	buf := make([]byte, len(zero))
 	for i, b := range d.Blocks {
 		if !b.Present() {
 			continue
@@ -164,6 +170,8 @@ func inUse(d *vhdx.Disk, fs *ext4.FS, i int) bool {
 // mostly shows it in its first bytes; the rest goes in buf's size. It
 // reports false (kept) when the budget runs out or the read fails.
 func zeros(r *vhdx.VirtualReader, off, n int64, buf []byte, budget *int64) bool {
+	// buf is never longer than zero: what it is compared with.
+	buf = buf[:min(len(buf), len(zero))]
 	step := min(4<<10, int64(len(buf)))
 	for done := int64(0); done < n; step = int64(len(buf)) {
 		chunk := buf[:min(step, n-done)]
@@ -173,10 +181,9 @@ func zeros(r *vhdx.VirtualReader, off, n int64, buf []byte, budget *int64) bool 
 		*budget -= int64(len(chunk))
 		got, err := r.ReadAt(chunk, off+done)
 		// A short read is the virtual end: what is past it is not data.
-		for _, c := range chunk[:got] {
-			if c != 0 {
-				return false
-			}
+		// Compared with zeros as a whole, which runs at memory speed.
+		if !bytes.Equal(chunk[:got], zero[:got]) {
+			return false
 		}
 		// The virtual end: zeros so far, and nothing past it is data.
 		if err == io.EOF {

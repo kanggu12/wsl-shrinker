@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,6 +47,16 @@ type (
 		// unfinished is a run that has not ended, read with the disks.
 		unfinished      journal.Entry
 		unfinishedState journal.State
+		// hist is the past runs, read with them too.
+		hist []history.Entry
+		// histAt is when that read began.
+		histAt time.Time
+	}
+	// histMsg is the past runs, read again for the history page, and when
+	// that read began.
+	histMsg struct {
+		at   time.Time
+		list []history.Entry
 	}
 	// reopenMsg is how continuing in a new window went: nil once the new
 	// window said it started.
@@ -154,7 +165,9 @@ type model struct {
 
 	run  *runState
 	hist []history.Entry
-	spin int
+	// histAt is when the read of hist began: a later read wins.
+	histAt time.Time
+	spin   int
 
 	toast    string
 	toastCat ui.Category
@@ -211,9 +224,10 @@ func Run(ctx context.Context, b Backend, opt Options) error {
 	return ended(end, err)
 }
 
-// BugError is the screen ended by a bug in a run's goroutine: what it was
-// and where, for a report. Bubble Tea catches the screen's own; this is the
-// one goroutine the program starts itself.
+// BugError is the screen ended by a bug in a goroutine of its own: what it
+// was and where, for a report. Bubble Tea catches a bug in a command's
+// goroutine; these are the ones the screen starts itself: a run's, and the
+// reads that go with the disks'.
 type BugError struct {
 	Value any
 	Stack []byte
@@ -236,16 +250,56 @@ func ended(end tea.Model, err error) error {
 // Init loads the disks and WSL's version, and asks the terminal for its
 // background so the colors suit it.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.loadDisks(), m.loadInfo(), frameTick())
+	return tea.Batch(tea.RequestBackgroundColor, m.loadDisks(), m.loadInfo(), frameTick(true))
 }
 
 // loadDisks reads the disks in the background.
 func (m model) loadDisks() tea.Cmd {
 	b, ctx := m.b, m.ctx
 	return func() tea.Msg {
+		// Asked at once: from WSL each is a start of wsl-shrinker.exe, and
+		// none waits for another. The list takes longest.
+		var (
+			e      journal.Entry
+			st     journal.State
+			hist   []history.Entry
+			histAt time.Time
+			wg     sync.WaitGroup
+			// One slot per goroutine below: neither waits to say its bug.
+			bugs = make(chan BugError, 2)
+		)
+		// Bubble Tea catches a bug only in the command's own goroutine: one
+		// in these ends the screen the same way, said and with the
+		// terminal given back, as a run's does.
+		caught := func(f func()) func() {
+			return func() {
+				defer func() {
+					if r := recover(); r != nil {
+						bugs <- BugError{Value: r, Stack: debug.Stack()}
+					}
+				}()
+				f()
+			}
+		}
+		wg.Go(caught(func() { e, st = b.Pending() }))
+		wg.Go(caught(func() { histAt = time.Now(); hist = b.History() }))
 		l, err := b.Disks(ctx)
-		e, st := b.Pending()
-		return disksMsg{list: l, err: err, unfinished: e, unfinishedState: st}
+		wg.Wait()
+		select {
+		case bug := <-bugs:
+			return bugMsg(bug)
+		default:
+		}
+		return disksMsg{list: l, err: err, unfinished: e, unfinishedState: st, hist: hist, histAt: histAt}
+	}
+}
+
+// loadHistory reads the past runs again, for the history page.
+func (m model) loadHistory() tea.Cmd {
+	b := m.b
+	return func() tea.Msg {
+		at := time.Now()
+		return histMsg{at: at, list: b.History()}
 	}
 }
 
@@ -273,9 +327,34 @@ func (m *model) loadSurvey(distro string) tea.Cmd {
 	}
 }
 
-// frameTick drives the spinner while a run goes.
-func frameTick() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg { return frameMsg(t) })
+// frameTick drives the screen's clock, one chain of ticks for the whole
+// session: a frame every 120 ms while something moves (moving), and every
+// 500 ms otherwise, often enough for a passing message to go on time.
+func frameTick(moving bool) tea.Cmd {
+	return tea.Tick(frameDelay(moving), func(t time.Time) tea.Msg { return frameMsg(t) })
+}
+
+// frameDelay is the time to the next frame.
+func frameDelay(moving bool) time.Duration {
+	if moving {
+		return 120 * time.Millisecond
+	}
+	return 500 * time.Millisecond
+}
+
+// moving reports whether something on the screen moves with the clock: a
+// spinner while the disks, a look inside, a run's preparation, a move to a
+// new window or R or F are at work, and a run's times while it goes.
+func (m model) moving() bool {
+	if m.loading || m.preparing || m.reopening || m.settling || m.run != nil && !m.run.done {
+		return true
+	}
+	for _, s := range m.surveys {
+		if s.loading {
+			return true
+		}
+	}
+	return false
 }
 
 // Update handles one message.
@@ -288,6 +367,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.themeFixed {
 			m.th = ui.NewTheme(msg.IsDark())
 		}
+		return m, nil
+	case histMsg:
+		m.takeHistory(msg.at, msg.list)
 		return m, nil
 	case infoMsg:
 		// A WSL that did not answer leaves what it can do unknown: no
@@ -315,7 +397,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeMain
 			}
 		}
-		m.hist = m.b.History()
+		m.takeHistory(msg.histAt, msg.hist)
 		m.reselect()
 		if m.pending != nil && m.err == nil {
 			p := m.pending
@@ -426,11 +508,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// something loads, a run's times count up, passing messages expire.
 		m.now = time.Time(msg)
 		m.spin++
-		return m, frameTick()
+		return m, frameTick(m.moving())
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
 	return m, nil
+}
+
+// takeHistory keeps the past runs read from at on, unless a read begun
+// later came back first: h reads them again while the disks may still be
+// loading with an older read of their own.
+func (m *model) takeHistory(at time.Time, h []history.Entry) {
+	if at.Before(m.histAt) {
+		return
+	}
+	m.hist, m.histAt = h, at
 }
 
 // reselect keeps the selection on the same disk after a reload.
@@ -520,7 +612,9 @@ func (m model) startRun(queue []disks.Disk, clean map[string][]survey.Item) (tea
 	}
 	m.mode = modeRun
 	m.run = &runState{queue: queue, clean: clean, events: make(chan tea.Msg, 64)}
-	return m, tea.Batch(m.startDisk(), frameTick())
+	// The session's clock is going already: a second chain of ticks would
+	// draw every frame twice, and one more each run.
+	return m, m.startDisk()
 }
 
 // startDisk runs the current disk of the queue.
@@ -583,8 +677,8 @@ func (m model) finishDisk(res shrink.Result) (tea.Model, tea.Cmd) {
 	}
 	// A failure stops the queue: the next disk can wait for a look.
 	if res.Err != "" || r.at+1 >= len(r.queue) {
+		// The history comes with the disks, read again.
 		r.done = true
-		m.hist = m.b.History()
 		return m, m.loadDisks()
 	}
 	r.at++
@@ -628,28 +722,38 @@ func (m model) blocked(d disks.Disk) string {
 // blockWords is a reason a disk cannot be shrunk now in the screen's words;
 // "" only for no reason at all.
 func blockWords(d disks.Disk, b shrink.Block) string {
-	switch b {
-	case "":
+	if b == "" {
 		// Nothing stands in the way.
 		return ""
-	case shrink.BlockProtected:
-		return i18n.T("toast.protected", d.Name)
-	case shrink.BlockUnreadable:
-		return i18n.T("toast.unreadable", d.Name)
-	case shrink.BlockEncrypted:
-		return i18n.T("toast.encrypted", d.Name)
-	case shrink.BlockFSErrors:
-		return i18n.T("toast.fserrors", d.Name)
-	case shrink.BlockFixed:
-		return i18n.T("toast.fixed", d.Name)
-	case shrink.BlockHeld:
-		return i18n.T(heldKey(d, "toast.held"), d.Name)
-	case shrink.BlockNoCompact:
-		return i18n.T("toast.nocompact")
+	}
+	if s, ok := knownBlockWords(d, b); ok {
+		return s
 	}
 	// A reason the screen has no words for yet is said in the engine's: a
 	// disk that cannot be shrunk never reads as one that can.
 	return d.Name + ": " + b.Reason(d)
+}
+
+// knownBlockWords is a reason a disk cannot be shrunk now in the screen's
+// words, and false for a reason it has no words for.
+func knownBlockWords(d disks.Disk, b shrink.Block) (string, bool) {
+	switch b {
+	case shrink.BlockProtected:
+		return i18n.T("toast.protected", d.Name), true
+	case shrink.BlockUnreadable:
+		return i18n.T("toast.unreadable", d.Name), true
+	case shrink.BlockEncrypted:
+		return i18n.T("toast.encrypted", d.Name), true
+	case shrink.BlockFSErrors:
+		return i18n.T("toast.fserrors", d.Name), true
+	case shrink.BlockFixed:
+		return i18n.T("toast.fixed", d.Name), true
+	case shrink.BlockHeld:
+		return i18n.T(heldKey(d, "toast.held"), d.Name), true
+	case shrink.BlockNoCompact:
+		return i18n.T("toast.nocompact"), true
+	}
+	return "", false
 }
 
 // kindOrder is the order of the groups in the clean list: what is rebuilt
@@ -755,8 +859,10 @@ func (m model) chosenItems(distro string) []survey.Item {
 // looking inside each distribution again so only items found now are used.
 func (m model) prepareRun(p Options) tea.Cmd {
 	list, b, ctx := m.list, m.b, m.ctx
-	m.info, m.infoKnown = b.Info(ctx), true
 	return func() tea.Msg {
+		// WSL's answer, for the rule below: asked here, away from the
+		// screen's updates, as it may take a start of wsl-shrinker.exe.
+		m.info, m.infoKnown = b.Info(ctx), true
 		var q []disks.Disk
 		clean := map[string][]survey.Item{}
 		for _, name := range p.Run {

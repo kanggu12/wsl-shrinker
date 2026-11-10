@@ -224,7 +224,19 @@ func hasCompact(help string) bool { return strings.Contains(help, "--compact") }
 // --version that fails at once is the WSL built into Windows, which has
 // neither --version nor --compact.
 func info(ctx context.Context, run wslRunner) (Info, error) {
+	// Both are asked at once: each is a start of wsl.exe, and neither
+	// answer waits for the other.
+	type answer struct {
+		out string
+		err error
+	}
+	helped := make(chan answer, 1)
+	go func() {
+		out, err := run(ctx, "--help")
+		helped <- answer{out, err}
+	}()
 	v, err := run(ctx, "--version")
+	help := <-helped
 	if err != nil {
 		if errors.Is(err, ErrNoAnswer) || ctx.Err() != nil {
 			return Info{NoAnswer: errors.Is(err, ErrNoAnswer)}, err
@@ -233,9 +245,8 @@ func info(ctx context.Context, run wslRunner) (Info, error) {
 	}
 	// Some releases end --help with a failing exit code after printing it:
 	// what it printed counts, unless it never answered.
-	help, err := run(ctx, "--help")
-	if errors.Is(err, ErrNoAnswer) || ctx.Err() != nil {
-		return Info{Version: parseVersion(v), NoAnswer: errors.Is(err, ErrNoAnswer)}, err
+	if errors.Is(help.err, ErrNoAnswer) || ctx.Err() != nil {
+		return Info{Version: parseVersion(v), NoAnswer: errors.Is(help.err, ErrNoAnswer)}, help.err
 	}
-	return Info{Version: parseVersion(v), CanCompact: hasCompact(help)}, nil
+	return Info{Version: parseVersion(v), CanCompact: hasCompact(help.out)}, nil
 }

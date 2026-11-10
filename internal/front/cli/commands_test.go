@@ -171,7 +171,7 @@ func TestCutOffRunIsReportedThenRecovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	var o, e bytes.Buffer
-	if code := run([]string{"doctor"}, &o, &e); code != exitFail || !strings.Contains(o.String(), "FAIL  a run of data.vhdx was cut off at compact") || !strings.Contains(o.String(), "wsl-shrinker recover") {
+	if code := run([]string{"doctor"}, &o, &e); code != exitFail || !strings.Contains(o.String(), "FAIL  the run of data.vhdx was cut off at compact") || !strings.Contains(o.String(), "wsl-shrinker recover") {
 		t.Fatalf("doctor exit %d:\n%s", code, o.String())
 	}
 	o.Reset()

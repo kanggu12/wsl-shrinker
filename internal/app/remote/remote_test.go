@@ -14,6 +14,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 )
 
 // answers is a stand-in wsl-shrinker.exe: for each command line (joined by
@@ -221,8 +222,31 @@ func TestForgetTellsARunThatEndedMeanwhile(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := "backend forget --pid=0 --started=0001-01-01T00:00:00Z --disk="
-	a.err[line] = errors.New(app.ErrNothingToForget.Error())
+	// As the program's words come back through Exe.
+	a.err[line] = ErrorFrom("wsl-shrinker: " + app.ErrNothingToForget.Error() + "\n")
 	if err := b.Forget(context.Background(), journal.Entry{}); !errors.Is(err, app.ErrNothingToForget) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTheProgramsWordsComeBackAsTheErrorsTheyName(t *testing.T) {
+	// Its own words, its name taken off; a known error found by errors.Is,
+	// whatever else the words say around it.
+	for stderr, want := range map[string]error{
+		"wsl-shrinker: " + app.ErrNothingToForget.Error() + "\n":                                                           app.ErrNothingToForget,
+		"wsl-shrinker: " + app.ErrRunChanged.Error() + " (wsl-shrinker recover --forget asks about the run cut off now)\n": app.ErrRunChanged,
+		"wsl-shrinker: wsl.exe --list --verbose: " + wsl.ErrNoAnswer.Error() + " in 1m0s\n":                                wsl.ErrNoAnswer,
+	} {
+		err := ErrorFrom(stderr)
+		if !errors.Is(err, want) || strings.HasPrefix(err.Error(), "wsl-shrinker:") || err.Error() != strings.TrimSpace(strings.TrimPrefix(stderr, "wsl-shrinker:")) {
+			t.Errorf("%q: %v", stderr, err)
+		}
+	}
+	// Other words are an error of their own; none, no error.
+	if err := ErrorFrom("wsl-shrinker: no disk named \"x\"\n"); err == nil || err.Error() != `no disk named "x"` || errors.Is(err, app.ErrRunChanged) {
+		t.Errorf("plain: %v", err)
+	}
+	if err := ErrorFrom("  \n"); err != nil {
+		t.Errorf("nothing said: %v", err)
 	}
 }

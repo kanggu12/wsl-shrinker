@@ -31,11 +31,21 @@ func backendCmd(p *apps) *cobra.Command {
 		return fmt.Errorf("%w: backend takes hello, info, settings, pending, recover, forget, crashes, shrink or reopen", errUsage)
 	}}
 	// hello names the build, so the launcher talks only to its own.
+	// hello says which build this is and, for the same build to use at
+	// once, the settings: one start of the program fewer before the screen
+	// in WSL draws. Settings that do not load leave them out, and the
+	// settings command says why.
 	cmd.AddCommand(&cobra.Command{Use: "hello", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		var s *backendSettings
+		if a, err := p.get(); err == nil {
+			v := settingsOf(a)
+			s = &v
+		}
 		return printJSON(cmd.OutOrStdout(), struct {
-			Schema  int    `json:"schema"`
-			Version string `json:"version"`
-		}{schema, version.String()})
+			Schema   int              `json:"schema"`
+			Version  string           `json:"version"`
+			Settings *backendSettings `json:"settings,omitempty"`
+		}{schema, version.String(), s})
 	}})
 	// info is WSL's version, and whether it can compact.
 	cmd.AddCommand(&cobra.Command{Use: "info", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -60,34 +70,15 @@ func backendCmd(p *apps) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		c := a.Config
-		protect := c.Protect
-		if protect == nil {
-			protect = []string{}
-		}
 		return printJSON(cmd.OutOrStdout(), struct {
-			Schema       int      `json:"schema"`
-			Language     string   `json:"language"`
-			Theme        string   `json:"theme"`
-			MinGainBytes int64    `json:"min_gain_bytes"`
-			Protect      []string `json:"protect"`
-			Mode         string   `json:"mode"`
-			First        bool     `json:"first"`
-			// What setup, drawn on the WSL side, starts from: the language
-			// as set ("auto" too), what auto picks here, the size in GB and
-			// the file the choices go to.
-			LanguageSetting string  `json:"language_setting"`
-			AutoLanguage    string  `json:"auto_language"`
-			MinGainGB       float64 `json:"min_gain_gb"`
-			Path            string  `json:"path"`
-		}{schema, string(i18n.Choose(c.Language, winapi.Korean())), c.Theme, int64(c.MinGainGB * (1 << 30)), protect,
-			c.Mode, a.ConfigPath != "" && !exists(a.ConfigPath),
-			c.Language, string(i18n.Choose("auto", winapi.Korean())), c.MinGainGB, a.ConfigPath})
+			Schema int `json:"schema"`
+			backendSettings
+		}{schema, settingsOf(a)})
 	}})
 	// crashes takes the crashes this program kept and did not say yet, for
 	// the launcher's screen to say: this side's stderr reaches no one.
 	cmd.AddCommand(&cobra.Command{Use: "crashes", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		shown := ClaimCrashes()
+		shown := claimKept()
 		// None is an empty list, never null.
 		if shown == nil {
 			shown = []string{}
@@ -264,4 +255,39 @@ func backendShrinkCmd(p *apps) *cobra.Command {
 	cmd.Flags().StringVar(&name, "disk", "", "the disk to shrink, by name")
 	cmd.Flags().StringArrayVar(&clean, "clean", nil, "NAME=ID: an item to remove inside NAME first; once per item")
 	return cmd
+}
+
+// backendSettings are the settings the screen in WSL works with, as hello
+// and settings answer them.
+type backendSettings struct {
+	Language     string   `json:"language"`
+	Theme        string   `json:"theme"`
+	MinGainBytes int64    `json:"min_gain_bytes"`
+	Protect      []string `json:"protect"`
+	Mode         string   `json:"mode"`
+	First        bool     `json:"first"`
+	// What setup, drawn on the WSL side, starts from: the language as set
+	// ("auto" too), what auto picks here, the size in GB and the file the
+	// choices go to.
+	LanguageSetting string  `json:"language_setting"`
+	AutoLanguage    string  `json:"auto_language"`
+	MinGainGB       float64 `json:"min_gain_gb"`
+	Path            string  `json:"path"`
+}
+
+// settingsOf is a's settings as the screen in WSL works with them.
+func settingsOf(a *app.App) backendSettings {
+	c := a.Config
+	// None protected is an empty list, never null.
+	protect := c.Protect
+	if protect == nil {
+		protect = []string{}
+	}
+	return backendSettings{
+		Language: string(i18n.Choose(c.Language, winapi.Korean())), Theme: c.Theme,
+		MinGainBytes: int64(c.MinGainGB * (1 << 30)), Protect: protect, Mode: c.Mode,
+		First:           a.ConfigPath != "" && !exists(a.ConfigPath),
+		LanguageSetting: c.Language, AutoLanguage: string(i18n.Choose("auto", winapi.Korean())),
+		MinGainGB: c.MinGainGB, Path: a.ConfigPath,
+	}
 }

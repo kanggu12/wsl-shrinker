@@ -149,9 +149,14 @@ func reopenLine(args []string, inPlace bool) (string, error) {
 	return b.String(), nil
 }
 
-// runCmdLine runs a full command line with no window of its own.
+// runCmdLine runs a full command line with no window of its own, in
+// Windows' own cmd.exe: not one a folder on the PATH may hold.
 func runCmdLine(line string) error {
-	cmd := exec.Command("cmd.exe")
+	sys, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(filepath.Join(sys, "cmd.exe"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line, HideWindow: true}
 	return cmd.Run()
 }
@@ -164,10 +169,28 @@ func Korean() bool {
 }
 
 // LocalAppData is the per-user folder for this tool's history.
-func LocalAppData() string { return os.Getenv("LOCALAPPDATA") }
+func LocalAppData() string { return knownFolder("LOCALAPPDATA", windows.FOLDERID_LocalAppData) }
 
 // AppData is the per-user folder for its settings.
-func AppData() string { return os.Getenv("APPDATA") }
+func AppData() string { return knownFolder("APPDATA", windows.FOLDERID_RoamingAppData) }
+
+// knownFolder is the folder the environment variable names or, when it is
+// empty, the one Windows keeps for it: an empty variable would put the
+// program's files under whatever folder it was started in. A test gets ""
+// instead, so it never reaches the person's own folders.
+func knownFolder(env string, id *windows.KNOWNFOLDERID) string {
+	if v := os.Getenv(env); v != "" {
+		return v
+	}
+	if testing.Testing() {
+		return ""
+	}
+	p, err := windows.KnownFolderPath(id, 0)
+	if err != nil {
+		return ""
+	}
+	return p
+}
 
 var (
 	virtdisk            = windows.NewLazySystemDLL("virtdisk.dll")
@@ -248,6 +271,13 @@ func ProcessStart(pid int) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(0, created.Nanoseconds()), true
+}
+
+// RemoteDrive reports whether the drive at root ("Z:\") is one Windows
+// maps to a network share.
+func RemoteDrive(root string) bool {
+	p, err := windows.UTF16PtrFromString(root)
+	return err == nil && windows.GetDriveType(p) == windows.DRIVE_REMOTE
 }
 
 // stillActive is the exit code of a process that has not ended (STILL_ACTIVE).

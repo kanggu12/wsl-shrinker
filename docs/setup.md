@@ -39,7 +39,7 @@ Environment variables set before it runs change what it does:
 
 | Variable | |
 |:---|:---|
-| `WSL_SHRINKER_VERSION` | the release to install, like `v0.6.1` (default: the latest) |
+| `WSL_SHRINKER_VERSION` | the release to install, like `v0.6.2` (default: the latest) |
 | `WSL_SHRINKER_BIN_DIR` | where the program goes (default: `%LOCALAPPDATA%\Programs\wsl-shrinker`) |
 | `WSL_SHRINKER_ZIP` | a downloaded zip to install as it is ([without internet access](#without-internet-access)) |
 | `WSL_SHRINKER_BASE_URL` | where releases download from, for a mirror |
@@ -78,13 +78,13 @@ Put both files from `dist/` in one folder on your PATH. A build from a commit sa
 The release's `checksums.txt` lists every zip's SHA-256:
 
 ```powershell
-(Get-FileHash .\wsl-shrinker_0.6.1_windows_amd64.zip -Algorithm SHA256).Hash
+(Get-FileHash .\wsl-shrinker_0.6.2_windows_amd64.zip -Algorithm SHA256).Hash
 ```
 
 GitHub signs the zips' build provenance. With the [GitHub CLI](https://cli.github.com),
 
 ```sh
-gh attestation verify wsl-shrinker_0.6.1_windows_amd64.zip -R kanggu12/wsl-shrinker
+gh attestation verify wsl-shrinker_0.6.2_windows_amd64.zip -R kanggu12/wsl-shrinker
 ```
 
 shows that this repository's release workflow built the zip from the tagged commit.
@@ -95,7 +95,7 @@ On a machine with access, download the zip for the PC's processor and `checksums
 `install.ps1`, check the zip, then install from it:
 
 ```powershell
-$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.6.1_windows_amd64.zip'
+$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.6.2_windows_amd64.zip'
 & ([scriptblock]::Create((Get-Content D:\install.ps1 -Raw)))
 Remove-Item Env:WSL_SHRINKER_ZIP
 ```

@@ -121,6 +121,25 @@ func (s Store) Begin(e Entry) error {
 	if err != nil {
 		return err
 	}
+	// Another run's journal found there may be gone before it is read: that
+	// run just ended, and the start is tried again, a few times.
+	for range 3 {
+		if err := s.create(b); !errors.Is(err, errEnded) {
+			return err
+		}
+	}
+	return fmt.Errorf("%w: other runs started and ended while this one tried to; try again", ErrBusy)
+}
+
+// errEnded is another run's journal found and then gone: that run ended.
+var errEnded = errors.New("the other run ended")
+
+// raced is called between finding another run's journal and reading it;
+// a test removes the journal there, as that run's end would.
+var raced = func() {}
+
+// create writes b as the journal where none is; busy() when one is.
+func (s Store) create(b []byte) error {
 	// The entry is written whole first, then linked under the real name:
 	// created only where none is, so of two runs starting at once one gets
 	// it, and nobody reads it half written.
@@ -133,12 +152,14 @@ func (s Store) Begin(e Entry) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, fs.ErrExist):
+		raced()
 		return s.busy()
 	}
 	// A drive without links: created, then written; Read takes a journal
 	// that young for a run starting.
 	f, err := os.OpenFile(s.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if errors.Is(err, fs.ErrExist) {
+		raced()
 		return s.busy()
 	}
 	if err != nil {
@@ -198,19 +219,35 @@ func (s Store) writeTemp(b []byte) (string, error) {
 	return tmp, nil
 }
 
-// busy says why the journal is taken.
+// Words says, in the command line's English, a run that has not ended and
+// what to do about it; "" for none. Every front that prints English says
+// it in these words.
+func Words(e Entry, st State) (what, fix string) {
+	switch {
+	case st == Going:
+		return e.Name() + " is being shrunk by another wsl-shrinker", "let it finish"
+	case st == CutOff && (e.Disk == "" || e.Step == ""):
+		return "a run was cut off", "wsl-shrinker recover finishes it"
+	case st == CutOff:
+		return "the run of " + e.Disk + " was cut off at " + e.Step, "wsl-shrinker recover finishes it"
+	}
+	return "", ""
+}
+
+// busy says why the journal is taken; errEnded when it no longer is.
 func (s Store) busy() error {
 	old, st, err := s.Read()
 	if err != nil {
 		return err
 	}
+	if st == None {
+		return errEnded
+	}
+	what, fix := Words(old, st)
 	if st == Going {
-		return fmt.Errorf("%w: %s is being shrunk by another wsl-shrinker", ErrBusy, old.Name())
+		return fmt.Errorf("%w: %s", ErrBusy, what)
 	}
-	if old.Disk == "" {
-		return fmt.Errorf("%w: a run was cut off; wsl-shrinker recover finishes it", ErrBusy)
-	}
-	return fmt.Errorf("%w: the run of %s was cut off at %s; wsl-shrinker recover finishes it", ErrBusy, old.Disk, old.Step)
+	return fmt.Errorf("%w: %s; %s", ErrBusy, what, fix)
 }
 
 // Update writes the entry again: the step it reached, the containers it

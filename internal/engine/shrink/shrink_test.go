@@ -502,3 +502,17 @@ func TestADistributionThatStopsDuringTheCleanIsLeftStopped(t *testing.T) {
 		t.Fatalf("calls %s", calls)
 	}
 }
+
+func TestTheStopScriptsWordsOnHooksAreCounted(t *testing.T) {
+	out := "stopped|0123456789ab\nhook|ok|10-flush\nhook|failed|20-backup\nhook|ok\nnote|hook|x|y\n\nhook|failed|30-sync\n"
+	// Two lines name a failure; a line short of its name is not a hook's.
+	if hooks, failed := readHooks(out); hooks != 3 || failed != 2 {
+		t.Fatalf("%d hooks, %d failed", hooks, failed)
+	}
+	if hooks, failed := readHooks(""); hooks != 0 || failed != 0 {
+		t.Fatalf("nothing said: %d, %d", hooks, failed)
+	}
+	if n := chosenBytes([]survey.Item{{Bytes: 3}, {Bytes: 4}}); n != 7 {
+		t.Fatalf("chosen %d", n)
+	}
+}

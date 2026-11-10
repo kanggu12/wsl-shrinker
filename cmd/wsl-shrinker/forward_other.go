@@ -23,6 +23,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/cli"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
+	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
@@ -338,7 +339,7 @@ func setupArgs(choice tui.SetupChoice, st remote.Settings) []string {
 // it. With a choice given as a flag setup opens no screen: the .exe takes
 // that, as it takes any mistake, in its own words.
 func setupOnly(args []string) (lang string, ok bool) {
-	langs := []string{"auto", "en", "ko"}
+	langs := config.Languages
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "setup" && !ok:

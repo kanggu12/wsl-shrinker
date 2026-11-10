@@ -265,3 +265,17 @@ func TestDeleteLineWaitsWithNoFolderToRemoveToo(t *testing.T) {
 		t.Fatalf("the folder went: %v", err)
 	}
 }
+
+func TestAnEmptyFolderVariableReachesNoRealFolderInATest(t *testing.T) {
+	// Outside a test, Windows' own folder stands in; inside one, nothing
+	// does, so a test never reads or writes the person's files.
+	t.Setenv("APPDATA", "")
+	t.Setenv("LOCALAPPDATA", "")
+	if a, l := AppData(), LocalAppData(); a != "" || l != "" {
+		t.Fatalf("%q %q", a, l)
+	}
+	t.Setenv("APPDATA", `C:\x`)
+	if a := AppData(); a != `C:\x` {
+		t.Fatalf("%q", a)
+	}
+}

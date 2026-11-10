@@ -18,6 +18,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 )
 
 // SetupStart is what the setup wizard starts from: the settings now, the
@@ -50,9 +51,9 @@ type SetupChoice struct {
 
 // The values each choice offers, in order.
 var (
-	setupLanguages = []string{"auto", "en", "ko"}
-	setupThemes    = []string{"auto", "dark", "light"}
-	setupModes     = []string{"tui", "cli"}
+	setupLanguages = config.Languages
+	setupThemes    = config.Themes
+	setupModes     = config.Modes
 	setupGains     = []float64{1, 2, 5, 10, 20, 50}
 )
 
@@ -673,18 +674,7 @@ func (m setupModel) category(d disks.Disk) ui.Category {
 	if bs := shrink.Preflight(d, true, m.protected(d.Name)); len(bs) > 0 {
 		block = bs[0]
 	}
-	switch block {
-	case "":
-		if d.Estimate.Reclaim >= int64(m.choice.MinGainGB*(1<<30)) {
-			return ui.CatGain
-		}
-		return ui.CatSmall
-	case shrink.BlockProtected:
-		return ui.CatSafe
-	case shrink.BlockHeld:
-		return ui.CatLive
-	}
-	return ui.CatBad
+	return ui.CategoryOf(d, block, int64(m.choice.MinGainGB*(1<<30)))
 }
 
 // gainPreview is the person's disks as the chosen size colors them, under

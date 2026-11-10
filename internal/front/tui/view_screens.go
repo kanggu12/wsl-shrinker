@@ -211,6 +211,8 @@ func (m model) failWords(e shrink.Event, d disks.Disk) string {
 		return i18n.T("toast.encrypted", d.Name)
 	case string(shrink.BlockFSErrors):
 		return i18n.T("toast.fserrors", d.Name)
+	case string(shrink.BlockFixed):
+		return i18n.T("toast.fixed", d.Name)
 	case string(shrink.BlockHeld):
 		return i18n.T(heldKey(d, "toast.held"), d.Name)
 	case string(shrink.BlockNoCompact):
@@ -643,7 +645,7 @@ func (m model) helpLines() []string {
 	body = append(body, "", " "+bold.Render(i18n.T("help.title")), "")
 	keys := [][2]string{
 		{"↑↓", "help.select"}, {"space", "help.mark"}, {"s ⏎", "help.shrink"}, {"c", "help.clean"},
-		{"r", "help.reload"}, {"R", "help.recover"}, {"h", "help.history"}, {"q", "help.quit"},
+		{"r", "help.reload"}, {"R", "help.recover"}, {"F", "help.forget"}, {"h", "help.history"}, {"q", "help.quit"},
 	}
 	// The keys' column is as wide as its widest key, as the console shows
 	// it: ⏎ is a word where its font has no ⏎.

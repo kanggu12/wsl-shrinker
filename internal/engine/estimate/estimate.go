@@ -48,6 +48,10 @@ type Result struct {
 	// Trimmed says which compaction the numbers are for: true for WSL's,
 	// which trims first.
 	Trimmed bool `json:"trimmed"`
+	// Fixed is set for a fixed-size disk: its file keeps every block, and
+	// Windows compacts only disks that grow. After is the file as it is,
+	// and nothing counts as trimmable.
+	Fixed bool `json:"fixed"`
 }
 
 // zeroScanLimit is how many bytes OfUntrimmed reads, per disk, looking for
@@ -63,6 +67,10 @@ var zeroScanLimit int64 = 4 << 30
 func Of(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 	r := start(d, fs, onHost)
 	r.Trimmed = true
+	// A fixed-size disk keeps every block: there is none to count.
+	if d.Fixed {
+		return finish(r, d, 0)
+	}
 	keep := 0
 	for i, b := range d.Blocks {
 		if !b.Present() {
@@ -87,6 +95,10 @@ func Of(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 // estimate errs towards less. Without a filesystem every block is kept.
 func OfUntrimmed(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 	r := start(d, fs, onHost)
+	// A fixed-size disk keeps every block: none is read to find zeros.
+	if d.Fixed {
+		return finish(r, d, 0)
+	}
 	keep := 0
 	budget := zeroScanLimit
 	rd := d.Contents()
@@ -110,7 +122,7 @@ func OfUntrimmed(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 
 // start fills in what both estimates share.
 func start(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
-	r := Result{FileSize: onHost, InUse: d.LogActive}
+	r := Result{FileSize: onHost, InUse: d.LogActive, Fixed: d.Fixed}
 	for _, b := range d.Blocks {
 		if b.Present() {
 			r.Stored += int64(d.BlockSize)
@@ -127,6 +139,12 @@ func start(d *vhdx.Disk, fs *ext4.FS, onHost int64) Result {
 
 // finish sets the size after a compaction that keeps keep blocks.
 func finish(r Result, d *vhdx.Disk, keep int) Result {
+	// A fixed-size disk keeps every block, whatever is in them: Windows'
+	// compaction of one reports success and leaves the file as it is.
+	if d.Fixed {
+		r.After, r.Reclaim = r.FileSize, 0
+		return r
+	}
 	r.After = d.CompactedSize(keep)
 	// A file already smaller than the estimate (a sparse file on the host)
 	// has nothing to give back.

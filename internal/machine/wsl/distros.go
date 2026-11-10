@@ -2,6 +2,7 @@ package wsl
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 )
@@ -70,10 +71,12 @@ func buildDistros(ctx context.Context, entries []regEntry, def string, run wslRu
 	// Without running distributions wsl.exe exits non-zero: runningNames
 	// tells that apart from WSL not answering, which is an error.
 	runOut, runErr := run(ctx, "--list", "--running", "--quiet")
-	// The full list is asked for only to explain a failed running list.
+	// The full list is asked for only to explain a failed running list,
+	// and not after WSL did not answer at all: a second wait for the same
+	// silence would only double it.
 	var allOut string
 	var allErr error
-	if runErr != nil {
+	if runErr != nil && !errors.Is(runErr, ErrNoAnswer) && ctx.Err() == nil {
 		allOut, allErr = run(ctx, "--list", "--quiet")
 	}
 	running, err := runningNames(runOut, runErr, allOut, allErr)

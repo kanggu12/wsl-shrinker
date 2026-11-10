@@ -335,3 +335,30 @@ func TestDamagedLogFieldsAreRefused(t *testing.T) {
 		t.Fatal("a log claiming a 1 PiB file was accepted")
 	}
 }
+
+func TestAFixedSizeDiskIsToldFromOneThatGrows(t *testing.T) {
+	// Bit 0 of the file parameters' flags (LeaveBlockAllocated) is what makes
+	// a disk fixed-size: the same blocks in the same places read as a disk
+	// that grows without it.
+	blocks := map[int64][]byte{0: {1}, 1: {}}
+	fixed, err := open(t, vhdxtest.Spec{VirtualSize: 2 << 20, Blocks: blocks, Fixed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grows, err := open(t, vhdxtest.Spec{VirtualSize: 2 << 20, Blocks: blocks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fixed.Fixed || grows.Fixed {
+		t.Fatalf("fixed-size reads %v, one that grows %v", fixed.Fixed, grows.Fixed)
+	}
+	// The bit refuses nothing and is not taken for the one beside it: the
+	// disk has no parent, and its blocks read as any other's.
+	if fixed.HasParent || fixed.PresentBlocks() != 2 {
+		t.Fatalf("parent %v, %d blocks stored", fixed.HasParent, fixed.PresentBlocks())
+	}
+	got := make([]byte, 1)
+	if _, err := fixed.Contents().ReadAt(got, 0); err != nil || got[0] != 1 {
+		t.Fatalf("read %v, %v", got, err)
+	}
+}

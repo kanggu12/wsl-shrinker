@@ -93,26 +93,76 @@ var caches = []cache{
 	// token and accelerate's settings, which no download brings back.
 	{"huggingface", ".cache/huggingface/hub", KindDownload},
 	{"playwright", ".cache/ms-playwright", KindDownload},
+	// Gradle's downloaded dependencies and build outputs, which the next
+	// build fetches or makes again.
+	{"gradle", ".gradle/caches", KindCache},
 	{"trash", ".local/share/Trash", KindLog},
 }
 
+// systemFolder is one system-wide folder the survey measures, and the one
+// command that empties it. when is a shell test that must hold besides the
+// folder being there: the tool that empties it is the one installed.
+type systemFolder struct {
+	what, path, when, command string
+	kind                      Kind
+}
+
+// systemFolders are the system-wide folders the survey looks at: each
+// package manager's download cache, which the next install downloads again
+// as it needs, and the journal. Each is emptied by its own tool, which
+// takes the package manager's lock, never by removing files under it.
+var systemFolders = []systemFolder{
+	// Debian and Ubuntu: apt-get clean empties the downloaded package
+	// archive only.
+	{"apt", "/var/cache/apt/archives", "command -v apt-get", "apt-get clean", KindCache},
+	// Fedora and its kin: dnf 5 (Fedora 41 on) keeps its cache in another
+	// folder than dnf 4, and `dnf clean all` empties the one of the dnf
+	// installed, which the link /usr/bin/dnf points to says.
+	{"dnf", "/var/cache/libdnf5", `[ "$(readlink -f "$(command -v dnf)")" = /usr/bin/dnf5 ]`, "dnf clean all", KindCache},
+	{"dnf", "/var/cache/dnf", `command -v dnf && [ "$(readlink -f "$(command -v dnf)")" != /usr/bin/dnf5 ]`, "dnf clean all", KindCache},
+	// Arch: pacman asks before it empties its whole cache, with "no" as
+	// the answer --noconfirm would give; yes answers it.
+	{"pacman", "/var/cache/pacman/pkg", "command -v pacman", "yes | pacman -Scc", KindCache},
+	// openSUSE: zypper's packages and repository data.
+	{"zypper", "/var/cache/zypp", "command -v zypper", "zypper --non-interactive clean --all", KindCache},
+	// The system journal: the last 100 MB stay, so recent boots stay
+	// readable (system takes them off what is offered).
+	{"journal", "/var/log/journal", "command -v journalctl", "journalctl --vacuum-size=100M", KindLog},
+}
+
+// RootOptions is the command that prints the options of the root mount
+// ("rw,relatime,discard"), or an empty line when /proc/mounts names none
+// for "/". The shell reads the file itself, so it needs nothing a small
+// distribution may lack; the last line for "/" counts, the mount on top.
+const RootOptions = `o=; while read -r x m x opt x; do [ "$m" = / ] && o=$opt; done < /proc/mounts; echo "$o"`
+
 // script prints one line per finding. It reads only; du's sizes are in KiB
-// because BusyBox's du (Alpine) has no byte option.
+// because BusyBox's du (Alpine) has no byte option. Besides docker it
+// needs sh and the core utilities only (df, du, cut, stat, readlink): a
+// distribution made from a small container image may have no awk. Such a
+// one may have no find either, and then no cache under a home directory is
+// listed: find is what empties them.
 func script() string {
 	var b strings.Builder
-	// The root filesystem's numbers and mount options.
-	b.WriteString(`df -Pk / 2>/dev/null | awk 'NR==2{print "fs|"$2"|"$3"|"$4}'` + "\n")
-	b.WriteString(`awk '$2=="/"{print "opts|"$4}' /proc/mounts | tail -1` + "\n")
-	// The package cache and the journal.
-	b.WriteString(`[ -d /var/cache/apt/archives ] && echo "sys|apt|/var/cache/apt/archives|$(du -sk /var/cache/apt/archives 2>/dev/null | cut -f1)"` + "\n")
-	b.WriteString(`[ -d /var/log/journal ] && echo "sys|journal|/var/log/journal|$(du -sk /var/log/journal 2>/dev/null | cut -f1)"` + "\n")
+	// The root filesystem's numbers: the second line df prints, read by the
+	// shell itself.
+	b.WriteString(`df -Pk / 2>/dev/null | { read -r x; read -r x t u a x && echo "fs|$t|$u|$a"; }` + "\n")
+	// Its mount options: the last line of /proc/mounts for "/".
+	b.WriteString(`o=$(` + RootOptions + `); [ -n "$o" ] && echo "opts|$o"` + "\n")
+	// The package manager's cache and the journal, each where its tool is.
+	for _, f := range systemFolders {
+		fmt.Fprintf(&b, "[ -d %s ] && { %s; } >/dev/null 2>&1 && echo \"sys|%s|%s|$(du -sk %s 2>/dev/null | cut -f1)\"\n", f.path, f.when, f.what, f.path, f.path)
+	}
 	// Every home directory's caches. A cache counts only where it really is:
 	// no link anywhere on its path (readlink -f gives the path back as it is)
 	// and on the root filesystem, the one the disk file holds. A cache moved
 	// to another drive and linked takes no space in the disk anyway, and
 	// following a link would show, and later remove, somewhere else.
-	b.WriteString("root_dev=$(stat -c %d /)\n")
-	b.WriteString("for h in /root /home/*; do [ -d \"$h\" ] || continue\n")
+	// Without an answer from stat no cache counts as on the root filesystem.
+	// They are listed where find is, as each folder above is where its own
+	// tool is: a cache that cannot be emptied here is not offered.
+	b.WriteString("root_dev=$(stat -c %d / 2>/dev/null); [ -n \"$root_dev\" ] || root_dev=unknown\n")
+	b.WriteString("command -v find >/dev/null 2>&1 && for h in /root /home/*; do [ -d \"$h\" ] || continue\n")
 	for _, c := range caches {
 		fmt.Fprintf(&b, "  p=\"$h/%s\"; [ -d \"$p\" ] && [ \"$(readlink -f \"$p\")\" = \"$p\" ] && [ \"$(stat -c %%d \"$p\")\" = \"$root_dev\" ] && echo \"home|%s|$p|$(du -skx \"$p\" 2>/dev/null | cut -f1)\"\n", c.rel, c.what)
 	}
@@ -122,16 +172,23 @@ func script() string {
 	// Docker Desktop's WSL integration puts its own docker command here: its
 	// images live on Docker Desktop's disk, not this one, so they are not
 	// offered (and nothing here stops its containers).
-	b.WriteString(`if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
-  echo "docker|desktop"
-elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  echo "docker|on"
-  echo "containers|$(docker ps -q | wc -l)"
-  docker system df --format '{{.Type}}|{{.Reclaimable}}' 2>/dev/null | sed 's/^/df|/'
-  # Per image: the space only it holds (shared layers stay with the other
-  # images) and how many containers use it.
-  docker image ls --filter dangling=true --quiet --no-trunc 2>/dev/null | sed 's/^/dangling|/'
-  docker system df -v --format '{{range .Images}}{{.ID}}|{{.Repository}}:{{.Tag}}|{{.UniqueSize}}|{{.CreatedSince}}|{{.Containers}}{{println}}{{end}}' 2>/dev/null | sed -n 's/^\(.\)/img|\1/p'
+	// The shell reads Docker's lines itself, as above: with grep, a
+	// distribution without one would take Docker Desktop's images for its
+	// own. printf, since echo reads a backslash its own way in some shells.
+	b.WriteString(`if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  case $(docker info --format '{{.OperatingSystem}}' 2>/dev/null) in
+  (*'Docker Desktop'*)
+    echo "docker|desktop" ;;
+  (*)
+    echo "docker|on"
+    n=0; for c in $(docker ps -q); do n=$((n+1)); done; echo "containers|$n"
+    docker system df --format '{{.Type}}|{{.Reclaimable}}' 2>/dev/null | while IFS= read -r l || [ -n "$l" ]; do printf 'df|%s\n' "$l"; done
+    # Per image: the space only it holds (shared layers stay with the other
+    # images) and how many containers use it.
+    docker image ls --filter dangling=true --quiet --no-trunc 2>/dev/null | while IFS= read -r l || [ -n "$l" ]; do printf 'dangling|%s\n' "$l"; done
+    docker system df -v --format '{{range .Images}}{{.ID}}|{{.Repository}}:{{.Tag}}|{{.UniqueSize}}|{{.CreatedSince}}|{{.Containers}}{{println}}{{end}}' 2>/dev/null | while IFS= read -r l || [ -n "$l" ]; do [ -z "$l" ] || printf 'img|%s\n' "$l"; done
+    ;;
+  esac
 fi
 `)
 	return b.String()
@@ -227,20 +284,21 @@ func (r *Result) add(it Item) {
 	}
 }
 
-// system builds the item for a system-wide finding.
+// system builds the item for a system-wide finding: a folder of the known
+// list, at its own path, or nothing.
 func system(what, path string, n int64) Item {
-	it := Item{ID: what, What: what, Label: path, Bytes: n}
-	switch what {
-	case "apt":
-		// apt-get clean empties the downloaded package archive only.
-		it.Kind, it.Command = KindCache, "apt-get clean"
-	case "journal":
-		// Keep the last 100 MB of the journal: recent boots stay readable.
-		// What goes is the rest.
-		it.Kind, it.Command = KindLog, "journalctl --vacuum-size=100M"
-		it.Bytes = max(0, n-100<<20)
+	for _, f := range systemFolders {
+		if f.what != what || f.path != path {
+			continue
+		}
+		it := Item{ID: what, What: what, Label: path, Bytes: n, Kind: f.kind, Command: f.command}
+		if what == "journal" {
+			// What goes is what the last 100 MB that stay leave.
+			it.Bytes = max(0, n-100<<20)
+		}
+		return it
 	}
-	return it
+	return Item{}
 }
 
 // home builds the item for one cache in one home directory. The path comes
@@ -272,10 +330,15 @@ func image(f []string) Item {
 	// every tag of that id is removed, which removes the image.
 	// An image known only by its digest has no tag to remove: "name:<none>"
 	// names nothing, so its id is removed instead.
+	// The shell picks the names out itself: a small distribution may have
+	// neither awk nor xargs. Names and ids hold no space and nothing the
+	// shell expands, so the list goes to docker as it is. Every pattern has
+	// both its parentheses: the command runs inside a subshell's (Clean).
 	if !inuse && validImageID(id) {
 		it.Command = "docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | " +
-			"awk '$2 ~ /^sha256:" + id + "/ { if ($1 ~ /:<none>$/) none = $2; else { print $1; named = 1 } } END { if (!named && none != \"\") print none }' | " +
-			"xargs -r docker image rm"
+			"{ tags=; none=; while read -r name full; do case $full in (sha256:" + id + "*) " +
+			"case $name in (*:'<none>') none=$full ;; (*) tags=\"$tags $name\" ;; esac ;; esac; done; " +
+			"[ -n \"$tags\" ] || tags=$none; [ -z \"$tags\" ] || docker image rm $tags; }"
 	}
 	return it
 }
@@ -290,10 +353,19 @@ func removeContents(path string) string {
 	q := quote(path)
 	// It goes into the folder first and checks where it is from inside, so
 	// a link swapped in on the way after the check cannot move the removal.
-	return "p=" + q + "; if cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$(stat -c %d /)\" ]; then " +
-		"if awk -v p=\"$p/\" 'index($5, p) == 1 { found = 1 } END { exit !found }' /proc/self/mountinfo; " +
-		"then echo \"skipped $p: something is mounted inside\"; false; " +
-		"else find . -xdev -mindepth 1 -delete; fi; " +
+	// Every check is closed when it cannot be made: a stat that answers
+	// nothing is not "the same filesystem", and mounts that cannot be read
+	// are not "nothing mounted inside". The shell reads the mounts itself
+	// (the fifth field is where each is mounted), with no awk to be missing;
+	// the pattern has both its parentheses, which every sh reads inside $().
+	return "p=" + q + "; d=$(stat -c %d /); " +
+		"if [ -z \"$d\" ]; then echo \"skipped $p: stat gave no answer\"; false; " +
+		"elif cd -P -- \"$p\" 2>/dev/null && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %d .)\" = \"$d\" ]; then " +
+		"m=$(while read -r x x x x at x; do case $at in (\"$p\"/*) echo inside; break ;; esac; done < /proc/self/mountinfo && echo read); " +
+		"case $m in " +
+		"(read) find . -xdev -mindepth 1 -delete ;; " +
+		"(inside*) echo \"skipped $p: something is mounted inside\"; false ;; " +
+		"(*) echo \"skipped $p: its mounts could not be read\"; false ;; esac; " +
 		"else echo \"skipped $p: moved or linked\"; false; fi"
 }
 
@@ -354,9 +426,9 @@ func dockerSize(s string) int64 {
 	return 0
 }
 
-// Clean removes the chosen items in one run as root and returns what each
-// command printed. Only commands built in this package run.
-func Clean(ctx context.Context, sys wsl.System, distro string, items []Item) (string, error) {
+// cleanScript is the script that removes items: nothing for none with a
+// command.
+func cleanScript(items []Item) string {
 	var b strings.Builder
 	for _, it := range items {
 		if it.Command == "" {
@@ -366,12 +438,19 @@ func Clean(ctx context.Context, sys wsl.System, distro string, items []Item) (st
 		// change directory); a failure is reported and the next goes on.
 		fmt.Fprintf(&b, "echo '== %s'; ( %s ) 2>&1 || echo 'failed: %s'\n", it.ID, it.Command, it.What)
 	}
-	if b.Len() == 0 {
+	return b.String()
+}
+
+// Clean removes the chosen items in one run as root and returns what each
+// command printed. Only commands built in this package run.
+func Clean(ctx context.Context, sys wsl.System, distro string, items []Item) (string, error) {
+	script := cleanScript(items)
+	if script == "" {
 		return "", nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, cleanLimit)
 	defer cancel()
-	out, err := sys.Run(ctx, distro, "root", b.String())
+	out, err := sys.Run(ctx, distro, "root", script)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return out, fmt.Errorf("removing took over %s: %w", cleanLimit, ctx.Err())
 	}

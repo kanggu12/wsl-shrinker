@@ -150,6 +150,33 @@ func TestACrashIsSaidWithoutColorsToo(t *testing.T) {
 	}
 }
 
+func TestAFolderLeftEmptyGoesAtTheEnd(t *testing.T) {
+	noRuntime(t)
+	// Inside WSL the folder holds crash files alone: a run that ends
+	// cleanly leaves nothing, not even the folder.
+	dir := filepath.Join(t.TempDir(), "wsl-shrinker")
+	end := watchCrashes(dir, os.Getpid(), notAlive, false, look{}, io.Discard)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("no folder while the run goes: %v", err)
+	}
+	end()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the folder stayed: %v", err)
+	}
+	// With the history in it, it stays, and so does the history.
+	history := filepath.Join(dir, "history.jsonl")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(history, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	watchCrashes(dir, os.Getpid(), notAlive, false, look{}, io.Discard)()
+	if _, err := os.Stat(history); err != nil {
+		t.Fatalf("the history went: %v", err)
+	}
+}
+
 func TestCrashFilesAreKeptWithinBounds(t *testing.T) {
 	// An empty file of a run that ended goes; one of a run still going
 	// stays; past keptCrashes, the oldest of each kind go.

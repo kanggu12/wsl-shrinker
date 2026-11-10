@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,10 @@ func testApp(t *testing.T, alive func(int, string) bool) (*App, *wsl.Fake) {
 		}
 		return "", nil
 	}
-	return &App{Config: config.Default(), WSL: fake, History: history.Open(dir), Journal: journal.Open(dir, alive)}, fake
+	// A start that fails is tried again at once: the waits between tries
+	// are the engine's to test.
+	return &App{Config: config.Default(), WSL: fake, History: history.Open(dir), Journal: journal.Open(dir, alive),
+		Sleep: func(time.Duration) {}}, fake
 }
 
 // dev finds the distribution's disk as the screen would.
@@ -238,5 +242,28 @@ func TestRecoverAfterACompactionReadsTheDiskFirst(t *testing.T) {
 	}
 	if _, st, _ := a.Journal.Read(); st != journal.None {
 		t.Fatalf("journal %v", st)
+	}
+}
+
+func TestAWSLThatDidNotAnswerIsAskedAgainAndNotTakenForAnOldOne(t *testing.T) {
+	a, fake := testApp(t, nil)
+	ctx := context.Background()
+	fake.InfoErr = fmt.Errorf("%w: wsl --version ran for 1m0s", wsl.ErrNoAnswer)
+	if in := a.Info(ctx); !in.NoAnswer || in.CanCompact {
+		t.Fatalf("%+v", in)
+	}
+	// What it can do is not known: a run is not refused for an old WSL,
+	// and its own calls to WSL say what is wrong.
+	if !a.ShrinkEnv(ctx).CanCompact {
+		t.Fatal("a WSL that did not answer was taken for one that cannot compact")
+	}
+	// Answered the next time, the answer is the one kept.
+	fake.InfoErr = nil
+	if in := a.Info(ctx); in.NoAnswer || !in.CanCompact || in.Version == "" {
+		t.Fatalf("%+v", in)
+	}
+	fake.InfoErr = fmt.Errorf("%w: later", wsl.ErrNoAnswer)
+	if in := a.Info(ctx); in.NoAnswer || !in.CanCompact {
+		t.Fatalf("the answer was not kept: %+v", in)
 	}
 }

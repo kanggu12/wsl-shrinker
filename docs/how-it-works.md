@@ -65,7 +65,7 @@ every stored block, so it can only come out low, and the screen says so.
 
 | Step | Reads | Changes |
 |:---|:---|:---|
-| check | WSL's version, the file's attributes, whether something holds it, whether the distribution runs now, recorded filesystem errors | nothing |
+| check | WSL's version, the file's attributes, whether the disk is fixed-size, whether something holds it, whether the distribution runs now, recorded filesystem errors | nothing |
 | clean | | removes the items you chose, with the one command each was listed with |
 | stop | the running containers | stops them (`docker stop`, each with its own timeout; not when `docker` there is Docker Desktop's, whose containers run in its own distribution), runs `/etc/wsl-shrinker/pre-stop.d/*`, syncs |
 | compact | | `wsl --manage <distro> --compact`: WSL stops the distribution, trims it and compacts the file; other files go through Windows' virtual disk API |
@@ -74,9 +74,13 @@ every stored block, so it can only come out low, and the screen says so.
 
 **Clean** builds every command itself, from a fixed list in `internal/engine/survey`. To empty a known folder under a
 home directory (a tool's cache, or the trash), it runs `find . -xdev -mindepth 1 -delete` inside the folder, after
-checking that it is still that folder on the root filesystem; the folder itself stays. The other commands are
-`apt-get clean`, `journalctl --vacuum-size=100M`, `docker builder prune --all --force`, `docker image prune --force`
-(unnamed images only), and `docker image rm` of every tag of an image no container uses. A test fails if any command
+checking that it is still that folder on the root filesystem; the folder itself stays. The other commands are the
+package manager's own (`apt-get clean`, `dnf clean all`, `yes | pacman -Scc`, `zypper --non-interactive clean --all`,
+each offered only where its tool is), `journalctl --vacuum-size=100M`, `docker builder prune --all --force`,
+`docker image prune --force` (unnamed images only), and `docker image rm` of every tag of an image no container uses.
+The look inside and these commands need only `sh` and the core utilities (`df`, `du`, `cut`, `stat`, `readlink`), so a
+distribution made from a small image, BusyBox's included, works too. Without `find`, no cache under a home directory is
+listed, since `find` is what empties it. A test fails if any command
 there could remove a volume, a container or anything else. Ids given on the command line are looked up in a fresh look
 inside, so only commands built this way run.
 
@@ -88,10 +92,12 @@ settling, 0.5 % plus 32 MiB), never by more. On a distribution's disk, every blo
 must still be stored. Other files skip that check: Windows' compaction also drops blocks of zeros the filesystem uses,
 which read back as the zeros they were. Errors recorded before the run stop it at the check, for e2fsck to see first.
 
-**Start again** checks the root is mounted read-write. If not, the distribution is stopped and started once more. If
-the root stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, as it stops every
+**Start again** checks the root is mounted read-write. WSL can refuse a start for a moment right after a compaction,
+so the start is tried three times, seconds apart. If the root is read-only, the distribution is stopped and started
+once more. If it stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, as it stops every
 distribution. Containers that were running before the stop come back one at a time, by id, with `docker start`. One
-that does not start is counted; one that was already stopped stays stopped. Docker may still be starting with the
+that waits on another (its network, a link) that had not started yet gets a second try a few seconds later. One that
+still does not start is counted; one that was already stopped stays stopped. Docker may still be starting with the
 distribution (systemd, or a `[boot]` command in `/etc/wsl.conf`): the run waits up to a minute for it.
 
 WSL stops a distribution once no terminal or other program from Windows runs in it, after `instanceIdleTimeout` in
@@ -110,8 +116,8 @@ program's own code fails (a panic). The result says how the distribution was lef
 `stopped`, `file`, `suspect` or `down`), and the screen, the command line and the history repeat it.
 
 What can be shrunk is one rule too, which the check applies and the screen, `doctor` and `shrink` show before a run: a
-protected disk, a file that could not be read, an encrypted file, recorded filesystem errors, a file a program holds, a
-WSL without `--compact`. The run itself enforces protection, whatever asked for it.
+protected disk, a file that could not be read, an encrypted file, recorded filesystem errors, a fixed-size disk, a file
+a program holds or a running distribution Docker Desktop, Rancher Desktop or Podman keeps, a WSL without `--compact`. The run itself enforces protection, whatever asked for it.
 
 ### A run cut off
 
@@ -119,7 +125,9 @@ A run keeps a journal, `run.json` next to the history: the disk, the step it rea
 goes when the run ends, however it went. A run cut off (the window closed, a crash, the power) leaves it behind, and
 the next start of wsl-shrinker says so. `R` on the screen, or `wsl-shrinker recover`, then starts the distribution
 again, writable, with those containers. A compaction WSL is still running is left to finish first. Until then no other
-run starts. The journal also keeps two runs, in two windows, from going at once.
+run starts. If the distribution does not start, the journal stays for another try; forgetting the run (`F`, or
+`wsl-shrinker recover --forget`) removes it and starts nothing. The journal also keeps two runs, in two windows, from
+going at once.
 
 ## From inside WSL
 

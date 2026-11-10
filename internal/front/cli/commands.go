@@ -116,6 +116,8 @@ func list(ctx context.Context, a *app.App, w io.Writer, asJSON bool) error {
 			state = "encrypted"
 		case d.Estimate.FSErrors:
 			state = "fs errors"
+		case d.Estimate.Fixed:
+			state = "fixed"
 		case d.Kind != disks.KindDistro && d.File.Held:
 			// Docker Desktop's disk, or a file from the settings, that its
 			// program has open.
@@ -128,7 +130,7 @@ func list(ctx context.Context, a *app.App, w io.Writer, asJSON bool) error {
 		switch {
 		case state == "protected":
 			state = l.safe(state)
-		case state == "unreadable" || state == "encrypted" || state == "fs errors":
+		case state == "unreadable" || state == "encrypted" || state == "fs errors" || state == "fixed":
 			state = l.bad(state)
 		case d.Running || state == "in use":
 			state = l.live(state)
@@ -234,7 +236,7 @@ func shrinkCmd(p *apps) *cobra.Command {
 			}
 			// A run that has not ended comes first: one cut off would lose
 			// what it stopped, one going on holds the journal.
-			if s, fix := unfinished(a); s != "" {
+			if s, fix := unfinished(a.Pending()); s != "" {
 				return hint(errors.New(s), fix)
 			}
 			ctx := cmd.Context()
@@ -564,34 +566,169 @@ func ask(ctx context.Context, in io.Reader, out io.Writer, q string) (bool, erro
 	}
 }
 
-// historyCmd prints past runs.
+// recoverCmd finishes a run that was cut off, or with --forget closes it
+// as it is.
 func recoverCmd(p *apps) *cobra.Command {
-	return &cobra.Command{
+	var forget, yes bool
+	cmd := &cobra.Command{
 		Use:   "recover",
 		Short: "Finish a run that was cut off: start its distribution and containers again",
-		Args:  noArgs,
+		Long: "Finishes a run that was cut off (the window closed, a crash, the power): the\n" +
+			"distribution it had stopped starts again, with the containers it had stopped.\n\n" +
+			"--forget closes the run as it is instead and starts nothing: the way out when\n" +
+			"the start keeps failing. It says how to start by hand what the run had stopped.",
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if forget {
+				return forgetRun(cmd, p, yes)
+			}
 			a, err := p.get()
 			if err != nil {
 				return err
 			}
-			said, err := a.Recover(cmd.Context())
+			did, err := a.Recover(cmd.Context())
 			if err != nil {
+				// A start that failed leaves the run cut off, and every later
+				// run held back: the two ways on are said.
+				var still app.StillCutOff
+				if errors.As(err, &still) {
+					return hint(err, "wsl-shrinker recover tries again; wsl-shrinker recover --forget closes the run as it is")
+				}
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), said)
+			sayDone(cmd.OutOrStdout(), did)
 			return nil
 		},
+	}
+	cmd.Flags().BoolVar(&forget, "forget", false, "close the run as it is, starting nothing again")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --forget, do not ask")
+	return cmd
+}
+
+// forgetRun closes a run that was cut off without starting anything again,
+// after a question that says what the run had stopped.
+func forgetRun(cmd *cobra.Command, p *apps, yes bool) error {
+	// The question needs someone to answer it: without a terminal and
+	// without --yes, stop before anything is read.
+	if !yes && !stdinIsTerminal() && !relayed(0) {
+		return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to forget it without the question")
+	}
+	a, err := p.get()
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	// A journal that cannot be read is said: "no run" would be a guess.
+	e, st, err := a.Journal.Read()
+	if err != nil {
+		return err
+	}
+	switch st {
+	case journal.None:
+		// Nothing to forget is no mistake: a script may ask to be sure.
+		sayDone(out, "no run was cut off")
+		return nil
+	case journal.Going:
+		// Another process is at it: that run is not this one's to close.
+		s, fix := unfinished(e, st)
+		return hint(errors.New(s), fix)
+	}
+	// What it had stopped is what forgetting leaves stopped.
+	ids := shrink.Startable(e.Containers)
+	stopped := e.Stopped && e.Distro != ""
+	if !yes {
+		// The question goes to stderr, as every question does.
+		talk := cmd.ErrOrStderr()
+		s, _ := unfinished(e, st)
+		fmt.Fprintln(talk, s)
+		switch {
+		case e.Disk == "":
+			// A journal that did not parse says nothing of what its run
+			// had stopped: that is said, not guessed.
+			fmt.Fprintln(talk, "its journal cannot be read: what it had stopped is not known")
+		case stopped && len(ids) > 0:
+			fmt.Fprintf(talk, "it had stopped %s and %s; forgetting it starts nothing again\n", e.Distro, counted(len(ids), "container"))
+		case stopped:
+			fmt.Fprintf(talk, "it had stopped %s; forgetting it starts nothing again\n", e.Distro)
+		default:
+			fmt.Fprintln(talk, "it had stopped nothing")
+		}
+		if err := confirm(cmd, "Forget it? [y/N] ", "not forgotten"); err != nil {
+			return err
+		}
+	}
+	// The run as the journal has it now: another process may have finished
+	// it while the question waited, and another run may have been cut off
+	// since, which is not the one asked about.
+	shown := e
+	e, st, err = a.Forget(&shown)
+	if errors.Is(err, app.ErrRunChanged) {
+		return hint(err, "wsl-shrinker recover --forget asks about the run cut off now")
+	}
+	if err != nil {
+		return err
+	}
+	if st == journal.None {
+		sayDone(out, "no run was cut off")
+		return nil
+	}
+	did := "forgot the run that was cut off"
+	if e.Disk != "" {
+		did = "forgot the run of " + e.Disk + " that was cut off at " + e.Step
+	}
+	// By hand from here: the commands a run would have given.
+	if e.Stopped && e.Distro != "" {
+		did += "; nothing was started again\nnote: to start by hand what it had stopped: wsl -d " + ui.ShellArg(e.Distro)
+		if ids := shrink.Startable(e.Containers); len(ids) > 0 {
+			did += ", then docker start " + strings.Join(ids, " ") + " inside it"
+		}
+	}
+	sayDone(out, did)
+	return nil
+}
+
+// counted is n of a thing, named for one or for several.
+func counted(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return strconv.Itoa(n) + " " + thing + "s"
+}
+
+// confirm asks q on stderr and returns nil for a yes. A no ends the command
+// with the words not; Ctrl+C at the question ends it like a no.
+func confirm(cmd *cobra.Command, q, not string) error {
+	ok, err := ask(cmd.Context(), cmd.InOrStdin(), cmd.ErrOrStderr(), q)
+	switch {
+	case errors.Is(err, context.Canceled):
+		return errors.New(not + ": cancelled")
+	case err != nil:
+		return err
+	case !ok:
+		return errors.New(not)
+	}
+	return nil
+}
+
+// sayDone prints what a command did. On a terminal its first line follows a
+// check mark and the notes under it are muted; plain, it is the text as it
+// is, for a script.
+func sayDone(out io.Writer, text string) {
+	l := lookFor(out)
+	first, notes, _ := strings.Cut(text, "\n")
+	fmt.Fprintln(out, l.done(first))
+	if notes != "" {
+		fmt.Fprintln(out, l.muted(notes))
 	}
 }
 
 // unfinished says why a run cannot start while another has not ended, and
-// what to do about it; "" when none is pending.
-func unfinished(a *app.App) (string, string) {
-	e, st := a.Pending()
+// what to do about it, from the journal's entry and state; "" when none is
+// pending.
+func unfinished(e journal.Entry, st journal.State) (string, string) {
 	switch {
 	case st == journal.Going:
-		return e.Disk + " is being shrunk by another wsl-shrinker", "let it finish"
+		return e.Name() + " is being shrunk by another wsl-shrinker", "let it finish"
 	case st == journal.CutOff && e.Disk == "":
 		return "a run was cut off", "wsl-shrinker recover finishes it"
 	case st == journal.CutOff:
@@ -626,13 +763,24 @@ func blockHint(err error, b shrink.Block, d disks.Disk) error {
 	return err
 }
 
+// historyCmd prints past runs, or with --clear removes them.
 func historyCmd(p *apps) *cobra.Command {
-	var asJSON bool
+	var asJSON, clear, yes bool
 	cmd := &cobra.Command{
 		Use:   "history",
 		Short: "Show past runs",
-		Args:  noArgs,
+		Long: "Shows past runs: when, which disk, its size before and after, and how it ended.\n\n" +
+			"--clear removes them all. Nothing else reads the history: the disks, the settings\n" +
+			"and a run that was cut off stay as they are.",
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if clear {
+				// Nothing is printed for a script to read after a clear.
+				if asJSON {
+					return fmt.Errorf("%w: --clear prints no JSON; leave --json out", errUsage)
+				}
+				return clearHistory(cmd, p, yes)
+			}
 			a, err := p.get()
 			if err != nil {
 				return err
@@ -672,7 +820,54 @@ func historyCmd(p *apps) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&clear, "clear", false, "remove every past run from the history")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --clear, do not ask")
 	return cmd
+}
+
+// clearHistory removes every past run from the history, after a question
+// that says how many there are.
+func clearHistory(cmd *cobra.Command, p *apps, yes bool) error {
+	// The question needs someone to answer it: without a terminal and
+	// without --yes, stop before anything is read.
+	if !yes && !stdinIsTerminal() && !relayed(0) {
+		return hint(fmt.Errorf("%w: no terminal to ask in", errUsage), "add --yes to clear it without the question")
+	}
+	a, err := p.get()
+	if err != nil {
+		return err
+	}
+	// A run going on writes its line as it ends: cleared now, the history
+	// would come back with that run alone.
+	if e, st := a.Pending(); st == journal.Going {
+		s, fix := unfinished(e, st)
+		return hint(errors.New(s), fix)
+	}
+	all, err := a.History.All()
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if len(all) == 0 {
+		// No run to ask about; a file that holds none (damaged lines, or a
+		// write cut short) goes without a word.
+		if err := a.History.Clear(); err != nil {
+			return err
+		}
+		sayDone(out, "the history is empty already")
+		return nil
+	}
+	runs := counted(len(all), "run")
+	if !yes {
+		if err := confirm(cmd, "Clear the history of "+runs+"? [y/N] ", "not cleared"); err != nil {
+			return err
+		}
+	}
+	if err := a.History.Clear(); err != nil {
+		return err
+	}
+	sayDone(out, "cleared the history of "+runs)
+	return nil
 }
 
 // configCmd shows where the settings are, or writes the example file.

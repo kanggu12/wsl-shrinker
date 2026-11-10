@@ -23,6 +23,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 )
 
 // demo returns the made-up PC without pauses.
@@ -451,6 +452,40 @@ func TestCatalogsComplete(t *testing.T) {
 			t.Errorf("English has no %q, which Korean has", k)
 		}
 	}
+	// A ".one" form is formatted with what its plural is: it takes the same
+	// values in the same order, or the screen shows the ones left over.
+	// And Korean takes what English takes, key by key.
+	verb := regexp.MustCompile(`%(\[\d+\])?[-+# 0-9.]*[a-zA-Z]`)
+	verbs := func(l i18n.Lang, k string) string {
+		i18n.Set(l)
+		return strings.Join(verb.FindAllString(i18n.T(k), -1), " ")
+	}
+	defer i18n.Set(i18n.English)
+	counted := 0
+	for k := range u.optional {
+		base, isOne := strings.CutSuffix(k, ".one")
+		if !isOne {
+			continue
+		}
+		for _, l := range []i18n.Lang{i18n.English, i18n.Korean} {
+			if !cat[l][k] {
+				continue
+			}
+			counted++
+			if one, many := verbs(l, k), verbs(l, base); one != many {
+				t.Errorf("%s: %q takes %q, but %q takes %q", l, k, one, base, many)
+			}
+		}
+	}
+	// English has a form for one of most things it counts.
+	if counted < 10 {
+		t.Fatalf("compared only %d \".one\" forms: TN's keys are no longer seen", counted)
+	}
+	for k := range cat[i18n.Korean] {
+		if en, ko := verbs(i18n.English, k), verbs(i18n.Korean, k); en != ko {
+			t.Errorf("%q takes %q in English and %q in Korean", k, en, ko)
+		}
+	}
 	// And nothing in the catalogs is left that the code cannot build.
 	var unused []string
 	for k := range cat[i18n.English] {
@@ -669,6 +704,47 @@ func TestPlainMarksLeaveEveryLineItsWidth(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// silentWSL is the demo with a WSL that did not answer in time, from this
+// side or, as from inside WSL, in wsl-shrinker.exe's words only.
+type silentWSL struct {
+	recording
+	words bool
+}
+
+func (s *silentWSL) Disks(context.Context) ([]disks.Disk, error) {
+	err := fmt.Errorf("asking WSL which distributions run: %w: wsl --list --running --quiet ran for 1m0s", wsl.ErrNoAnswer)
+	if s.words {
+		return nil, errors.New(err.Error())
+	}
+	return nil, err
+}
+
+func (s *silentWSL) Info(context.Context) wsl.Info { return wsl.Info{NoAnswer: true} }
+
+func TestAWSLThatDidNotAnswerIsSaidSoAndAskedAgain(t *testing.T) {
+	for _, words := range []bool{false, true} {
+		b := &silentWSL{recording: recording{Demo: NewDemo()}, words: words}
+		m := playKeys(t, b, nil)
+		out := ansi.Strip(m.View().Content)
+		if !strings.Contains(out, "did not answer in time") || !strings.Contains(out, "wsl --shutdown") || strings.Contains(out, "Could not list") {
+			t.Fatalf("words %v:\n%s", words, out)
+		}
+		// r asks again, WSL's version too, as it did not answer either.
+		m.infoKnown = false
+		next, cmd := m.Update(snapshotKey("r"))
+		if !next.(model).loading || cmd == nil {
+			t.Fatalf("r did not ask again")
+		}
+		msgs := 0
+		if batch, ok := cmd().(tea.BatchMsg); ok {
+			msgs = len(batch)
+		}
+		if msgs != 2 {
+			t.Fatalf("r asked %d questions, want the disks and WSL's version", msgs)
 		}
 	}
 }

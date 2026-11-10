@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,18 +40,39 @@ type variant struct {
 	// distribution again went.
 	then []shrink.Event
 	// unfinished is a run the journal says has not ended; recovered counts
-	// the times Recover was asked, which then clears it.
+	// the times Recover was asked, which then clears it. With recoverErr
+	// set, Recover fails with it instead and the run stays cut off.
 	unfinished      journal.Entry
 	unfinishedState journal.State
 	recovered       int
+	recoverErr      error
+	// forgot counts the times Forget was asked, which then clears the run;
+	// with forgetErr set, Forget fails with it and the run stays.
+	// forgotRun is the run the last Forget was asked about.
+	forgot    int
+	forgetErr error
+	forgotRun journal.Entry
 }
 
 func (v *variant) Pending() (journal.Entry, journal.State) { return v.unfinished, v.unfinishedState }
 
 func (v *variant) Recover(context.Context) (string, error) {
 	v.recovered++
+	if v.recoverErr != nil {
+		return "", v.recoverErr
+	}
 	v.unfinishedState = journal.None
 	return v.unfinished.Disk + ": running, 2 containers started again", nil
+}
+
+func (v *variant) Forget(_ context.Context, run journal.Entry) error {
+	v.forgot++
+	v.forgotRun = run
+	if v.forgetErr != nil {
+		return v.forgetErr
+	}
+	v.unfinishedState = journal.None
+	return nil
 }
 
 func (v *variant) Disks(ctx context.Context) ([]disks.Disk, error) {
@@ -584,6 +606,18 @@ func TestConfirmOffersChoosingOnlyWhereThereIsSomething(t *testing.T) {
 	}
 }
 
+func TestConfirmCountsOneContainer(t *testing.T) {
+	// One running container: the sentence for one, with nothing left over
+	// from the count it was formatted with.
+	one := &variant{Demo: demo(), inside: &survey.Result{Docker: true, Containers: 1}}
+	for _, keys := range [][]string{{"s"}, {"space", "down", "space", "s"}} {
+		out := joined(screen(one, 120, 30, keys...))
+		if !strings.Contains(out, "its 1 running container,") || strings.Contains(out, "%!") {
+			t.Errorf("%v: one container is said as:\n%s", keys, out)
+		}
+	}
+}
+
 func TestConfirmOfSeveralNamesTheOneItStops(t *testing.T) {
 	out := joined(screen(demo(), 120, 30, "space", "down", "space", "s"))
 	if !strings.Contains(out, "Stops Ubuntu-24.04") {
@@ -672,5 +706,186 @@ func TestReopenPassesEachItemOnItsOwn(t *testing.T) {
 	want := "--clean Ubuntu-24.04=apt --clean Ubuntu-24.04=pip:/home/a,b/.cache/pip"
 	if !strings.Contains(got, want) {
 		t.Errorf("%s", got)
+	}
+}
+
+// fixedUbuntu is the demo with Ubuntu's disk made fixed-size, as the engine
+// reads one: the file after a shrink as it is, nothing to give back.
+func fixedUbuntu() *variant {
+	return &variant{Demo: demo(), disks: func(l []disks.Disk) []disks.Disk {
+		e := *l[0].Estimate
+		e.Fixed, e.After, e.Reclaim, e.Trimmable = true, e.FileSize, 0, 0
+		l[0].Estimate = &e
+		return l
+	}}
+}
+
+func TestAFixedSizeDiskIsSaidAndNeverRun(t *testing.T) {
+	// Windows' compaction of a fixed-size disk reports success and leaves
+	// the file as it is. The screen says what the disk is, counts nothing
+	// of it as space to get back, and starts no run of it.
+	b := fixedUbuntu()
+	// At 100 cells the detail is under the table, each line whole.
+	lines := screen(b, 100, 34)
+	at, ok := tableRow(lines, "Ubuntu-24.04")
+	if !ok || !regexp.MustCompile(`\sfixed\s+312 GB\s+312 GB\s+0 B\s`).MatchString(lines[at]) {
+		t.Fatalf("its row:\n%s", strings.Join(lines, "\n"))
+	}
+	out := joined(lines)
+	for _, want := range []string{
+		"A fixed-size disk: its file keeps its full size, so a shrink gives nothing back.",
+		"✗ fixed-size disk: Windows compacts only disks that grow",
+		// Only Debian's 23 GB is worth a run now.
+		"23.0 GB can be given back now",
+		"1 worth shrinking",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q:\n%s", want, strings.Join(lines, "\n"))
+		}
+	}
+	if strings.Contains(out, "Gives back about") {
+		t.Errorf("the verdict promises what a shrink cannot do:\n%s", strings.Join(lines, "\n"))
+	}
+	m := playKeys(t, b, nil)
+	if d, _ := m.selected(); m.category(d) != ui.CatBad || d.Name != "Ubuntu-24.04" {
+		t.Errorf("%s shows as %v, not as one that cannot be shrunk", d.Name, m.category(d))
+	}
+	// Asked to shrink it, to mark it, or to clean it and go on: the status
+	// line says why not, and the question is never asked.
+	for _, keys := range [][]string{{"s"}, {"enter"}, {"space"}, {"space", "s"}, {"c", "space", "enter"}} {
+		m := playKeys(t, b, keys)
+		if m.mode != modeMain || !strings.Contains(m.toast, "Ubuntu-24.04 is a fixed-size disk") || len(m.marked) != 0 || len(m.queueFor()) != 0 {
+			t.Errorf("%v: mode %v, marked %v, toast %q", keys, m.mode, m.marked, m.toast)
+		}
+	}
+	// Marked while it still read as a disk that grows, it stays out of the
+	// run of the others.
+	m = playKeys(t, b, []string{"down", "down", "space"})
+	m.marked["Ubuntu-24.04"] = true
+	if q := m.queueFor(); len(q) != 1 || q[0].Name != "Debian" {
+		t.Errorf("the run takes %v", q)
+	}
+	// In Korean, the same places.
+	i18n.Set(i18n.Korean)
+	defer i18n.Set(i18n.English)
+	lines = screen(b, 100, 34)
+	if at, ok := tableRow(lines, "Ubuntu-24.04"); !ok || !regexp.MustCompile(`\s고정 크기\s+312 GB\s+312 GB\s+0 B\s`).MatchString(lines[at]) {
+		t.Fatalf("its row:\n%s", strings.Join(lines, "\n"))
+	}
+	out = joined(lines)
+	for _, want := range []string{
+		"고정 크기 디스크라 파일이 전체 크기를 그대로 차지합니다. 줄여도 돌려받는 공간이 없습니다.",
+		"✗ 고정 크기 디스크: Windows는 커지는 디스크만 압축함",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q:\n%s", want, strings.Join(lines, "\n"))
+		}
+	}
+	if m := playKeys(t, b, []string{"s"}); m.mode != modeMain || !strings.Contains(m.toast, "고정 크기") {
+		t.Errorf("mode %v, toast %q", m.mode, m.toast)
+	}
+}
+
+func TestTheStateColumnKeepsEveryWordWhole(t *testing.T) {
+	// A state longer than the usual ones ("unreadable" in English, "고정 크기"
+	// in Korean) widens its column: cut short it would say less than the
+	// word, on the one row that needs it. The columns after it still line
+	// up, and stay where they are as the list scrolls.
+	names := []string{"Ubuntu-24.04", "Docker Desktop data", "Debian"}
+	b := &variant{Demo: demo(), disks: func(l []disks.Disk) []disks.Disk {
+		e := *l[0].Estimate
+		e.Fixed, e.After, e.Reclaim, e.Trimmable = true, e.FileSize, 0, 0
+		l[0].Estimate = &e
+		l[1].Estimate, l[1].Err = nil, "the file is not a VHDX"
+		f := *l[2].Estimate
+		f.FSErrors = true
+		l[2].Estimate = &f
+		// Enough disks that the table scrolls.
+		return many(40)(l)
+	}}
+	// end is how many cells of s there are up to the end of sub.
+	end := func(s, sub string) int {
+		i := strings.Index(s, sub)
+		if i < 0 {
+			return -1
+		}
+		return lipgloss.Width(s[:i+len(sub)])
+	}
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		states := []string{i18n.T("state.fixed"), i18n.T("state.unreadable"), i18n.T("state.fserrors")}
+		heading := func(lines []string) int {
+			return slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, i18n.T("col.frees")) })
+		}
+		for _, w := range []int{200, 160, 132, 110, 100, 80, 70, 60, 50, 40} {
+			lines := screen(b, w, 30)
+			head := heading(lines)
+			if head < 0 || head+3 >= len(lines) {
+				t.Fatalf("%s %d: no table:\n%s", lang, w, strings.Join(lines, "\n"))
+			}
+			// A table too narrow for the state has none: nothing to cut.
+			shown := strings.Contains(lines[head], " "+i18n.T("col.state")+" ")
+			for i, name := range names {
+				// The disks are listed in their order, under the heading.
+				row := lines[head+1+i]
+				if shown != strings.Contains(row, " "+states[i]+" ") {
+					t.Errorf("%s %d: state column %v, the row of %s:\n%s", lang, w, shown, name, row)
+				}
+				// Only a name too long for its column is cut.
+				cuts := 1
+				if strings.Contains(row, name) {
+					cuts = 0
+				}
+				if n := strings.Count(row, "…"); n != cuts {
+					t.Errorf("%s %d: %d cuts in the row of %s:\n%s", lang, w, n, name, row)
+				}
+			}
+			// What a shrink frees ends where its heading does, in the rows
+			// with a long state as in the others.
+			want := end(lines[head], i18n.T("col.frees"))
+			for i, size := range map[int]string{0: " 0 B", 2: " 23.0 GB", 3: " 300 MB"} {
+				if got := end(lines[head+1+i], size); got != want {
+					t.Errorf("%s %d: the heading ends at cell %d, %q at %d:\n%s\n%s", lang, w, want, size, got, lines[head], lines[head+1+i])
+				}
+			}
+		}
+		// Scrolled to the end of the list, where no row has a long state,
+		// the columns are where they were.
+		top, last := screen(b, 100, 30), screen(b, 100, 30, "end")
+		if _, ok := tableRow(last, "Ubuntu-24.04"); ok {
+			t.Fatalf("%s: the list did not scroll:\n%s", lang, strings.Join(last, "\n"))
+		}
+		was, is := end(top[heading(top)], i18n.T("col.frees")), end(last[heading(last)], i18n.T("col.frees"))
+		if was != is || was < 0 {
+			t.Errorf("%s: the columns moved from cell %d to %d on the way down", lang, was, is)
+		}
+	}
+}
+
+func TestEveryReasonADiskIsRefusedForHasWords(t *testing.T) {
+	// The engine decides what cannot be shrunk; the screen only says it. Each
+	// reason has the screen's own words in both languages, and one the screen
+	// does not know yet is said in the engine's: never as nothing, which
+	// would read as a disk that can be shrunk.
+	d := disks.Disk{Name: "Dev", Distro: "Dev"}
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		for _, b := range []shrink.Block{
+			shrink.BlockProtected, shrink.BlockUnreadable, shrink.BlockEncrypted, shrink.BlockFSErrors,
+			shrink.BlockFixed, shrink.BlockHeld, shrink.BlockNoCompact,
+		} {
+			// A key with no entry in the catalog comes back as the key.
+			if s := blockWords(d, b); s == "" || strings.Contains(s, "toast.") {
+				t.Errorf("%s: %s is said as %q", lang, b, s)
+			}
+		}
+		if s := blockWords(d, shrink.Block("of a later version")); !strings.Contains(s, "Dev") || !strings.Contains(s, "of a later version") {
+			t.Errorf("%s: a reason without words is said as %q", lang, s)
+		}
+	}
+	if s := blockWords(d, ""); s != "" {
+		t.Errorf("no reason is said as %q", s)
 	}
 }

@@ -45,9 +45,15 @@ type App struct {
 	// asks Windows (winapi.Stat). Tests set it, to hold a file as WSL does
 	// while it compacts.
 	StatFile func(path string) (winapi.FileInfo, error)
-	// info is WSL's answer about itself, asked once.
-	info     wsl.Info
-	infoOnce sync.Once
+	// Sleep waits between the tries of a start that failed; nil waits as
+	// long as each try says. Tests set it, so a start that keeps failing
+	// does not cost them the waits.
+	Sleep func(time.Duration)
+	// info is WSL's answer about itself, asked once it answers: a WSL that
+	// did not answer in time is asked again the next time.
+	info      wsl.Info
+	infoKnown bool
+	infoMu    sync.Mutex
 }
 
 // New reads the settings and sets up the parts. A settings file that does
@@ -67,9 +73,19 @@ func New() (*App, error) {
 		History: history.Open(dir), Journal: j}, nil
 }
 
-// Info asks WSL about itself, once.
+// Info asks WSL about itself, once it answers. A WSL that did not answer in
+// time comes back with NoAnswer and is asked again next time: what it can do
+// is not known yet, which is not the same as a WSL that cannot compact.
 func (a *App) Info(ctx context.Context) wsl.Info {
-	a.infoOnce.Do(func() { a.info, _ = a.WSL.Info(ctx) })
+	a.infoMu.Lock()
+	defer a.infoMu.Unlock()
+	if !a.infoKnown {
+		info, err := a.WSL.Info(ctx)
+		if err != nil && (info.NoAnswer || ctx.Err() != nil) {
+			return wsl.Info{NoAnswer: info.NoAnswer}
+		}
+		a.info, a.infoKnown = info, true
+	}
 	return a.info
 }
 
@@ -85,7 +101,11 @@ func (a *App) DisksEnv() disks.Env {
 
 // ShrinkEnv is what a run uses.
 func (a *App) ShrinkEnv(ctx context.Context) shrink.Env {
-	return shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: a.Info(ctx).CanCompact, Protected: a.Config.Protected}
+	// A WSL that did not answer is not refused for an old one: the run's
+	// own calls to it say what is wrong, in WSL's words or as no answer.
+	info := a.Info(ctx)
+	return shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: info.CanCompact || info.NoAnswer, Protected: a.Config.Protected,
+		Sleep: a.Sleep}
 }
 
 // Shrink runs one disk and records it in the history. The journal holds the
@@ -179,10 +199,14 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 	case journal.None:
 		return "no run was cut off", nil
 	case journal.Going:
-		return "", fmt.Errorf("%s is being shrunk by another wsl-shrinker; let it finish", e.Disk)
+		return "", fmt.Errorf("%s is being shrunk by another wsl-shrinker; let it finish", e.Name())
 	}
 	msg := "nothing was stopped"
 	switch {
+	case e.Disk == "" && e.Distro == "":
+		// A journal that did not parse: what its run had stopped is not
+		// known, so nothing can be started again. Said, not guessed.
+		msg = "the journal of the run that was cut off cannot be read: what it had stopped is not known, so nothing was started again, and the run is closed"
 	case e.Distro == "" && e.Disk != "":
 		// A file's program (Docker Desktop) is the person's to start.
 		msg = e.Disk + " is a file: start the program that uses it again"
@@ -206,7 +230,10 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 			return e.Disk + " is no longer registered in WSL; the run that was cut off is closed", nil
 		}
 		if d != nil && d.File.Held && !d.Running {
-			return "", fmt.Errorf("WSL is still compacting %s; try again when it is done", e.Disk)
+			// The journal stays, for another try once WSL is done. Another
+			// program may hold the disk as well, for as long as it likes:
+			// the run stays cut off, and Forget is the way out of it too.
+			return "", StillCutOff{fmt.Errorf("WSL is still compacting %s, or another program holds its disk; try again when it is done", e.Disk)}
 		}
 		// Cut off once the compaction began, before the disk was read
 		// again: it is read now, and a disk that does not read cleanly stays
@@ -224,7 +251,7 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 		ev, err := shrink.StartAgain(ctx, a.ShrinkEnv(ctx), e.Distro, e.Containers)
 		if err != nil {
 			// The journal stays, for another try.
-			return "", err
+			return "", StillCutOff{err}
 		}
 		msg = e.Disk + ": " + ev.Detail
 		// Started again with its containers, it runs as long as WSL keeps it
@@ -238,6 +265,46 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 	}
 	return msg, nil
 }
+
+// StillCutOff is why Recover could not finish a run: it could not start
+// again what the run had stopped, or the disk is still held. The run stays
+// cut off, for another try, and holds every later run back until one works
+// or Forget closes it.
+type StillCutOff struct{ Err error }
+
+// Error is the reason itself.
+func (e StillCutOff) Error() string { return e.Err.Error() }
+
+// Unwrap gives the reason, for errors.Is.
+func (e StillCutOff) Unwrap() error { return e.Err }
+
+// Forget closes a run that was cut off as it is, starting nothing again:
+// the way out when Recover cannot finish it. It returns the run it closed,
+// for the fronts to say how to start by hand what that run had stopped, and
+// the state it found: None when no run was cut off, with nothing closed. A
+// run going on in another process is not this one's to close. expect is
+// the run the person was shown and said yes to, if any: another run cut
+// off since is not forgotten in its place (ErrRunChanged).
+func (a *App) Forget(expect *journal.Entry) (journal.Entry, journal.State, error) {
+	e, st, err := a.Journal.Read()
+	if err != nil {
+		return e, st, err
+	}
+	switch {
+	case st == journal.None:
+		return e, st, nil
+	case st == journal.Going:
+		return e, st, fmt.Errorf("%s is being shrunk by another wsl-shrinker; let it finish", e.Name())
+	case expect != nil && !e.Same(*expect):
+		return e, st, ErrRunChanged
+	}
+	return e, st, a.Journal.End()
+}
+
+// ErrRunChanged is Forget refusing a run cut off other than the one the
+// person was asked about: that one ended meanwhile, and this one started
+// and was cut off since.
+var ErrRunChanged = errors.New("the run that was cut off is not the one shown any more; nothing was forgotten")
 
 // follower keeps the journal in step with a run: the step reached, that
 // the distribution must run again from the stop on, and the containers the
@@ -311,6 +378,13 @@ func (b Backend) Pending() (journal.Entry, journal.State) { return b.A.Pending()
 
 // Recover finishes a run that was cut off.
 func (b Backend) Recover(ctx context.Context) (string, error) { return b.A.Recover(ctx) }
+
+// Forget closes the run that was cut off the screen showed, starting
+// nothing again.
+func (b Backend) Forget(_ context.Context, run journal.Entry) error {
+	_, _, err := b.A.Forget(&run)
+	return err
+}
 
 // Protected follows the settings.
 func (b Backend) Protected(name string) bool { return b.A.Config.Protected(name) }

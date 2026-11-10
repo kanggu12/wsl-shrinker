@@ -30,7 +30,7 @@ sits with core, where every layer may reach it; `internal/testutil` serves tests
 | | `journal`, `history` | the run going on (`run.json`), and past runs |
 | settings | `config` | `config.toml`, read whole and written key by key |
 | machine | `wsl` | `wsl.exe` and the registry's list of distributions |
-| | `winapi` | file attributes, Windows' virtual disk API, the console, a new window |
+| | `winapi` | file attributes, Windows' virtual disk API, the console, a new window; for uninstall, the user's PATH and the program's removal after it exits |
 | | `vhdx`, `ext4` | the disk file's block table with its log replayed, and the filesystem's bitmaps; both only read |
 | core | `units`, `version` | sizes as Windows shows them; the build's version |
 
@@ -49,8 +49,8 @@ of the same code. It first decides where to run:
    here, in the terminal, not in a Windows dialog on the desktop.
 3. A screen (TUI mode, or `wsl-shrinker tui`) runs in the Linux terminal if `hello` finds `wsl-shrinker.exe` is the
    same build. `app/remote` stands in for the engine: it runs `wsl-shrinker.exe list --json`, `inside --json`,
-   `history --json` and the hidden `backend` command (`hello`, `info`, `settings`, `pending`, `shrink`, `reopen`,
-   `crashes`). `backend shrink` streams the run's events as JSON lines.
+   `history --json` and the hidden `backend` command (`hello`, `info`, `settings`, `pending`, `recover`, `forget`,
+   `shrink`, `reopen`, `crashes`). `backend shrink` streams the run's events as JSON lines.
 4. Anything else, every other command or a `wsl-shrinker.exe` of another build, goes to `wsl-shrinker.exe` by `exec`,
    with the distribution's name in `WSLENV`.
 
@@ -62,7 +62,7 @@ new window (`start`, the default terminal), already confirmed. The old terminal 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/touches-dark.svg">
-  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; and its own files: the settings, the history and the run's journal. Nothing changes before you confirm a shrink, and a protected disk is never shrunk." src="assets/touches-light.svg">
+  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; its own files: the settings, the history and the run's journal; and when you uninstall it, the program and its entry in your PATH. Nothing changes before you confirm a shrink or an uninstall, and a protected disk is never shrunk." src="assets/touches-light.svg">
 </picture>
 
 A few rules keep that list short, each held in one place:

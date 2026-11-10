@@ -4,6 +4,7 @@ package winapi
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,12 @@ import (
 func TestMain(m *testing.M) {
 	if out := os.Getenv("REOPEN_CHILD"); out != "" {
 		_ = os.WriteFile(out, []byte(strings.Join(os.Args[1:], "\n")), 0o644)
+		os.Exit(0)
+	}
+	// Started with WAIT_CHILD set, it is another copy of the program,
+	// running until its stdin closes.
+	if os.Getenv("WAIT_CHILD") != "" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)
 	}
 	os.Exit(m.Run())

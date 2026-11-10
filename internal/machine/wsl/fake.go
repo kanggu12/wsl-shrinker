@@ -2,6 +2,7 @@ package wsl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,6 +24,11 @@ type Fake struct {
 	OnCompact func(distro string) error
 	// Fail makes the named calls fail ("compact:Ubuntu", "start:Ubuntu").
 	Fail map[string]error
+	// Flaky makes a call Fail names fail only this many times, then go
+	// through, as WSL refusing for a moment does.
+	Flaky map[string]int
+	// InfoErr makes Info fail, as when WSL does not answer.
+	InfoErr error
 	// Calls records "terminate:X", "start:X", "compact:X" and "run:X".
 	Calls []string
 	// DistrosErr makes Distros fail, as when WSL does not answer.
@@ -41,6 +47,9 @@ func (f *Fake) Distros(context.Context) ([]Distro, error) {
 
 // Info returns the version.
 func (f *Fake) Info(context.Context) (Info, error) {
+	if f.InfoErr != nil {
+		return Info{NoAnswer: errors.Is(f.InfoErr, ErrNoAnswer)}, f.InfoErr
+	}
 	v := f.Version
 	if v == "" {
 		v = "3.0.3.0"
@@ -114,6 +123,12 @@ func (f *Fake) record(op, distro string) error {
 	defer f.mu.Unlock()
 	key := op + ":" + distro
 	f.Calls = append(f.Calls, key)
+	if n, flaky := f.Flaky[key]; flaky {
+		if n == 0 {
+			return nil
+		}
+		f.Flaky[key] = n - 1
+	}
 	return f.Fail[key]
 }
 

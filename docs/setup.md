@@ -15,10 +15,11 @@ PowerShell versions.
 | Windows | Windows 10 version 2004 or later, Windows 11, or Windows Server 2022 or 2025, on x64 or ARM64 ([what differs](#windows)) | Windows 11 |
 | WSL | WSL 2 distributions. Shrinking one needs WSL 3.0.1 or later, from `wsl --update` ([what differs](#wsl)) | the newest WSL |
 | Install script | Windows PowerShell 5.1, which every Windows has, or PowerShell 7 ([what differs](#powershell)) | |
+| Distributions | `sh` and the core utilities, BusyBox's included. Without `find`, no cache in a home folder is offered | |
 | Screen | a VT terminal of 40 by 12 cells: Windows Terminal, the Windows console, VS Code's terminal, or any Linux terminal inside WSL ([what differs](#terminals)) | Windows Terminal, 120 by 30 cells |
 | Demo sandbox | Docker | |
 
-The program is 6.5 MB and its WSL launcher 6.2 MB; neither needs another library. It runs as you, only while you use it:
+The program and its WSL launcher are about 8 MB each; neither needs another library. It runs as you, only while you use it:
 no administrator rights, no service, no network.
 
 ## Install
@@ -38,7 +39,7 @@ Environment variables set before it runs change what it does:
 
 | Variable | |
 |:---|:---|
-| `WSL_SHRINKER_VERSION` | the release to install, like `v0.5.1` (default: the latest) |
+| `WSL_SHRINKER_VERSION` | the release to install, like `v0.6.0` (default: the latest) |
 | `WSL_SHRINKER_BIN_DIR` | where the program goes (default: `%LOCALAPPDATA%\Programs\wsl-shrinker`) |
 | `WSL_SHRINKER_ZIP` | a downloaded zip to install as it is ([without internet access](#without-internet-access)) |
 | `WSL_SHRINKER_BASE_URL` | where releases download from, for a mirror |
@@ -77,13 +78,13 @@ Put both files from `dist/` in one folder on your PATH. A build from a commit sa
 The release's `checksums.txt` lists every zip's SHA-256:
 
 ```powershell
-(Get-FileHash .\wsl-shrinker_0.5.1_windows_amd64.zip -Algorithm SHA256).Hash
+(Get-FileHash .\wsl-shrinker_0.6.0_windows_amd64.zip -Algorithm SHA256).Hash
 ```
 
 GitHub signs the zips' build provenance. With the [GitHub CLI](https://cli.github.com),
 
 ```sh
-gh attestation verify wsl-shrinker_0.5.1_windows_amd64.zip -R kanggu12/wsl-shrinker
+gh attestation verify wsl-shrinker_0.6.0_windows_amd64.zip -R kanggu12/wsl-shrinker
 ```
 
 shows that this repository's release workflow built the zip from the tagged commit.
@@ -94,7 +95,7 @@ On a machine with access, download the zip for the PC's processor and `checksums
 `install.ps1`, check the zip, then install from it:
 
 ```powershell
-$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.5.1_windows_amd64.zip'
+$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker_0.6.0_windows_amd64.zip'
 & ([scriptblock]::Create((Get-Content D:\install.ps1 -Raw)))
 Remove-Item Env:WSL_SHRINKER_ZIP
 ```
@@ -106,17 +107,33 @@ wsl-shrinker itself needs no network: it reads disks and asks WSL.
 To upgrade, run the one-line install again, which replaces the two files, or `scoop update wsl-shrinker`. The settings
 and history stay.
 
-The same script removes it:
+To remove it, in PowerShell or in WSL:
+
+```powershell
+wsl-shrinker uninstall
+```
+
+It removes the two programs, and their folder and PATH entry if the folder is named `wsl-shrinker` and nothing else is
+in it. The settings (`%APPDATA%\wsl-shrinker`) and the history (`%LOCALAPPDATA%\wsl-shrinker`) stay unless `--purge` is
+given ([Commands](commands.md#uninstall)). A run that was cut off is finished or forgotten first, with
+`wsl-shrinker recover`, or `recover --forget`.
+Installed with Scoop, `wsl-shrinker uninstall --purge` removes the settings and the history, and
+`scoop uninstall wsl-shrinker` the program.
+
+The install script can also remove it without running it, for an install that no longer starts:
 
 ```powershell
 $env:WSL_SHRINKER_UNINSTALL = '1'; irm https://github.com/kanggu12/wsl-shrinker/releases/latest/download/install.ps1 | iex
 ```
 
 It removes the two programs, and their folder and PATH entry if nothing else is in it. A folder with other files, such
-as one already on your PATH, keeps them and its entry. Settings (`%APPDATA%\wsl-shrinker`) and history
-(`%LOCALAPPDATA%\wsl-shrinker`) stay unless `$env:WSL_SHRINKER_PURGE = '1'` is also set; a cut-off run keeps its journal
-either way, for `wsl-shrinker recover`. Both variables are cleared at the end, so a later install in the same window
-installs. With Scoop, run `scoop uninstall wsl-shrinker`, then delete those two folders if you want them gone.
+as one already on your PATH, keeps them and its entry. The settings and the history stay unless
+`$env:WSL_SHRINKER_PURGE = '1'` is also set. A cut-off run keeps the history's folder, its journal in it, either way:
+install again and run `wsl-shrinker recover` (or `recover --forget`) first. Both variables are cleared at the end, so a
+later install in the same window installs.
+
+Inside WSL, a distribution where the screen stopped on a bug keeps what Go printed in `~/.cache/wsl-shrinker`, a folder
+the screen otherwise removes as it ends; delete it there if you want it gone.
 
 ## Versions
 
@@ -191,6 +208,9 @@ wsl-shrinker finds Docker Desktop's data disk at `%LOCALAPPDATA%\Docker\wsl\disk
 at `%LOCALAPPDATA%\Docker\wsl\data\ext4.vhdx` (older ones), or where Docker Desktop's settings move it (Resources,
 Advanced, "Disk image location"). A second one, such as a disk an older release left behind, is listed as
 `Docker Desktop data 2`. Docker Desktop holds its disk while it runs: quit it to shrink the disk.
+
+Rancher Desktop's distributions (`rancher-desktop`, `rancher-desktop-data`) and a Podman machine's are treated the same
+way: they are not shrunk while their program runs them. Quit Rancher Desktop, or `podman machine stop`, first.
 
 ## Inside WSL
 

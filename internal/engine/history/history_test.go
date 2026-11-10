@@ -3,6 +3,7 @@ package history
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,5 +100,45 @@ func TestOlderKeysStillRead(t *testing.T) {
 	}
 	if e := all[0]; e.Before != 10 || e.After != 4 || e.Freed != 6 || e.Cleaned != 2 {
 		t.Fatalf("%+v", e)
+	}
+}
+
+func TestClearRemovesTheRunsAndWhatACutShortWriteLeft(t *testing.T) {
+	dir := t.TempDir()
+	s := Open(dir)
+	// No history is nothing to clear, not an error.
+	if err := s.Clear(); err != nil {
+		t.Fatalf("clearing no history: %v", err)
+	}
+	for i := range 3 {
+		if err := s.Add(Entry{At: time.Unix(int64(i), 0), Disk: "d"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A temporary file a write cut short left, and a file that is not the
+	// history's: only the first goes with the history.
+	left, other := filepath.Join(dir, "history-123.tmp"), filepath.Join(dir, "config.toml")
+	for _, p := range []string{left, other} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := s.All(); err != nil || len(all) != 0 {
+		t.Fatalf("after clearing: %v %v", all, err)
+	}
+	for p, want := range map[string]bool{s.Path: false, left: false, other: true} {
+		if _, err := os.Stat(p); (err == nil) != want {
+			t.Errorf("%s: there %v, want %v", filepath.Base(p), err == nil, want)
+		}
+	}
+	// A history cleared takes new runs as before.
+	if err := s.Add(Entry{Disk: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := s.All(); len(all) != 1 || all[0].Disk != "again" {
+		t.Fatalf("after a new run: %v", all)
 	}
 }

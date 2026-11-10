@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 	buildversion "github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
@@ -102,7 +104,7 @@ func (m model) header() string {
 			case d.Estimate == nil || m.b.Protected(d.Name):
 			case d.Distro == "" && d.File.Held:
 				held += d.Estimate.Reclaim
-			case m.blocked(d) == "" && d.Estimate.Reclaim >= m.b.MinGain():
+			case m.block(d) == "" && d.Estimate.Reclaim >= m.b.MinGain():
 				// Worth shrinking, as the status line and CLI mode count.
 				now += d.Estimate.Reclaim
 			}
@@ -151,15 +153,33 @@ func (m model) driveFree() string {
 
 // mainView is the disks: the table and the selected disk's details.
 func (m model) mainView() string {
+	// statusRows is how many rows a message takes at most: enough for a
+	// failure's two sentences in the narrowest window.
+	const statusRows = 3
 	t := m.th
 	h := m.bodyHeight()
-	// A message too long for the status row takes the row above it as
-	// well: its end says what to do. The body gives that row up.
+	// A message too long for the status row takes the rows above it as
+	// well, statusRows in all at most: its end says what to do. The body
+	// gives those rows up.
 	status := []string{m.statusLine()}
-	if text, st, ok := m.message(); ok && lipgloss.Width(text)+1 > m.width {
-		status = m.wrapTo(text, m.width, " ", st)
-		if len(status) > 2 {
-			status = status[:2]
+	text, st, ok := m.message()
+	switch {
+	case m.mode == modeForget:
+		// The box says the run itself, and the keys this row names do
+		// nothing while it is open: the row is empty rather than half
+		// covered by the box.
+		status = []string{""}
+	case ok && lipgloss.Width(text)+1 > m.width:
+		// Wrapped plain and colored after: a message cut short is marked in
+		// its own text, inside the width.
+		rows := m.wrapTo(text, m.width-1, "", lipgloss.NewStyle())
+		if len(rows) > statusRows {
+			rows = rows[:statusRows]
+			rows[statusRows-1] = strings.TrimRight(ansi.Truncate(rows[statusRows-1], m.width-3, ""), " ") + "…"
+		}
+		status = status[:0]
+		for _, r := range rows {
+			status = append(status, " "+st.Render(r))
 		}
 		h -= len(status) - 1
 	}
@@ -171,14 +191,24 @@ func (m model) mainView() string {
 	case m.err != nil:
 		// The error says what is wrong in WSL's own words: show it whole,
 		// under what to do when that is known.
-		box := lipgloss.NewStyle().Width(min(m.width-8, 90)).Align(lipgloss.Center)
+		bw := min(m.width-8, 90)
+		box := lipgloss.NewStyle().Width(bw).Align(lipgloss.Center)
+		// Wrapped in the box, a command or a name in the text stays whole.
+		lines := func(st lipgloss.Style, s string) []string { return strings.Split(unhold(st.Render(hold(s, bw))), "\n") }
 		var parts []string
-		if notEnabled(m.err) {
-			parts = append(parts, strings.Split(box.Foreground(t.Ink).Bold(true).Render(i18n.T("error.notenabled")), "\n")...)
+		switch {
+		case notEnabled(m.err):
+			parts = append(parts, lines(box.Foreground(t.Ink).Bold(true), i18n.T("error.notenabled"))...)
 			parts = append(parts, "")
-			parts = append(parts, strings.Split(box.Foreground(t.Muted).Bold(false).Render(oneLine(m.err.Error())), "\n")...)
-		} else {
-			parts = append(parts, strings.Split(box.Foreground(t.Cat[ui.CatBad]).Render(i18n.T("error.list", oneLine(m.err.Error()))), "\n")...)
+			parts = append(parts, lines(box.Foreground(t.Muted).Bold(false), oneLine(m.err.Error()))...)
+		case noAnswer(m.err):
+			// Not an error in the disks: WSL starting, updating or stuck.
+			// What to do first, then the call that went unanswered.
+			parts = append(parts, lines(box.Foreground(t.Ink).Bold(true), i18n.T("error.noanswer"))...)
+			parts = append(parts, "")
+			parts = append(parts, lines(box.Foreground(t.Muted).Bold(false), oneLine(m.err.Error()))...)
+		default:
+			parts = append(parts, lines(box.Foreground(t.Cat[ui.CatBad]), i18n.T("error.list", oneLine(m.err.Error())))...)
 			parts = append(parts, "", ui.Fg(t.Muted).Render(i18n.T("error.retry")))
 		}
 		body = m.centered(h, parts...)
@@ -210,17 +240,20 @@ func (m model) mainView() string {
 			body = append(body, " "+l)
 		}
 	}
-	// The first row of a message of two goes where the body ends.
-	if len(status) == 2 {
+	// All of a long message but its last row goes where the body ends.
+	if n := len(status) - 1; n > 0 {
 		for len(body) < h {
 			body = append(body, "")
 		}
-		body = append(body[:h], status[0])
-		status = status[1:]
+		body = append(body[:h], status[:n]...)
+		status = status[n:]
 	}
 	screen := m.page(body, status[0], m.footer())
 	if m.mode == modeConfirm {
 		return m.overlay(screen, m.confirmBox())
+	}
+	if m.mode == modeForget {
+		return m.overlay(screen, m.forgetBox())
 	}
 	return screen
 }
@@ -291,10 +324,12 @@ type columns struct {
 
 // tableColumns drops columns until a row fits w cells, the least needed
 // first: the bar, the size after, the file's size, the state. What a shrink
-// frees always stays.
-func tableColumns(w int) columns {
-	c := columns{state: true, file: true, after: true, bar: true}
-	// The state column fits its longest word in the language in use.
+// frees always stays. stateW is the widest state among the disks listed.
+func tableColumns(w, stateW int) columns {
+	c := columns{state: true, file: true, after: true, bar: true, stateW: stateW}
+	// The state column fits its usual words in the language in use, so it
+	// stays where it is as disks start and stop; a word longer than those
+	// (a disk that cannot be read) widens it rather than lose its end.
 	for _, k := range []string{"col.state", "state.running", "state.stopped", "state.inuse", "state.file", "state.protected"} {
 		c.stateW = max(c.stateW, lipgloss.Width(i18n.T(k)))
 	}
@@ -357,7 +392,13 @@ func (c columns) cells(name, state, file, after, frees, bar string) string {
 // longer list shows the window around the selected disk.
 func (m model) table(w, rows int) []string {
 	t := m.th
-	c := tableColumns(w)
+	// Every disk's state, not only the rows in view: the columns stay
+	// where they are as the list scrolls.
+	stateW := 0
+	for _, d := range m.list {
+		stateW = max(stateW, lipgloss.Width(m.stateWord(d)))
+	}
+	c := tableColumns(w, stateW)
 	// The heading starts where the names do, after the 5 cells that lead a row.
 	head := "     " + c.cells(i18n.T("col.disk"), i18n.T("col.state"), i18n.T("col.file"), i18n.T("col.after"),
 		i18n.T("col.frees"), "")
@@ -408,6 +449,8 @@ func (m model) stateWord(d disks.Disk) string {
 		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.encrypted"))
 	case d.Estimate.FSErrors:
 		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.fserrors"))
+	case d.Estimate.Fixed:
+		return ui.Fg(t.Cat[ui.CatBad]).Render(i18n.T("state.fixed"))
 	case d.Distro == "" && d.File.Held:
 		// Docker Desktop's disk, or a file from the settings another program
 		// has open.
@@ -468,6 +511,8 @@ func (m model) details(w, h int) []string {
 		verdict = i18n.T("verdict.encrypted", units.Bytes(d.Estimate.Reclaim))
 	case shrink.BlockFSErrors:
 		verdict = i18n.T("verdict.fserrors", units.Bytes(d.Estimate.Reclaim))
+	case shrink.BlockFixed:
+		verdict = i18n.T("verdict.fixed")
 	case shrink.BlockNoCompact:
 		verdict = i18n.T("verdict.nocompact", units.Bytes(d.Estimate.Reclaim))
 	case "":
@@ -554,12 +599,22 @@ func (m model) details(w, h int) []string {
 	return lines
 }
 
-// heldKey is the key of a message about a disk a program holds: Docker
-// Desktop holds its own disk; for a file from the settings, it is another
-// program.
-func heldKey(d disks.Disk, key string) string {
-	if d.Kind == disks.KindDocker {
+// heldKey is the key of a message about a disk a program holds: the
+// program that keeps it for itself (Docker Desktop, Rancher Desktop, a
+// Podman machine), or, for a file from the settings, another program.
+func heldKey(d disks.Disk, key string) string { return ownerKey(shrink.OwnerOf(d), key) }
+
+// ownerKey completes key with the program that keeps the disk: Docker
+// Desktop's words are the key itself, the other programs' have their own,
+// and a file another program has open has ".file".
+func ownerKey(o shrink.Owner, key string) string {
+	switch o {
+	case shrink.OwnerDocker:
 		return key
+	case shrink.OwnerRancher:
+		return key + ".rancher"
+	case shrink.OwnerPodman:
+		return key + ".podman"
 	}
 	return key + ".file"
 }
@@ -590,6 +645,11 @@ func (m model) checks(d disks.Disk) []string {
 		return []string{bad(i18n.T("check.unreadable", oneLine(d.Err)))}
 	}
 	if d.Distro != "" {
+		// A distribution another program runs for itself is that
+		// program's while it runs, whatever WSL can do.
+		if shrink.OwnerOf(d) != shrink.OwnerNone && d.Running {
+			out = append(out, inUse(i18n.T(heldKey(d, "check.held"))))
+		}
 		if m.info.CanCompact {
 			out = append(out, ok(i18n.T("check.compact", m.info.Version)))
 		} else if m.infoKnown {
@@ -605,6 +665,9 @@ func (m model) checks(d disks.Disk) []string {
 	}
 	if d.File.Sparse {
 		out = append(out, note(i18n.T("check.sparse")))
+	}
+	if d.Estimate.Fixed {
+		out = append(out, bad(i18n.T("check.fixed")))
 	}
 	switch {
 	case d.Estimate.FSErrors:
@@ -719,17 +782,28 @@ func (m model) message() (text string, st lipgloss.Style, ok bool) {
 	if m.toast != "" && time.Now().Before(m.toastUntil) {
 		return m.toast, ui.Fg(t.Cat[m.toastCat]), true
 	}
-	if !m.loaded || m.err != nil || len(m.list) == 0 {
-		return "", st, false
-	}
-	// A run that has not ended matters more than the counts.
+	// A run that has not ended matters more than the counts, and is said
+	// where no disk is listed too: the journal is read apart from WSL, and
+	// a cut-off run of a disk that is gone still waits for R.
 	switch m.unfinishedState {
 	case journal.CutOff:
-		if m.unfinished.Step == "" || m.unfinished.Disk == "" {
+		unknown := m.unfinished.Step == "" || m.unfinished.Disk == ""
+		switch {
+		// After an R that could not start things again: the two ways on.
+		case m.recoverFailed && unknown:
+			return i18n.T("unfinished.unknown.failed"), ui.Fg(t.Cat[ui.CatWarn]), true
+		case m.recoverFailed:
+			return i18n.T("unfinished.cutoff.failed", m.unfinished.Disk), ui.Fg(t.Cat[ui.CatWarn]), true
+		case unknown:
 			return i18n.T("unfinished.unknown"), ui.Fg(t.Cat[ui.CatWarn]), true
 		}
 		return i18n.T("unfinished.cutoff", m.unfinished.Disk, i18n.T("step."+m.unfinished.Step)), ui.Fg(t.Cat[ui.CatWarn]), true
 	case journal.Going:
+		// A journal that does not parse yet: a run starting, its disk not
+		// said.
+		if m.unfinished.Disk == "" {
+			return i18n.T("unfinished.going.unknown"), ui.Fg(t.Cat[ui.CatLive]), true
+		}
 		return i18n.T("unfinished.going", m.unfinished.Disk), ui.Fg(t.Cat[ui.CatLive]), true
 	}
 	return "", st, false
@@ -766,23 +840,32 @@ func (m model) footer() string {
 		}
 		return m.keyBar(append(keys, [2]string{"esc", i18n.T("key.cancel")}))
 	}
+	if m.mode == modeForget {
+		return m.keyBar([][2]string{{"⏎", i18n.T("key.forget")}, {"esc", i18n.T("key.cancel")}})
+	}
 	// With no disk on screen, the keys that act on one do nothing.
-	if !m.loaded || m.err != nil || len(m.list) == 0 {
-		return m.keyBar([][2]string{{"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")}, {"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")}})
+	keys := [][2]string{{"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")}, {"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")}}
+	if m.loaded && m.err == nil && len(m.list) > 0 {
+		keys = [][2]string{
+			{"↑↓", i18n.T("key.select")}, {"space", i18n.T("key.mark")}, {"s", m.shrinkKey()},
+			{"c", i18n.T("key.clean")}, {"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")},
+			{"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")},
+		}
+		// While a run is cut off, or another wsl-shrinker runs one, s only
+		// says so: its key goes.
+		if m.unfinishedState == journal.CutOff || m.unfinishedState == journal.Going {
+			keys = slices.DeleteFunc(keys, func(k [2]string) bool { return k[0] == "s" })
+		}
 	}
-	keys := [][2]string{
-		{"↑↓", i18n.T("key.select")}, {"space", i18n.T("key.mark")}, {"s", m.shrinkKey()},
-		{"c", i18n.T("key.clean")}, {"r", i18n.T("key.reload")}, {"h", i18n.T("key.history")},
-		{"?", i18n.T("key.help")}, {"q", i18n.T("key.quit")},
-	}
-	// While a run is cut off, or another wsl-shrinker runs one, s only says
-	// so: its key goes. A run cut off is finished first: its key leads, and
-	// never drops.
-	if m.unfinishedState == journal.CutOff || m.unfinishedState == journal.Going {
-		keys = slices.DeleteFunc(keys, func(k [2]string) bool { return k[0] == "s" })
-	}
+	// A run cut off is finished first, whatever else is on screen: its key
+	// leads, and never drops. Once R has failed to start things again, the
+	// key that forgets the run follows it.
 	if m.unfinishedState == journal.CutOff {
-		keys = append([][2]string{{"R", i18n.T("key.recover")}}, keys...)
+		lead := [][2]string{{"R", i18n.T("key.recover")}}
+		if m.recoverFailed {
+			lead = append(lead, [2]string{"F", i18n.T("key.forget")})
+		}
+		keys = append(lead, keys...)
 	}
 	return m.keyBar(keys)
 }
@@ -846,8 +929,13 @@ func (m model) box(border ui.Category, lines ...string) string {
 	// The text wraps once, at the width inside the border (2 cells) and the
 	// padding (4): lipgloss's Width counts both, so a wider body would wrap
 	// again and leave a word alone on a line.
-	body := lipgloss.NewStyle().Width(w - 6).Foreground(m.th.Ink).Render(strings.Join(lines, "\n"))
-	return lipgloss.NewStyle().BorderForeground(m.th.Cat[border]).Border(lipgloss.RoundedBorder()).Padding(0, 2).Width(w).Render(body)
+	// A name, an amount and a command stay whole where the text wraps.
+	held := make([]string, len(lines))
+	for i, l := range lines {
+		held[i] = hold(l, w-6)
+	}
+	body := lipgloss.NewStyle().Width(w - 6).Foreground(m.th.Ink).Render(strings.Join(held, "\n"))
+	return unhold(lipgloss.NewStyle().BorderForeground(m.th.Cat[border]).Border(lipgloss.RoundedBorder()).Padding(0, 2).Width(w).Render(body))
 }
 
 // boxLine is one line of a dialog; drop says how early it goes when the
@@ -991,6 +1079,65 @@ func (m model) confirmBox() string {
 	return m.fitBox(ui.CatGain, lines)
 }
 
+// forgetBox asks before a cut-off run is forgotten, saying what that run
+// had stopped, which stays stopped, and how to start it by hand.
+func (m model) forgetBox() string {
+	t := m.th
+	e := m.unfinished
+	// On a small screen the blank lines go first, then the commands to type;
+	// the title, what stays stopped and the keys always stay.
+	const blank, byhand = 2, 1
+	var lines []boxLine
+	add := func(s string, drop int) { lines = append(lines, boxLine{s, drop}) }
+	title := lipgloss.NewStyle().Bold(true).Foreground(t.Ink)
+	if e.Disk == "" {
+		add(title.Render(i18n.T("forget.title.unknown")), 0)
+	} else {
+		add(title.Render(i18n.T("forget.title", e.Disk)), 0)
+	}
+	add("", blank)
+	// What the run had stopped: the distribution, and the containers a
+	// recovery would have started (the ids docker start is given).
+	stopped := e.Stopped && e.Distro != ""
+	ids := shrink.Startable(e.Containers)
+	switch {
+	case e.Disk == "":
+		// A journal that did not parse says nothing of what its run had
+		// stopped: that is said, not guessed.
+		add(i18n.T("forget.unknown"), 0)
+	case stopped && len(ids) > 0:
+		add(i18n.TN("forget.stopped", len(ids), e.Distro, len(ids)), 0)
+	case stopped:
+		add(i18n.T("forget.stopped.none", e.Distro), 0)
+	default:
+		add(i18n.T("forget.nothing"), 0)
+	}
+	if stopped {
+		// The commands a recovery would have run, to type afterwards: one
+		// line of the box, so on a small screen all of it drops, never half.
+		// The box keeps each command whole where it wraps.
+		start := "wsl -d " + ui.ShellArg(e.Distro)
+		hand := i18n.T("forget.byhand", start)
+		if len(ids) > 0 {
+			hand = i18n.T("forget.byhand.docker", start, "docker start "+strings.Join(ids, " "))
+		}
+		add("", blank)
+		add(ui.Fg(t.Muted).Render(hand), byhand)
+	}
+	// The width inside the box's border and padding.
+	inner := min(70, m.width-4) - 6
+	// The keys on one line, as in the question before a run: the screen
+	// behind is dimmed, so they are said here.
+	keys := []string{t.KeyCap("⏎", i18n.T("key.forget")), t.KeyCap("esc", i18n.T("key.cancel"))}
+	line := strings.Join(keys, "   ")
+	if lipgloss.Width(line) > inner {
+		line = strings.Join(keys, "  ")
+	}
+	add("", blank)
+	add(line, 0)
+	return m.fitBox(ui.CatWarn, lines)
+}
+
 // hostsAny reports whether a run would stop the distribution this
 // program's terminal runs in.
 func (m model) hostsAny(q []disks.Disk) bool {
@@ -1012,9 +1159,63 @@ func (m model) wrap(s, indent string, st lipgloss.Style) []string {
 // part.
 var amountRe = regexp.MustCompile(`(\d) (B|KB|MB|GB|TB)\b`)
 
-// commandRe matches "wsl -d NAME", a command a line must not part either:
-// it is read, and typed, as one.
-var commandRe = regexp.MustCompile(`wsl -d (\S+)`)
+// commandRe matches a command with what it acts on ("wsl -d NAME", "wsl
+// --shutdown", "docker start ID ID"), which a line must not part either:
+// it is read, and typed, as one. The ids are hex digits, all docker start
+// is given. A mark written against it, as a quote, is measured with it.
+var commandRe = regexp.MustCompile(`\S*(wsl -d \S+|wsl --\S+|docker start( [0-9a-f]+)+)`)
+
+// wordRe matches a word: what stands between spaces.
+var wordRe = regexp.MustCompile(`\S+`)
+
+// The marks hold leaves where a line must not break, which unhold takes
+// out again: a no-break space, and a no-break hyphen, one cell each as the
+// characters they stand for.
+const (
+	holdSpace  = "\u00a0"
+	holdHyphen = "\u2011"
+)
+
+// hold marks where s must not break when it wraps in a column w cells
+// wide. A no-break space joins an amount to its unit and a command's
+// words. A no-break hyphen stands for every hyphen of a word, since the
+// wrapping breaks after a hyphen as after a space: "Ubuntu-" on one line
+// and "24.04" on the next, or "wsl --" and "shutdown". What is wider than
+// the column is left as it is: it has to break somewhere, and breaks best
+// at its spaces and hyphens.
+func hold(s string, w int) string {
+	s = amountRe.ReplaceAllString(s, "$1"+holdSpace+"$2")
+	s = commandRe.ReplaceAllStringFunc(s, func(c string) string {
+		if lipgloss.Width(c) <= w {
+			return strings.ReplaceAll(c, " ", holdSpace)
+		}
+		// Wider than the column, as docker start with many ids is: its
+		// first three words stay together where they fit, so a line never
+		// ends in "docker" or "docker start", and the rest breaks between
+		// ids.
+		words := strings.SplitN(c, " ", 4)
+		if len(words) < 4 {
+			return c
+		}
+		head := strings.Join(words[:3], holdSpace)
+		if lipgloss.Width(head) > w {
+			// Narrower still: "docker start" at least stays one.
+			return words[0] + holdSpace + words[1] + " " + strings.Join(words[2:], " ")
+		}
+		return head + " " + words[3]
+	})
+	return wordRe.ReplaceAllStringFunc(s, func(word string) string {
+		if lipgloss.Width(word) > w {
+			return word
+		}
+		return strings.ReplaceAll(word, "-", holdHyphen)
+	})
+}
+
+// unhold puts back the spaces and hyphens hold marked.
+func unhold(s string) string {
+	return strings.NewReplacer(holdSpace, " ", holdHyphen, "-").Replace(s)
+}
 
 // wrapTo is wrap for a column w cells wide, every line after indent. A line
 // already styled keeps its colors.
@@ -1026,12 +1227,10 @@ func (m model) wrapTo(s string, width int, indent string, st lipgloss.Style) []s
 // after rest: a check's continuation starts under its words, not its mark.
 func (m model) wrapHang(s string, width int, first, rest string, st lipgloss.Style) []string {
 	w := max(10, width-max(lipgloss.Width(first), lipgloss.Width(rest))-1)
-	// A no-break space holds each amount to its unit while the text wraps.
-	s = amountRe.ReplaceAllString(s, "$1\u00a0$2")
-	s = commandRe.ReplaceAllString(s, "wsl\u00a0-d\u00a0$1")
+	// An amount, a command and a name stay whole while the text wraps.
 	var out []string
-	for l := range strings.SplitSeq(lipgloss.NewStyle().Width(w).Render(s), "\n") {
-		l = strings.ReplaceAll(strings.TrimRight(l, " "), "\u00a0", " ")
+	for l := range strings.SplitSeq(lipgloss.NewStyle().Width(w).Render(hold(s, w)), "\n") {
+		l = unhold(strings.TrimRight(l, " "))
 		lead := rest
 		if len(out) == 0 {
 			lead = first
@@ -1080,6 +1279,12 @@ func notEnabled(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "has not been enabled") || strings.Contains(s, "optional_component") ||
 		strings.Contains(s, "wsl.exe\": executable file not found")
+}
+
+// noAnswer reports whether err is WSL not answering in time. From inside
+// WSL the error is wsl-shrinker.exe's words, so they are matched too.
+func noAnswer(err error) bool {
+	return errors.Is(err, wsl.ErrNoAnswer) || strings.Contains(err.Error(), wsl.ErrNoAnswer.Error())
 }
 
 // shrinkKey says what s shrinks: the marked disks, by count, when there are.

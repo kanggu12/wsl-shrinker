@@ -57,6 +57,8 @@ type Spec struct {
 	BreakRegion1 bool
 	// Parent marks the disk as differencing.
 	Parent bool
+	// Fixed marks the disk as fixed-size: its blocks stay allocated.
+	Fixed bool
 	// HeaderLogOffset, when set, is the log offset both headers name in
 	// place of the real one: a damaged header field.
 	HeaderLogOffset uint64
@@ -288,13 +290,19 @@ func contains(xs []int64, x int64) bool {
 	return false
 }
 
-// fileParams encodes the block size and the has-parent flag.
+// fileParams encodes the block size and the two flags: bit 0 for a
+// fixed-size disk, bit 1 for one with a parent.
 func fileParams(s Spec) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint32(b[0:4], s.BlockSize)
-	if s.Parent {
-		binary.LittleEndian.PutUint32(b[4:8], 2)
+	var flags uint32
+	if s.Fixed {
+		flags |= 1
 	}
+	if s.Parent {
+		flags |= 2
+	}
+	binary.LittleEndian.PutUint32(b[4:8], flags)
 	return b
 }
 

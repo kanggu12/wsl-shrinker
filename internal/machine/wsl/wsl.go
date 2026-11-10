@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
@@ -22,6 +23,45 @@ var ErrNoDistro = errors.New("no such distribution")
 // ErrNotRunning is a script for a distribution that is stopped: Run never
 // starts one as a side effect.
 var ErrNotRunning = errors.New("not running")
+
+// ErrNoAnswer wraps a wsl.exe call that ran out of time: WSL starting,
+// updating, or stuck. It is never taken for an answer, such as "none
+// runs" or "an old WSL"; context.DeadlineExceeded stays in its chain.
+var ErrNoAnswer = errors.New("WSL did not answer in time")
+
+// answerLimit is how long a wsl.exe call may take when its caller set no
+// limit of its own: listing the distributions, the version, the help. The
+// first call after Windows starts also starts WSL's service, which takes
+// seconds; a minute without an answer is a WSL that is not going to answer,
+// and waiting on it would leave the screen or the command waiting forever.
+// A variable so tests can make it short.
+var answerLimit = time.Minute
+
+// limited gives ctx the answer limit when it has no deadline of its own.
+func limited(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, answerLimit)
+}
+
+// noAnswer is the error of a call with args that ran out of its time,
+// limit, or nil when ctx did not run out: a call that failed on its own
+// says what WSL said instead.
+func noAnswer(ctx context.Context, args []string, limit time.Duration) error {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return fmt.Errorf("%w: wsl %s ran for %s (%w)", ErrNoAnswer, describe(args), limit.Round(time.Second), context.DeadlineExceeded)
+}
+
+// timeLeft is how long ctx gives a call, for saying it when it runs out.
+func timeLeft(ctx context.Context) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		return time.Until(dl)
+	}
+	return 0
+}
 
 // find returns the registered distribution named name, ignoring case as
 // wsl.exe does, or an error wrapping ErrNoDistro.
@@ -97,6 +137,9 @@ type Info struct {
 	// CanCompact is set when `wsl --manage` offers --compact (WSL 3.0.1 and
 	// later), which this tool uses to compact a distribution's disk.
 	CanCompact bool
+	// NoAnswer is set when WSL did not answer in time: what it can do is
+	// not known, which is not the same as an old WSL.
+	NoAnswer bool
 }
 
 // System is what the rest of the tool asks of WSL.
@@ -174,3 +217,25 @@ func parseVersion(out string) string {
 
 // hasCompact reports whether `wsl --help` lists the compact option.
 func hasCompact(help string) bool { return strings.Contains(help, "--compact") }
+
+// info asks wsl.exe, through run, for its version and whether it can
+// compact. A WSL that did not answer in time says so, in NoAnswer and as an
+// error, and so does a call stopped by the caller: neither is an old WSL. A
+// --version that fails at once is the WSL built into Windows, which has
+// neither --version nor --compact.
+func info(ctx context.Context, run wslRunner) (Info, error) {
+	v, err := run(ctx, "--version")
+	if err != nil {
+		if errors.Is(err, ErrNoAnswer) || ctx.Err() != nil {
+			return Info{NoAnswer: errors.Is(err, ErrNoAnswer)}, err
+		}
+		return Info{}, nil
+	}
+	// Some releases end --help with a failing exit code after printing it:
+	// what it printed counts, unless it never answered.
+	help, err := run(ctx, "--help")
+	if errors.Is(err, ErrNoAnswer) || ctx.Err() != nil {
+		return Info{Version: parseVersion(v), NoAnswer: errors.Is(err, ErrNoAnswer)}, err
+	}
+	return Info{Version: parseVersion(v), CanCompact: hasCompact(help)}, nil
+}

@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -57,7 +59,10 @@ func flowApp(t *testing.T) (*app.App, *wsl.Fake) {
 	// run from WSL would look inside one, and its run would move to a new
 	// window.
 	elsewhere := func(string) bool { return false }
-	return &app.App{Config: config.Default(), WSL: fake, History: history.Open(dir), Journal: journal.Open(dir, alive), TerminalIn: elsewhere}, fake
+	// A start that fails is tried again at once: the waits between tries
+	// are the engine's to test.
+	return &app.App{Config: config.Default(), WSL: fake, History: history.Open(dir), Journal: journal.Open(dir, alive), TerminalIn: elsewhere,
+		Sleep: func(time.Duration) {}}, fake
 }
 
 // shrinkWith runs a command line on a, returning the exit code and output.
@@ -299,5 +304,114 @@ func TestDoctorSaysAProtectedNameNoDiskHas(t *testing.T) {
 	_, out, _ := shrinkWith(a, "doctor")
 	if !strings.Contains(out, `protect names "Gone", which no disk is called now`) || strings.Contains(out, `protect names "dev"`) {
 		t.Fatalf("%s", out)
+	}
+}
+
+func TestAWSLThatDoesNotAnswerIsSaidSoWithWhatToDo(t *testing.T) {
+	// WSL starting, updating or stuck: the commands end with that, and with
+	// what to do, never with advice for an old WSL.
+	a, fake := flowApp(t)
+	silent := fmt.Errorf("asking WSL which distributions run: %w: wsl --list --running --quiet ran for 1m0s", wsl.ErrNoAnswer)
+	fake.DistrosErr = silent
+	code, _, errOut := shrinkWith(a, "list")
+	if code == exitOK || !strings.Contains(errOut, "did not answer in time") || !strings.Contains(errOut, "wsl --shutdown restarts WSL") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	fake.InfoErr = fmt.Errorf("%w: wsl --version ran for 1m0s", wsl.ErrNoAnswer)
+	_, out, _ := shrinkWith(a, "doctor")
+	if !strings.Contains(out, "WSL did not answer wsl --version in time") || strings.Contains(out, "wsl --update") || strings.Contains(out, "wsl --install") {
+		t.Fatalf("%s", out)
+	}
+	if !strings.Contains(out, "could not list the distributions") || !strings.Contains(out, "may still be starting or updating") {
+		t.Fatalf("%s", out)
+	}
+}
+
+// fixedDisk writes the fake's only disk anew as a fixed-size one: every
+// block in the file, all of them zeros but the two that held data.
+func fixedDisk(t *testing.T, fake *wsl.Fake) {
+	t.Helper()
+	blocks := map[int64][]byte{0: {1}, 3: {1}}
+	for i := int64(0); i < 16; i++ {
+		if _, ok := blocks[i]; !ok {
+			blocks[i] = []byte{}
+		}
+	}
+	vhdxtest.Write(t, fake.List[0].VHD, vhdxtest.Spec{VirtualSize: 16 << 20, Blocks: blocks, Fixed: true})
+}
+
+func TestAFixedSizeDiskIsSaidAndRefusedOnTheCommandLine(t *testing.T) {
+	// Windows' compaction of a fixed-size disk reports success and leaves
+	// the file as it is. Every command says what the disk is and promises
+	// nothing; shrink refuses it before the question, with nothing stopped.
+	a, fake := flowApp(t)
+	fixedDisk(t, fake)
+	// The table: its state, the file after a shrink as it is now, nothing
+	// to free.
+	code, out, errOut := shrinkWith(a, "list")
+	row := regexp.MustCompile(`(?m)^Dev\s+fixed\s+(\S+ \S+)\s+(\S+ \S+)\s+0 B\s*$`).FindStringSubmatch(out)
+	if code != exitOK || row == nil || row[1] != row[2] {
+		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
+	}
+	// For a script: what stands in the way, and the estimate's own word.
+	_, out, _ = shrinkWith(a, "list", "--json")
+	var got struct {
+		Disks []struct {
+			Blocked  string `json:"blocked"`
+			Estimate struct {
+				Fixed   bool  `json:"fixed"`
+				File    int64 `json:"file_size_bytes"`
+				After   int64 `json:"after_bytes"`
+				Reclaim int64 `json:"reclaim_bytes"`
+			} `json:"estimate"`
+		} `json:"disks"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Disks) != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if d := got.Disks[0]; d.Blocked != "fixed" || !d.Estimate.Fixed || d.Estimate.Reclaim != 0 || d.Estimate.After != d.Estimate.File || d.Estimate.File < 16<<20 {
+		t.Fatalf("%+v\n%s", d, out)
+	}
+	// shrink: refused with the reason, whether asked to ask or not.
+	for _, args := range [][]string{{"shrink", "Dev", "--yes"}, {"shrink", "dev", "--yes", "--json"}} {
+		code, out, errOut = shrinkWith(a, args...)
+		if code != exitFail || !strings.Contains(errOut, "Dev cannot be shrunk now: the disk is fixed-size") || !strings.Contains(errOut, "only disks that grow") {
+			t.Fatalf("%v: exit %d: %s\n%s", args, code, errOut, out)
+		}
+	}
+	// Nothing was stopped or compacted, and no run was written down.
+	if calls := strings.Join(fake.CallList(), " "); strings.Contains(calls, "terminate:") || strings.Contains(calls, "compact:") {
+		t.Fatalf("calls %s", calls)
+	}
+	if all, _ := a.History.All(); len(all) != 0 {
+		t.Fatalf("history %+v", all)
+	}
+	// doctor: said as what the disk is, not as a problem of this PC.
+	code, out, errOut = shrinkWith(a, "doctor")
+	if !strings.Contains(out, "Dev: a fixed-size disk; its file keeps its full size") || strings.Contains(errOut, "problem") {
+		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
+	}
+}
+
+func TestTheOverviewSaysAFixedSizeDisk(t *testing.T) {
+	// CLI mode's picture, in both languages: the state in the disk's row,
+	// why beside it, and no shrink suggested for the only disk there is.
+	for lang, row := range map[string]string{
+		"en": `(?m)^\S+\s+Dev\s+fixed\s+(\S+ \S+)\s+(\S+ \S+)\s+0 B\s+Windows compacts only disks that grow$`,
+		"ko": `(?m)^\S+\s+Dev\s+고정 크기\s+(\S+ \S+)\s+(\S+ \S+)\s+0 B\s+Windows는 커지는 디스크만 압축함$`,
+	} {
+		a, fake := flowApp(t)
+		fixedDisk(t, fake)
+		withSettings(t, a, "mode = \"cli\"\nlanguage = \""+lang+"\"\n")
+		inTerminal(t, tui.SetupChoice{}, false)
+		code, out, errOut := shrinkWith(a)
+		plain := ansi.Strip(out)
+		if code != exitOK || strings.Contains(plain, "wsl-shrinker shrink") {
+			t.Fatalf("%s: exit %d: %s\n%s", lang, code, errOut, plain)
+		}
+		// The file after a shrink is the file as it is.
+		if m := regexp.MustCompile(row).FindStringSubmatch(plain); m == nil || m[1] != m[2] {
+			t.Errorf("%s: no row like %s in:\n%s", lang, row, plain)
+		}
 	}
 }

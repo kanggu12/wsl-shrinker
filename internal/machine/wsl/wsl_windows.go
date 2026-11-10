@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -26,15 +27,27 @@ func New() System { return Real{} }
 // wslExe runs wsl.exe without a console window of its own and returns its
 // decoded output; the error carries that output, which says what went wrong.
 func wslExe(ctx context.Context, args ...string) (string, error) {
+	// A call with no limit of its own gets one: a WSL that never answers
+	// must not hold the screen or a command forever.
+	ctx, cancel := limited(ctx)
+	defer cancel()
+	limit := timeLeft(ctx)
 	cmd := exec.CommandContext(ctx, "wsl.exe", args...)
 	// Ask for UTF-8 where wsl.exe honours it, and keep any window hidden.
 	cmd.Env = append(os.Environ(), "WSL_UTF8=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	// Ended at its limit, wsl.exe may leave something holding its output
+	// open; the call returns a few seconds later all the same.
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	text := decode(out.Bytes())
 	if err != nil {
+		// Out of time, it said nothing that counts as an answer.
+		if na := noAnswer(ctx, args, limit); na != nil {
+			return text, na
+		}
 		return text, fmt.Errorf("wsl %s: %w: %s", describe(args), err, strings.TrimSpace(text))
 	}
 	return text, nil
@@ -81,13 +94,7 @@ func (Real) Distros(ctx context.Context) ([]Distro, error) {
 
 // Info runs `wsl --version` and `wsl --help`.
 func (Real) Info(ctx context.Context) (Info, error) {
-	v, err := wslExe(ctx, "--version")
-	if err != nil {
-		// Old inbox WSL has no --version; it has no --compact either.
-		return Info{}, nil
-	}
-	help, _ := wslExe(ctx, "--help")
-	return Info{Version: parseVersion(v), CanCompact: hasCompact(help)}, nil
+	return info(ctx, wslExe)
 }
 
 // Run runs the script with sh, inside a distribution that already runs.

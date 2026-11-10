@@ -277,6 +277,11 @@ func TestSafeIDs(t *testing.T) {
 	if len(got) != 1 || got[0] != "0123456789ab" {
 		t.Fatalf("%v", got)
 	}
+	// What the fronts tell a person to type is what a run would start: the
+	// same ids, and nothing a shell would read as more than an id.
+	if got := Startable([]string{"0123456789ab", "$(reboot)", "ba9876543210"}); strings.Join(got, " ") != "0123456789ab ba9876543210" {
+		t.Fatalf("startable %v", got)
+	}
 }
 
 // mapsEqual compares two status maps.

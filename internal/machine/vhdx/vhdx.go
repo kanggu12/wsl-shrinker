@@ -68,6 +68,10 @@ type Disk struct {
 	LogicalSectorSize, PhysicalSectorSize uint32
 	// HasParent is set for a differencing disk, which this package refuses.
 	HasParent bool
+	// Fixed is set for a fixed-size disk (MS-VHDX 2.6.2.1,
+	// LeaveBlockAllocated): its file holds every block from the day it was
+	// made, and none may be taken out of it.
+	Fixed bool
 	// LogActive is set when the header names a log: the file is open (WSL
 	// runs on it) or was not closed cleanly. LogEntries counts the entries
 	// replayed in memory to read it as Windows would.
@@ -320,9 +324,11 @@ func (d *Disk) readMetadata(r io.ReaderAt) error {
 		}
 		switch id {
 		case itemFileParams:
-			// Block size, then flags: bit 1 says the disk has a parent.
+			// Block size, then flags: bit 0 says the blocks stay allocated
+			// (a fixed-size disk), bit 1 that the disk has a parent.
 			d.BlockSize = binary.LittleEndian.Uint32(v[0:4])
-			d.HasParent = binary.LittleEndian.Uint32(v[4:8])&2 != 0
+			flags := binary.LittleEndian.Uint32(v[4:8])
+			d.Fixed, d.HasParent = flags&1 != 0, flags&2 != 0
 		case itemDiskSize:
 			d.VirtualSize = int64(binary.LittleEndian.Uint64(v))
 		case itemLogical:

@@ -106,6 +106,14 @@ func TestNeverNegative(t *testing.T) {
 // reads both back.
 func ext4Disk(t *testing.T, extra map[int64][]byte) (*vhdx.Disk, *ext4.FS, int64, int) {
 	t.Helper()
+	return ext4DiskAs(t, extra, nil)
+}
+
+// ext4DiskAs is ext4Disk with the file's description passed through shape
+// before it is written, for a disk that is not the usual kind; the count it
+// returns is of the blocks stored after that.
+func ext4DiskAs(t *testing.T, extra map[int64][]byte, shape func(*vhdxtest.Spec)) (*vhdx.Disk, *ext4.FS, int64, int) {
+	t.Helper()
 	if _, err := exec.LookPath("mkfs.ext4"); err != nil {
 		t.Skip("mkfs.ext4 not installed")
 	}
@@ -140,12 +148,16 @@ func ext4Disk(t *testing.T, extra map[int64][]byte) (*vhdx.Disk, *ext4.FS, int64
 		blocks[free] = data
 		free--
 	}
-	d, size := disk(t, vhdxtest.Spec{VirtualSize: 64 << 20, Blocks: blocks})
+	spec := vhdxtest.Spec{VirtualSize: 64 << 20, Blocks: blocks}
+	if shape != nil {
+		shape(&spec)
+	}
+	d, size := disk(t, spec)
 	fs, err := ext4.Read(d.Contents(), d.VirtualSize)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return d, fs, size, len(blocks)
+	return d, fs, size, len(spec.Blocks)
 }
 
 func TestWithoutTrimOnlyZeroBlocksGo(t *testing.T) {
@@ -185,12 +197,59 @@ func TestWithoutTrimOrFilesystemEveryBlockStays(t *testing.T) {
 	}
 }
 
+func TestAFixedSizeDiskGivesNothingBack(t *testing.T) {
+	// Windows' compaction of a fixed-size disk reports success and takes
+	// nothing out of the file (measured on Windows, in winapi's tests). So
+	// neither estimate may promise anything: not the free blocks with deleted
+	// data that a trim drops, not the blocks of zeros.
+	extra := map[int64][]byte{1: []byte("deleted data"), 2: []byte("more deleted data"), 3: {}, 4: {}, 5: {}}
+	// Every block stored, as in a fixed-size disk: the ones the filesystem
+	// never wrote hold zeros.
+	whole := func(s *vhdxtest.Spec) {
+		for i := int64(0); i < 64; i++ {
+			if _, ok := s.Blocks[i]; !ok {
+				s.Blocks[i] = []byte{}
+			}
+		}
+	}
+	d, fs, size, n := ext4DiskAs(t, extra, func(s *vhdxtest.Spec) { whole(s); s.Fixed = true })
+	if !d.Fixed || n != 64 {
+		t.Fatalf("fixed %v, %d blocks stored", d.Fixed, n)
+	}
+	// The file on the host is as large as the disk inside it, and more.
+	if size < 64<<20 {
+		t.Fatalf("a file of %d bytes", size)
+	}
+	for name, r := range map[string]Result{"with a trim": Of(d, fs, size), "without one": OfUntrimmed(d, fs, size)} {
+		if !r.Fixed || r.After != size || r.Reclaim != 0 || r.Trimmable != 0 {
+			t.Errorf("%s: %+v", name, r)
+		}
+		// What the file holds and the filesystem uses is still said.
+		if !r.Filesystem || r.Stored != 64<<20 || r.Used != int64(fs.UsedBlocks)*fs.BlockSize {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	// A host file larger than the disk's own does not come back either.
+	if r := Of(d, fs, size+(40<<20)); r.After != size+(40<<20) || r.Reclaim != 0 {
+		t.Errorf("a padded file: %+v", r)
+	}
+	// The flag alone decides: the same blocks in a disk that grows come
+	// back, with a trim and without.
+	g, gfs, gsize, _ := ext4DiskAs(t, extra, whole)
+	if r := Of(g, gfs, gsize); r.Fixed || r.Reclaim < 5<<20 || r.Trimmable < 5<<20 {
+		t.Errorf("one that grows, with a trim: %+v", r)
+	}
+	if r := OfUntrimmed(g, gfs, gsize); r.Fixed || r.Reclaim < 3<<20 {
+		t.Errorf("one that grows, without: %+v", r)
+	}
+}
+
 func TestResultJSONKeys(t *testing.T) {
 	b, err := json.Marshal(Result{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"file_size_bytes":0,"after_bytes":0,"reclaim_bytes":0,"stored_bytes":0,"used_bytes":0,"trimmable_bytes":0,"in_use":false,"mounted":false,"fs_errors":false,"filesystem":false,"trimmed":false}`
+	want := `{"file_size_bytes":0,"after_bytes":0,"reclaim_bytes":0,"stored_bytes":0,"used_bytes":0,"trimmable_bytes":0,"in_use":false,"mounted":false,"fs_errors":false,"filesystem":false,"trimmed":false,"fixed":false}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}

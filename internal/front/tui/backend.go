@@ -36,6 +36,11 @@ type Backend interface {
 	// Pending is a run that has not ended: going on in another process,
 	// or cut off and waiting to be finished.
 	Pending() (journal.Entry, journal.State)
-	// Recover finishes a run that was cut off, and says what it did.
+	// Recover finishes a run that was cut off, and says what it did. A
+	// start that failed comes back as app.StillCutOff: the run stays cut
+	// off, and Forget is the other way out of it.
 	Recover(ctx context.Context) (string, error)
+	// Forget closes the run that was cut off, as it is, starting nothing
+	// again: run, the one the screen asked about, and no other.
+	Forget(ctx context.Context, run journal.Entry) error
 }

@@ -13,9 +13,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
@@ -123,17 +126,19 @@ func (b *Backend) ask(ctx context.Context, v any, args ...string) error {
 	return json.Unmarshal(out.Bytes(), v)
 }
 
-// Info is WSL's version and whether it can compact; nothing when it does
+// Info is WSL's version and whether it can compact; NoAnswer when it does
 // not say, as on Windows.
 func (b *Backend) Info(ctx context.Context) wsl.Info {
 	var info struct {
 		Version    string `json:"version"`
 		CanCompact bool   `json:"can_compact"`
+		NoAnswer   bool   `json:"no_answer"`
 	}
+	// No answer is not knowing what WSL can do, not a WSL that cannot.
 	if err := b.ask(ctx, &info, "backend", "info"); err != nil {
-		return wsl.Info{}
+		return wsl.Info{NoAnswer: true}
 	}
-	return wsl.Info{Version: info.Version, CanCompact: info.CanCompact}
+	return wsl.Info{Version: info.Version, CanCompact: info.CanCompact, NoAnswer: info.NoAnswer}
 }
 
 // Crashes takes the crashes wsl-shrinker.exe kept and did not say yet, and
@@ -282,13 +287,34 @@ func (b *Backend) Pending() (journal.Entry, journal.State) {
 	return journal.Entry{}, journal.None
 }
 
-// Recover finishes a run that was cut off, and says what it did.
+// Recover finishes a run that was cut off, and says what it did. A start
+// that failed comes back as app.StillCutOff, as it does on Windows: the
+// screen offers to forget the run after one.
 func (b *Backend) Recover(ctx context.Context) (string, error) {
-	var out bytes.Buffer
-	if err := b.run(ctx, []string{"recover"}, &out); err != nil {
+	var got struct {
+		Did         string `json:"did"`
+		Error       string `json:"error"`
+		StillCutOff bool   `json:"still_cut_off"`
+	}
+	if err := b.ask(ctx, &got, "backend", "recover"); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out.String()), nil
+	switch {
+	case got.StillCutOff:
+		return "", app.StillCutOff{Err: errors.New(got.Error)}
+	case got.Error != "":
+		return "", errors.New(got.Error)
+	}
+	return got.Did, nil
+}
+
+// Forget closes the run that was cut off the screen showed, on the
+// Windows side, which refuses another run cut off since. Each value is
+// one argument with its flag, so an empty one survives the trip to
+// Windows.
+func (b *Backend) Forget(ctx context.Context, run journal.Entry) error {
+	return b.run(ctx, []string{"backend", "forget", "--pid=" + strconv.Itoa(run.PID),
+		"--started=" + run.Started.Format(time.RFC3339Nano), "--disk=" + run.Disk}, io.Discard)
 }
 
 // lineWriter calls line for every whole line written to it.

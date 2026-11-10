@@ -2,6 +2,7 @@ package survey
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,7 +77,7 @@ func TestParse(t *testing.T) {
 	if it := byID["docker-dangling"]; it.Bytes != 500_000_000 || it.Command != "docker image prune --force" {
 		t.Fatalf("dangling: %+v", it)
 	}
-	if it := byID["image:ba9876543210"]; it.Bytes != 1_100_000_000 || !strings.Contains(it.Command, "/^sha256:ba9876543210/") || !strings.HasSuffix(it.Command, "xargs -r docker image rm") || it.Note != "2 months ago" {
+	if it := byID["image:ba9876543210"]; it.Bytes != 1_100_000_000 || !strings.Contains(it.Command, "sha256:ba9876543210*)") || !strings.HasSuffix(it.Command, "docker image rm $tags; }") || it.Note != "2 months ago" {
 		t.Fatalf("node: %+v", it)
 	}
 	if _, ok := byID["image:0123456789ab"]; ok {
@@ -100,7 +101,9 @@ func TestNoCommandTouchesWhatMustStay(t *testing.T) {
 	for _, c := range caches {
 		cmds = append(cmds, home(c.what, "/home/u/"+c.rel, 1).Command)
 	}
-	cmds = append(cmds, system("apt", "", 1).Command, system("journal", "", 1).Command)
+	for _, f := range systemFolders {
+		cmds = append(cmds, system(f.what, f.path, 1).Command)
+	}
 	forbidden := regexp.MustCompile(`volume|system prune|container|\brm -f\b|--volumes|unregister|docker rm\b|/mnt/`)
 	for _, c := range cmds {
 		if forbidden.MatchString(c) {
@@ -122,6 +125,10 @@ func TestNoCommandTouchesWhatMustStay(t *testing.T) {
 func TestRemoveContentsStaysWhereItWasListed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the command is for Linux")
+	}
+	// find is what empties a cache, and no cache is listed without it.
+	if _, err := exec.LookPath("find"); err != nil {
+		t.Skip("no find")
 	}
 	root := t.TempDir()
 	write := func(p string) {
@@ -181,14 +188,8 @@ func TestDockerDesktopIntegrationIsLeftAlone(t *testing.T) {
 	if !r.DockerDesktop || r.Docker {
 		t.Fatalf("%+v", r)
 	}
-	// The script prints no image lines then: the branch with them is the
-	// one for an engine of this distribution's own.
-	s := script()
-	if !strings.Contains(s, `grep -q 'Docker Desktop'; then
-  echo "docker|desktop"
-elif`) {
-		t.Fatalf("script:\n%s", s)
-	}
+	// The script prints no image lines then, which
+	// TestDockerDesktopsImagesAreNotListed runs it to see.
 }
 
 func TestDockerSize(t *testing.T) {
@@ -209,6 +210,10 @@ func TestScriptRunsInSh(t *testing.T) {
 	// would read the test's C:\ paths as escapes.
 	if runtime.GOOS == "windows" {
 		t.Skip("the script is for Linux")
+	}
+	// No cache under a home directory is listed where nothing empties it.
+	if _, err := exec.LookPath("find"); err != nil {
+		t.Skip("no find")
 	}
 	root := t.TempDir()
 	pip := filepath.Join(root, "home", "ann", ".cache", "pip")
@@ -258,5 +263,44 @@ func TestClean(t *testing.T) {
 	fake.List[0].Running = false
 	if _, err := Clean(context.Background(), fake, "U", items); err == nil {
 		t.Fatal("cleaned a stopped distribution")
+	}
+}
+
+func TestEachPackageManagersCacheIsEmptiedByItsOwnTool(t *testing.T) {
+	// Debian's apt, Fedora's dnf 4 and 5, Arch's pacman, openSUSE's zypper:
+	// each cache found at its own folder is one item, emptied by the
+	// package manager itself.
+	out := strings.Join([]string{
+		"sys|apt|/var/cache/apt/archives|1024",
+		"sys|dnf|/var/cache/libdnf5|2048",
+		"sys|pacman|/var/cache/pacman/pkg|3072",
+		"sys|zypper|/var/cache/zypp|4096",
+		// A folder the list does not have, under a known name, is nothing.
+		"sys|dnf|/etc|8192",
+		"sys|apt|/var/cache/apt|8192",
+	}, "\n")
+	want := map[string]string{
+		"apt":    "apt-get clean",
+		"dnf":    "dnf clean all",
+		"pacman": "yes | pacman -Scc",
+		"zypper": "zypper --non-interactive clean --all",
+	}
+	r := parse(out)
+	if len(r.Items) != len(want) {
+		t.Fatalf("items %+v", r.Items)
+	}
+	for _, it := range r.Items {
+		if want[it.What] == "" || it.Command != want[it.What] || it.Kind != KindCache || it.Bytes == 0 {
+			t.Fatalf("%+v", it)
+		}
+	}
+	// The script looks for each where its tool is: dnf 5's folder only
+	// with dnf 5, dnf 4's only without it, and none without its tool.
+	s := script()
+	for _, f := range systemFolders {
+		line := fmt.Sprintf("[ -d %s ] && { %s; }", f.path, f.when)
+		if !strings.Contains(s, line) || f.when == "" {
+			t.Fatalf("no guarded line for %s:\n%s", f.path, s)
+		}
 	}
 }

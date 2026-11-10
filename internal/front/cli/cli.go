@@ -122,8 +122,15 @@ func withHint(err error) error {
 	if errors.Is(err, wsl.ErrNotWindows) {
 		return hint(err, "run it on Windows, or inside WSL with wsl-shrinker.exe installed on Windows")
 	}
+	// WSL starting, updating or stuck: nothing about the disks.
+	if errors.Is(err, wsl.ErrNoAnswer) {
+		return hint(err, noAnswerFix)
+	}
 	return err
 }
+
+// noAnswerFix is what to do when WSL did not answer in time.
+const noAnswerFix = "WSL may still be starting or updating: try again; if it keeps happening, wsl --shutdown restarts WSL, stopping every distribution"
 
 // usageHint adds what to do to cobra's own errors about how a command was
 // called: the command meant, for a word that is none, or the command's help.
@@ -302,7 +309,7 @@ func newRoot(p *apps) *cobra.Command {
 	for _, f := range []string{"snapshot", "keys", "stop-at", "cli", "reopened", "handoff", "run", "clean"} {
 		_ = root.Flags().MarkHidden(f)
 	}
-	root.AddCommand(listCmd(p), insideCmd(p), shrinkCmd(p), recoverCmd(p), historyCmd(p), doctorCmd(p), tuiCmd(p), setupCmd(p), configCmd(), versionCmd(), backendCmd(p))
+	root.AddCommand(listCmd(p), insideCmd(p), shrinkCmd(p), recoverCmd(p), historyCmd(p), doctorCmd(p), tuiCmd(p), setupCmd(p), configCmd(), versionCmd(), uninstallCmd(), backendCmd(p))
 	// Shell completion is cobra's own: it still works, but the help lists
 	// only what this program does.
 	root.CompletionOptions.HiddenDefaultCmd = true

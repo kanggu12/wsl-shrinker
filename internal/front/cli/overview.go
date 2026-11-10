@@ -278,10 +278,15 @@ func overviewLook(l look, d disks.Disk, block shrink.Block, minGain int64) (func
 		// The state says "protected" already: the note says what to do.
 		return l.safe, l.muted(i18n.T("overview.protected", d.Name))
 	case shrink.BlockHeld:
-		// Docker Desktop's disk, or a file another program has open.
-		// The state says "in use" already: the note says what to do.
-		if d.Kind == disks.KindDocker || shrink.DockerDesktops(d) {
+		// A disk a program keeps for itself, or a file another program has
+		// open. The state says "in use" already: the note says what to do.
+		switch shrink.OwnerOf(d) {
+		case shrink.OwnerDocker:
 			return l.live, l.muted(i18n.T("overview.held"))
+		case shrink.OwnerRancher:
+			return l.live, l.muted(i18n.T("overview.held.rancher"))
+		case shrink.OwnerPodman:
+			return l.live, l.muted(i18n.T("overview.held.podman"))
 		}
 		return l.live, l.muted(i18n.T("overview.held.file"))
 	case shrink.BlockUnreadable:
@@ -290,6 +295,10 @@ func overviewLook(l look, d disks.Disk, block shrink.Block, minGain int64) (func
 		return l.bad, l.bad(i18n.T("check.encrypted"))
 	case shrink.BlockFSErrors:
 		return l.bad, l.bad(i18n.T("check.fserrors"))
+	case shrink.BlockFixed:
+		// The state says "fixed" already: the note says why that ends it,
+		// short enough to stay beside the row.
+		return l.bad, l.bad(i18n.T("overview.fixed"))
 	case shrink.BlockNoCompact:
 		// Said once, in the headline.
 		return l.bad, ""
@@ -317,8 +326,8 @@ func widthOf(w io.Writer) int {
 }
 
 // blockedWord is the state of a disk that cannot be shrunk whatever is
-// done to WSL: unreadable, encrypted, or with errors on its filesystem; ""
-// for any other.
+// done to WSL: unreadable, encrypted, with errors on its filesystem, or
+// fixed-size; "" for any other.
 func blockedWord(d disks.Disk) string {
 	switch {
 	case d.Err != "" || d.Estimate == nil:
@@ -327,6 +336,8 @@ func blockedWord(d disks.Disk) string {
 		return i18n.T("state.encrypted")
 	case d.Estimate.FSErrors:
 		return i18n.T("state.fserrors")
+	case d.Estimate.Fixed:
+		return i18n.T("state.fixed")
 	}
 	return ""
 }
@@ -354,6 +365,8 @@ func stateWords(d disks.Disk) string {
 func pendingWords(b tui.Backend) string {
 	e, st := b.Pending()
 	switch {
+	case st == journal.Going && e.Disk == "":
+		return i18n.T("unfinished.going.unknown")
 	case st == journal.Going:
 		return i18n.T("unfinished.going", e.Disk)
 	case st == journal.CutOff && (e.Disk == "" || e.Step == ""):

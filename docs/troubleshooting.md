@@ -22,6 +22,13 @@ Installing, and running it from inside WSL:
 PowerShell installs it, after a restart. wsl-shrinker lists and reads the disks either way, and shrinks a distribution
 once the current WSL is there.
 
+## "WSL did not answer in time"
+
+WSL starts its service with the first call after Windows starts, which takes seconds, and longer while it updates.
+wsl-shrinker gives each call to WSL a time limit, a minute for most, then says so, rather than take the silence for an
+old WSL or for no distribution running. Try again (`r` on the screen). If it keeps happening, `wsl --shutdown` restarts WSL, stopping
+every distribution.
+
 ## "this WSL cannot compact"
 
 Shrinking a distribution uses `wsl --manage <distro> --compact`, in WSL 3.0.1 and later (2.9.8 as a pre-release).
@@ -37,6 +44,13 @@ do not need it.
 - **The file is sparse.** A sparse disk (`wsl --manage <distro> --set-sparse true`) already gives space back on its
   own; the screen marks it.
 
+## "a fixed-size disk"
+
+A VHDX made with a fixed size keeps every block in its file from the day it was made, and Windows compacts only disks
+that grow: it reports a compaction of one as done and leaves the file as it is. wsl-shrinker marks such a disk `fixed`
+and does not shrink it, so its distribution is not stopped for nothing. WSL itself makes disks that grow; a fixed-size
+one was made by another tool.
+
 ## "the disk file is encrypted"
 
 Windows cannot compact a file encrypted with EFS (error 0x80071772). Turn encryption off in the file's Properties,
@@ -44,7 +58,9 @@ Advanced, then shrink it.
 
 ## Docker Desktop's disk is "in use"
 
-Docker Desktop holds its data disk while it runs. Quit it from its tray icon, then shrink the disk.
+Docker Desktop holds its data disk while it runs. Quit it from its tray icon, then shrink the disk. Rancher Desktop
+holds its distributions the same way: quit it too. A Podman machine holds its distribution while it runs:
+`podman machine stop`, then shrink it.
 
 ## Containers stopped a little after a shrink
 
@@ -87,10 +103,17 @@ says "The run of … was cut off", and `R` (or `wsl-shrinker recover`) starts th
 it stopped. If WSL is still compacting, it says so; try again when it is done. `wsl-shrinker doctor` reports such a run
 too. `wsl-shrinker history` has no line for it.
 
+If the distribution does not start again, or its disk stays held, the message says why, and the run stays cut off:
+`R` tries again, and `F` (or `wsl-shrinker recover --forget`) closes the run as it is, starting nothing. Both say first
+what stays stopped and how to start it by hand: `wsl -d NAME`, then `docker start` with the container ids inside it.
+The command prints this again after forgetting. A root filesystem
+that stays read-only clears with `wsl --shutdown`, which stops every distribution.
+
 ## "another run is not finished"
 
 A shrink refuses to start while another wsl-shrinker is shrinking a disk (wait for it), or while a run that was cut off
-waits to be finished (`wsl-shrinker recover`, or `R` on the screen).
+waits to be finished (`wsl-shrinker recover`, or `R` on the screen; `recover --forget`, or `F`, when it cannot be
+finished).
 
 ## A new window opened
 

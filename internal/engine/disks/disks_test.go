@@ -237,3 +237,55 @@ func TestDockerDisksNeverTakeAFilesName(t *testing.T) {
 		t.Fatalf("%v", after)
 	}
 }
+
+func TestAFixedSizeDiskIsListedWithNothingToGiveBack(t *testing.T) {
+	// A fixed-size disk is found like any other, as a distribution's disk
+	// and as a file Windows compacts itself: the listing says what it is and
+	// promises nothing, though its file is padded and most of its blocks are
+	// zeros. A disk that grows, with the same blocks, gives them back.
+	dir := t.TempDir()
+	docker := filepath.Join(dir, `Docker\wsl\disk\docker_data.vhdx`)
+	if err := os.MkdirAll(filepath.Dir(docker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixed, grows := filepath.Join(dir, "fixed.vhdx"), filepath.Join(dir, "grows.vhdx")
+	// Every block stored, as a fixed-size disk has them; one holds data.
+	blocks := map[int64][]byte{0: {1}}
+	for i := int64(1); i < 8; i++ {
+		blocks[i] = []byte{}
+	}
+	for p, isFixed := range map[string]bool{docker: true, fixed: true, grows: false} {
+		vhdxtest.Write(t, p, vhdxtest.Spec{VirtualSize: 8 << 20, Blocks: blocks, Fixed: isFixed})
+	}
+	env := Env{
+		WSL: &wsl.Fake{List: []wsl.Distro{{Name: "Fixed", VHD: fixed, Version: 2}, {Name: "Grows", VHD: grows, Version: 2}}},
+		Stat: func(p string) (winapi.FileInfo, error) {
+			// As if 50 MiB more were on the drive for each.
+			fi, err := winapi.Stat(p)
+			fi.OnDisk += 50 << 20
+			return fi, err
+		},
+		Open:         OpenFile,
+		LocalAppData: dir,
+	}
+	got, err := Find(context.Background(), env)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, d := range got {
+		e := d.Estimate
+		if e == nil {
+			t.Fatalf("%s: %s", d.Name, d.Err)
+		}
+		if want := d.Name != "Grows"; e.Fixed != want {
+			t.Fatalf("%s: fixed %v", d.Name, e.Fixed)
+		}
+		if e.Fixed && (e.Reclaim != 0 || e.After != e.FileSize || e.Trimmable != 0) {
+			t.Fatalf("%s: %+v", d.Name, e)
+		}
+		// The padding and the blocks without a filesystem block in use.
+		if !e.Fixed && e.Reclaim < 50<<20 {
+			t.Fatalf("%s: %+v", d.Name, e)
+		}
+	}
+}

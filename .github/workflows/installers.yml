@@ -121,6 +121,10 @@ jobs:
           $v = wsl-shrinker version
           $v
           if ($v -notmatch ('^wsl-shrinker ' + [regex]::Escape($env:VERSION) + ' ')) { 'not the release asked for'; exit 1 }
+          # The program leaves what Scoop installed to Scoop.
+          $said = wsl-shrinker uninstall --yes 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 1 -or $said -notmatch 'installed with Scoop') { "wsl-shrinker uninstall did not leave the Scoop install to Scoop: $said"; exit 1 }
+          if (-not (Get-Command wsl-shrinker -ErrorAction SilentlyContinue)) { 'the program went'; exit 1 }
           scoop uninstall wsl-shrinker
           if ($LASTEXITCODE -ne 0) { 'scoop uninstall failed'; exit 1 }
           exit 0

@@ -82,6 +82,10 @@ func watchCrashes(dir string, pid int, alive func(int) bool, person bool, l look
 		if watching {
 			_ = crashOutput(nil, debug.CrashOptions{})
 			_ = os.Remove(own)
+			// The folder goes too once nothing is left in it: inside WSL it
+			// holds crash files alone, and uninstall --purge leaves this
+			// run's own to this moment. Every writer makes it again.
+			_ = os.Remove(dir)
 		}
 		// A script's stderr leaves them for a later start in a terminal.
 		if person {

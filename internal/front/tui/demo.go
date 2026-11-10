@@ -188,3 +188,6 @@ func (d *Demo) Pending() (journal.Entry, journal.State) { return journal.Entry{}
 
 // Recover has nothing to finish on the made-up PC.
 func (d *Demo) Recover(context.Context) (string, error) { return "", nil }
+
+// Forget has nothing to forget there either.
+func (d *Demo) Forget(context.Context, journal.Entry) error { return nil }

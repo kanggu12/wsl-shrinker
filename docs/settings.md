@@ -60,10 +60,14 @@ minutes; past that, the run ends and restarts the containers it stopped.
 | File | |
 |:---|:---|
 | `%APPDATA%\wsl-shrinker\config.toml` | the settings, from setup or `config init` |
-| `%LOCALAPPDATA%\wsl-shrinker\history.jsonl` | one line per run, the newest 500 |
-| `%LOCALAPPDATA%\wsl-shrinker\run.json` | the run in progress; one left behind is a run cut off, which `R` on the screen or `wsl-shrinker recover` finishes |
+| `%LOCALAPPDATA%\wsl-shrinker\history.jsonl` | one line per run, the newest 500; `wsl-shrinker history --clear` removes it |
+| `%LOCALAPPDATA%\wsl-shrinker\run.json` | the run in progress; one left behind is a run cut off, which `R` on the screen or `wsl-shrinker recover` finishes, and `F` or `recover --forget` closes as it is |
 | `%LOCALAPPDATA%\wsl-shrinker\handoff-*` | a new window's empty receipt for the terminal a run moved from; removed once seen, or at the next move |
-| `%LOCALAPPDATA%\wsl-shrinker\crash-*.txt` | each run's, empty while it runs and removed when it ends. After an error Go cannot recover from, it keeps what Go printed until a later run in a terminal says where it is, as that run ends, and renames it `...-shown.txt`. At most ten of each stay. The WSL launcher keeps one the same way in `~/.cache/wsl-shrinker` while it draws the screen |
+| `%LOCALAPPDATA%\wsl-shrinker\crash-*.txt` | each run's, empty while it runs and removed when it ends. After an error Go cannot recover from, it keeps what Go printed until a later run in a terminal says where it is, as that run ends, and renames it `...-shown.txt`. At most ten of each stay. The WSL launcher keeps one the same way in `~/.cache/wsl-shrinker` while it draws the screen, and removes the folder as it ends if nothing else is in it |
+
+`wsl-shrinker uninstall --purge` removes these files on Windows, and each folder once nothing else is in it. Temporary
+files a write cut short (`config.toml.new`, `run-*.tmp`, `history-*.tmp`) go with them. A crash file inside WSL stays
+([Setup](setup.md#upgrade-and-remove)).
 
 ## Environment
 

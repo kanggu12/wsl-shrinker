@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.5.1" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.6.0" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <a href="https://github.com/kanggu12/wsl-shrinker/pkgs/container/wsl-shrinker-demo"><img alt="Demo image" src="docs/assets/badges/demo.svg"></a>
   <img alt="Runs on Windows 10 and 11, x64 and ARM64, with WSL 2" src="docs/assets/badges/runs-on.svg">
@@ -92,7 +92,7 @@ estimate counts them that way.
 
 | Step | What happens |
 |:---|:---|
-| **Check** | WSL's version, an encrypted file, a disk another program holds, errors the filesystem recorded |
+| **Check** | WSL's version, an encrypted file, a fixed-size disk, a disk another program holds, errors the filesystem recorded |
 | **Clean** | Only what you chose |
 | **Stop** | Containers, each with its own timeout, then your pre-stop scripts |
 | **Compact** | WSL's own `wsl --manage --compact`; Windows' virtual disk API for files WSL does not register |
@@ -117,7 +117,8 @@ and what comes back. Nothing is started to read a disk, and a protected disk is 
 | <kbd>↑</kbd> <kbd>↓</kbd> | select a disk | <kbd>c</kbd> | choose what to remove inside it |
 | <kbd>space</kbd> | mark it, to shrink several in one run | <kbd>r</kbd> | read the disks again |
 | <kbd>s</kbd> or <kbd>⏎</kbd> | shrink the marked disks, or the selected one | <kbd>h</kbd> | past runs |
-| <kbd>R</kbd> | finish a run that was cut off | <kbd>?</kbd> | every key and what each color means |
+| <kbd>R</kbd> | finish a run that was cut off | <kbd>F</kbd> | forget one that <kbd>R</kbd> could not finish |
+| <kbd>?</kbd> | every key and what each color means | <kbd>q</kbd> | quit |
 
 It speaks English and Korean (`--lang`; Windows' language by default). In CLI mode, a bare `wsl-shrinker` prints the
 disks and the commands to use instead; `wsl-shrinker tui` opens the screen in either mode.
@@ -146,10 +147,11 @@ The screen on a made-up PC with five disks, in any terminal with Docker; nothing
 | `list [--json]` | every disk and what a shrink gives back |
 | `inside DISTRO [--json]` | what can be removed inside a running distribution, with ids |
 | `shrink DISK... [--clean DISK=ID,ID] [--yes]` | shrink by name, printing each step |
-| `recover` | finish a run that was cut off |
-| `history [--json]` | past runs, each with its steps |
+| `recover [--forget]` | finish a run that was cut off, or close it as it is |
+| `history [--json \| --clear]` | past runs, each with its steps, or remove them |
 | `doctor` | what a shrink needs on this PC, and what to do about what is missing |
 | `config [path\|init]` | where the settings are, or a settings file with every key |
+| `uninstall [--purge]` | remove wsl-shrinker from this PC, with the settings and the history if asked |
 
 [Commands](docs/commands.md) has every flag, the `--json` shape and the exit codes.
 
@@ -184,7 +186,11 @@ wsl-shrinker runs `wsl --manage --compact` itself, and adds what comes before an
 volumes and containers never.
 
 **Is it safe to close the window during a shrink?** WSL finishes a compaction it started. The next start says what is
-left, and `R` or `wsl-shrinker recover` starts the distribution and its containers again.
+left, and `R` or `wsl-shrinker recover` starts the distribution and its containers again. If that start fails, `F` or
+`wsl-shrinker recover --forget` closes the run and says how to start them by hand.
+
+**How do I remove it?** `wsl-shrinker uninstall`, in PowerShell or WSL. `--purge` removes the settings and the history
+too.
 
 **Why did my terminal close?** Shrinking the distribution your terminal runs in stops it, so the run moves to a new
 window first.
@@ -196,7 +202,7 @@ shrink, so it is not listed.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/touches-dark.svg">
-  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; and its own files: the settings, the history and the run's journal. Nothing changes before you confirm a shrink, and a protected disk is never shrunk." src="docs/assets/touches-light.svg">
+  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; its own files: the settings, the history and the run's journal; and when you uninstall it, the program and its entry in your PATH. Nothing changes before you confirm a shrink or an uninstall, and a protected disk is never shrunk." src="docs/assets/touches-light.svg">
 </picture>
 
 ## Documentation

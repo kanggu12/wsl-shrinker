@@ -198,6 +198,10 @@ const (
 	// BlockFSErrors: the kernel recorded errors in the filesystem; e2fsck
 	// should see it before anything else touches it.
 	BlockFSErrors Block = "fserrors"
+	// BlockFixed: a fixed-size disk. Windows compacts only disks that grow:
+	// asked to compact this one it reports success and leaves the file as it
+	// is, so a run would stop the distribution for nothing.
+	BlockFixed Block = "fixed"
 	// BlockHeld: a program holds the file (Docker Desktop its data disk).
 	BlockHeld Block = "held"
 	// BlockNoCompact: this WSL cannot compact a distribution.
@@ -222,12 +226,18 @@ func Preflight(d disks.Disk, canCompact, protected bool) []Block {
 	if d.Estimate.FSErrors {
 		out = append(out, BlockFSErrors)
 	}
+	// Before what a program holds: quitting the program would not help.
+	if d.Estimate.Fixed {
+		out = append(out, BlockFixed)
+	}
 	if d.Distro == "" && d.File.Held {
 		out = append(out, BlockHeld)
 	}
-	// Docker Desktop's own distributions are its to run: while they run,
-	// Docker Desktop holds them as it holds its data disk.
-	if DockerDesktops(d) && d.Running {
+	// A distribution another program registers for itself is that
+	// program's to run: while it runs, the program holds it as Docker
+	// Desktop holds its data disk, and a compaction would stop it under the
+	// program's feet.
+	if d.Distro != "" && OwnerOf(d) != OwnerNone && d.Running {
 		out = append(out, BlockHeld)
 	}
 	if d.Distro != "" && !canCompact {
@@ -236,10 +246,52 @@ func Preflight(d disks.Disk, canCompact, protected bool) []Block {
 	return out
 }
 
-// DockerDesktops reports whether d is a distribution Docker Desktop
-// registers for itself, docker-desktop or the older docker-desktop-data.
-func DockerDesktops(d disks.Disk) bool {
-	return strings.EqualFold(d.Distro, "docker-desktop") || strings.EqualFold(d.Distro, "docker-desktop-data")
+// Owner is a program that keeps a disk for itself: Docker Desktop its data
+// disk and its own distributions, Rancher Desktop and Podman theirs. While
+// that program runs, the disk is its own, and only quitting or stopping the
+// program lets it go.
+type Owner string
+
+const (
+	// OwnerNone: the person's own disk, or a file another program may have
+	// open for a moment.
+	OwnerNone Owner = ""
+	// OwnerDocker: Docker Desktop's data disk, or docker-desktop and the
+	// older docker-desktop-data.
+	OwnerDocker Owner = "docker-desktop"
+	// OwnerRancher: Rancher Desktop's rancher-desktop and
+	// rancher-desktop-data.
+	OwnerRancher Owner = "rancher-desktop"
+	// OwnerPodman: a Podman machine, the distribution `podman machine init`
+	// imports.
+	OwnerPodman Owner = "podman"
+)
+
+// OwnerOf says which program keeps disk d for itself, OwnerNone for none.
+// The distributions go by the names their programs register, and a Podman
+// machine by where Podman imports it, as its name is the person's choice.
+func OwnerOf(d disks.Disk) Owner {
+	switch {
+	case d.Kind == disks.KindDocker:
+		return OwnerDocker
+	case d.Distro == "":
+		return OwnerNone
+	case strings.EqualFold(d.Distro, "docker-desktop"), strings.EqualFold(d.Distro, "docker-desktop-data"):
+		return OwnerDocker
+	case strings.EqualFold(d.Distro, "rancher-desktop"), strings.EqualFold(d.Distro, "rancher-desktop-data"):
+		return OwnerRancher
+	case podmanMachine(d.Path):
+		return OwnerPodman
+	}
+	return OwnerNone
+}
+
+// podmanMachine reports whether path is a Podman machine's disk: Podman
+// imports each machine's distribution into a folder of its own under
+// %USERPROFILE%\.local\share\containers\podman\machine\wsl\wsldist.
+func podmanMachine(path string) bool {
+	p := strings.ToLower(strings.ReplaceAll(path, "/", `\`))
+	return strings.Contains(p, `\containers\podman\machine\wsl\`)
 }
 
 // Reason is a block in English, as the run's check and the command line
@@ -257,9 +309,16 @@ func (b Block) Reason(d disks.Disk) string {
 		// Errors recorded before the run: a compaction would be blamed for
 		// them, and e2fsck should see the disk first.
 		return "the filesystem records errors; check it with e2fsck first"
+	case BlockFixed:
+		return "the disk is fixed-size: its file keeps its full size, and Windows compacts only disks that grow"
 	case BlockHeld:
-		if d.Kind == disks.KindDocker || DockerDesktops(d) {
+		switch OwnerOf(d) {
+		case OwnerDocker:
 			return "the file is in use; quit Docker Desktop first"
+		case OwnerRancher:
+			return "the distribution is Rancher Desktop's; quit Rancher Desktop first"
+		case OwnerPodman:
+			return "the distribution is a Podman machine; stop it first: podman machine stop"
 		}
 		return "the file is in use; close the program that uses it first"
 	case BlockNoCompact:
@@ -347,15 +406,37 @@ var ErrCheck = errors.New("not started")
 // listScript names the containers the stop step is to stop, before any of
 // them stops: the running ones, unless Docker Desktop's integration runs
 // them (they are Docker Desktop's, which this program leaves alone). It
-// prints "running|ID ID ...".
-const listScript = `if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && ! docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
-  echo "running|$(docker ps -q | tr '\n' ' ')"
+// prints "running|ID ID ...". The shell does it alone: with grep, a
+// distribution without one would take Docker Desktop's containers for its
+// own. The ids are hex, so echo joins them as they are.
+const listScript = `if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  case $(docker info --format '{{.OperatingSystem}}' 2>/dev/null) in
+  (*'Docker Desktop'*) ;;
+  (*) echo "running|$(echo $(docker ps -q))" ;;
+  esac
 fi
 `
 
 // containerID is a container's id as docker ps -q prints it: only those go
 // into the stop script.
 var containerID = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+
+// runningIDs reads what listScript printed: the ids of the containers to
+// stop. Anything that is not an id (a warning wsl.exe put in between) is
+// passed over.
+func runningIDs(listed string) []string {
+	var ids []string
+	for line := range strings.SplitSeq(listed, "\n") {
+		if f := strings.Split(strings.TrimSpace(line), "|"); f[0] == "running" && len(f) == 2 {
+			for _, id := range strings.Fields(f[1]) {
+				if containerID.MatchString(id) {
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	return ids
+}
 
 // stopScript stops what runs in a distribution the way it expects: the
 // containers ids, each with its own stop timeout (Docker waits that long
@@ -581,15 +662,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		if err != nil {
 			return fail(StepStop, err, false)
 		}
-		for line := range strings.SplitSeq(listed, "\n") {
-			if f := strings.Split(strings.TrimSpace(line), "|"); f[0] == "running" && len(f) == 2 {
-				for _, id := range strings.Fields(f[1]) {
-					if containerID.MatchString(id) {
-						restartIDs = append(restartIDs, id)
-					}
-				}
-			}
-		}
+		restartIDs = runningIDs(listed)
 		if len(restartIDs) > 0 {
 			sayE(Event{Step: StepStop, Status: Running, Containers: restartIDs})
 		}
@@ -879,22 +952,19 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 	// kept it running, a terminal open in it, and WSL stops it again once
 	// nothing from Windows runs in it (IdleNote).
 	e.DistroStarted = !runningNow(ctx, sys, distro)
-	if err := sys.Start(within(ctx, callLimit), distro); err != nil {
-		return e, err
-	}
-	// WSL has been seen to leave the root read-only after compacting until
-	// it is stopped and started again; check, and do that once.
-	ro, err := readOnly(ctx, env, distro)
+	ro, tries, err := startWritable(ctx, env, distro, sleep)
 	if err != nil {
 		return e, err
 	}
+	if tries > 1 {
+		e.Detail = fmt.Sprintf("running (started on try %d)", tries)
+	}
+	// WSL has been seen to leave the root read-only after compacting until
+	// it is stopped and started again; check, and do that once.
 	if ro {
 		_ = sys.Terminate(within(ctx, callLimit), distro)
 		sleep(2 * time.Second)
-		if err := sys.Start(within(ctx, callLimit), distro); err != nil {
-			return e, err
-		}
-		if ro, err = readOnly(ctx, env, distro); err != nil {
+		if ro, _, err = startWritable(ctx, env, distro, sleep); err != nil {
 			return e, err
 		}
 		if ro {
@@ -916,12 +986,29 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		}
 		// One start per container, each reported: one that fails does not
 		// count the others as failed too.
-		out, _ := sys.Run(within(ctx, stopLimit), distro, "root", startScript(ids))
 		started := map[string]bool{}
-		for line := range strings.SplitSeq(out, "\n") {
-			if id, ok := strings.CutPrefix(strings.TrimSpace(line), "started|"); ok {
-				started[id] = true
+		read := func(out string) {
+			for line := range strings.SplitSeq(out, "\n") {
+				if id, ok := strings.CutPrefix(strings.TrimSpace(line), "started|"); ok {
+					started[id] = true
+				}
 			}
+		}
+		out, _ := sys.Run(within(ctx, stopLimit), distro, "root", startScript(ids))
+		read(out)
+		// A container can wait on another (one on another's network, or
+		// linked to it), which may not have run yet when its turn came: a
+		// second round, a little later, starts it once that one runs.
+		var left []string
+		for _, id := range ids {
+			if !started[id] {
+				left = append(left, id)
+			}
+		}
+		if len(left) > 0 {
+			sleep(containerRetryWait)
+			out, _ = sys.Run(within(ctx, stopLimit), distro, "root", startScript(left))
+			read(out)
 		}
 		for _, id := range ids {
 			if !started[id] {
@@ -936,6 +1023,41 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		}
 	}
 	return e, nil
+}
+
+// startTries are the waits before each start of a distribution a run
+// starts again: WSL can refuse a start for a moment right after a
+// compaction, and a distribution started can stop on its own before the run
+// reads its root (a short instanceIdleTimeout). A few tries, seconds apart,
+// ride over both; a distribution that does not start after them is left
+// down, and the run says so.
+var startTries = []time.Duration{0, 3 * time.Second, 10 * time.Second}
+
+// containerRetryWait is how long the second round of container starts
+// waits after the first.
+const containerRetryWait = 5 * time.Second
+
+// startWritable starts distro and reads whether its root is read-only,
+// trying again as startTries say. It returns how many tries it took. A
+// call that ran out of time is not tried again (a WSL that did not answer
+// in minutes will not in seconds), nor is a name WSL does not have.
+func startWritable(ctx context.Context, env Env, distro string, sleep func(time.Duration)) (ro bool, tries int, err error) {
+	sys := env.Disks.WSL
+	for i, wait := range startTries {
+		if wait > 0 {
+			sleep(wait)
+		}
+		tries = i + 1
+		if err = sys.Start(within(ctx, callLimit), distro); err == nil {
+			if ro, err = readOnly(ctx, env, distro); err == nil {
+				return ro, tries, nil
+			}
+		}
+		if errors.Is(err, wsl.ErrNoAnswer) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, wsl.ErrNoDistro) {
+			return false, tries, err
+		}
+	}
+	return false, tries, err
 }
 
 // runningNow reports whether WSL lists distro as running. A WSL that does
@@ -990,7 +1112,9 @@ func reclaimOf(d disks.Disk) int64 {
 
 // readOnly reports whether the distribution's root is mounted read-only.
 func readOnly(ctx context.Context, env Env, distro string) (bool, error) {
-	out, err := env.Disks.WSL.Run(within(ctx, callLimit), distro, "root", `awk '$2=="/"{print $4}' /proc/mounts | tail -1`)
+	// The shell reads /proc/mounts itself: with awk, a distribution that has
+	// none would answer nothing, and nothing reads as "writable".
+	out, err := env.Disks.WSL.Run(within(ctx, callLimit), distro, "root", survey.RootOptions)
 	if err != nil {
 		return false, err
 	}
@@ -1015,6 +1139,11 @@ func safeIDs(ids []string) []string {
 	}
 	return out
 }
+
+// Startable is the containers of ids a run starts again: the ids made of
+// hex digits, all that docker start is ever given. The fronts name them
+// where a person is told how to start them by hand.
+func Startable(ids []string) []string { return safeIDs(ids) }
 
 // oneLine keeps the first line of an error, for a step's detail.
 func oneLine(s string) string {

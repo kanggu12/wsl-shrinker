@@ -146,6 +146,20 @@ func (s Store) Add(e Entry) error {
 	return nil
 }
 
+// Clear removes every run: the file, and a temporary one a write that was
+// cut short left beside it. No history is nothing to clear, not an error.
+func (s Store) Clear() error {
+	if err := os.Remove(s.Path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Add removes its temporary file itself; only a crash leaves one.
+	left, _ := filepath.Glob(filepath.Join(filepath.Dir(s.Path), "history-*.tmp"))
+	for _, p := range left {
+		_ = os.Remove(p)
+	}
+	return nil
+}
+
 // All returns every entry, oldest first. A missing file is no history; a
 // damaged line, however long, is skipped.
 func (s Store) All() ([]Entry, error) {

@@ -15,6 +15,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
 )
 
@@ -75,7 +76,7 @@ func doctorCmd(made *apps) *cobra.Command {
 			case st == journal.CutOff:
 				line(false, "a run of "+e.Disk+" was cut off at "+e.Step, "wsl-shrinker recover finishes it")
 			case st == journal.Going:
-				note(e.Disk + " is being shrunk by another wsl-shrinker")
+				note(e.Name() + " is being shrunk by another wsl-shrinker")
 			}
 			ctx := cmd.Context()
 			info := a.Info(ctx)
@@ -83,6 +84,9 @@ func doctorCmd(made *apps) *cobra.Command {
 			// distributions has WSL already, and the fix for it differs.
 			ds, findErr := disks.Find(ctx, a.DisksEnv())
 			switch {
+			case info.NoAnswer:
+				// Not an old WSL: one that did not answer in time.
+				line(false, "WSL did not answer wsl --version in time", noAnswerFix)
 			case info.Version == "":
 				line(false, "WSL does not answer wsl --version", wslFix(findErr == nil && len(ds) > 0))
 			case !info.CanCompact:
@@ -98,7 +102,11 @@ func doctorCmd(made *apps) *cobra.Command {
 				}
 			}
 			if findErr != nil {
-				line(false, "could not list the distributions: "+findErr.Error(), "wsl --status says why")
+				fix := "wsl --status says why"
+				if errors.Is(findErr, wsl.ErrNoAnswer) {
+					fix = noAnswerFix
+				}
+				line(false, "could not list the distributions: "+findErr.Error(), fix)
 				return problems(bad)
 			}
 			if len(ds) == 0 {
@@ -166,14 +174,22 @@ func doctorDisk(d disks.Disk, canCompact, protected bool, line func(bool, string
 			line(false, d.Name+": the file is encrypted (EFS)", "Windows cannot compact an encrypted disk; decrypt it in its Properties")
 		case shrink.BlockFSErrors:
 			line(false, d.Name+": the filesystem records errors", "check it with e2fsck first: see Troubleshooting in the docs")
+		case shrink.BlockFixed:
+			// How the disk was made, not something missing on this PC.
+			note(d.Name + ": a fixed-size disk; its file keeps its full size, and Windows compacts only disks that grow")
 		case shrink.BlockProtected:
 			// A choice made in the settings, not a problem.
 			note(d.Name + ": protected in the settings; wsl-shrinker setup --unprotect " + d.Name + " shrinks it again")
 		case shrink.BlockHeld:
 			// Waiting on a program, not a problem.
-			if d.Kind == disks.KindDocker {
+			switch shrink.OwnerOf(d) {
+			case shrink.OwnerDocker:
 				note(d.Name + ": in use; quit Docker Desktop to shrink it")
-			} else {
+			case shrink.OwnerRancher:
+				note(d.Name + ": in use; quit Rancher Desktop to shrink it")
+			case shrink.OwnerPodman:
+				note(d.Name + ": in use; stop the Podman machine (podman machine stop) to shrink it")
+			default:
 				note(d.Name + ": in use by another program; close it to shrink the disk")
 			}
 		}

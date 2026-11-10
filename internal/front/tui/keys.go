@@ -30,6 +30,8 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.keyPage(s)
 	case modeConfirm:
 		return m.keyConfirm(s)
+	case modeForget:
+		return m.keyForget(s)
 	case modeClean:
 		return m.keyClean(s)
 	case modeRun:
@@ -64,10 +66,14 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.move(1)
 	case "r":
-		// Read everything again, the inside of the selected disk included.
+		// Read everything again, the inside of the selected disk included,
+		// and WSL's version when it did not answer before.
 		m.loading = true
 		if d, ok := m.selected(); ok && d.Running && d.Distro != "" {
 			delete(m.surveys, d.Distro)
+		}
+		if !m.infoKnown {
+			return m, tea.Batch(m.loadDisks(), m.loadInfo())
 		}
 		return m, m.loadDisks()
 	case "c":
@@ -78,16 +84,27 @@ func (m model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openConfirm()
 	case "R":
 		// Finish a run that was cut off: its distribution and containers
-		// started again.
-		if m.unfinishedState != journal.CutOff {
+		// started again. One try at a time: a second R while the first is
+		// at work would start the same things twice.
+		if m.unfinishedState != journal.CutOff || m.settling {
 			return m, nil
 		}
 		b, ctx := m.b, m.ctx
+		m.settling = true
 		m.say(i18n.T("toast.recovering"), ui.CatLive)
 		return m, func() tea.Msg {
 			said, err := b.Recover(ctx)
 			return recoverMsg{said: said, err: err}
 		}
+	case "F":
+		// Forget a run R could not finish. Offered only after R failed to
+		// start again what the run had stopped, and asked about first.
+		if m.unfinishedState != journal.CutOff || !m.recoverFailed || m.settling {
+			return m, nil
+		}
+		// The question stands alone, as the one before a run does.
+		m.toast = ""
+		m.mode = modeForget
 	case "h":
 		m.hist = m.b.History()
 		m.mode, m.pageTop = modeHistory, 0
@@ -286,6 +303,29 @@ func (m model) keyConfirm(s string) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return reopenMsg{err: b.Reopen(args)} }
 		}
 		return m.startRun(q, clean)
+	case "esc", "n", "q":
+		m.mode = modeMain
+	}
+	return m, nil
+}
+
+// keyForget answers the question before a cut-off run is forgotten.
+func (m model) keyForget(s string) (tea.Model, tea.Cmd) {
+	switch s {
+	case "enter", "y":
+		m.mode = modeMain
+		// The box is open only while the run is cut off and neither R nor F
+		// is at work: a reload that finds the run ended closes it, and F
+		// waits for R. The check keeps an answer from acting should that
+		// ever stop holding.
+		if m.unfinishedState != journal.CutOff || m.settling {
+			return m, nil
+		}
+		// The run as the box showed it goes with the answer, for the words
+		// after it.
+		b, ctx, e := m.b, m.ctx, m.unfinished
+		m.settling = true
+		return m, func() tea.Msg { return forgetMsg{run: e, err: b.Forget(ctx, e)} }
 	case "esc", "n", "q":
 		m.mode = modeMain
 	}

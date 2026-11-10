@@ -3,7 +3,9 @@ package wsl
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 )
 
@@ -100,6 +102,91 @@ func TestRunningListFailureIsNotAllStopped(t *testing.T) {
 	// Running names are matched without case.
 	if got, err := runningNames("Dev\r\n", nil, "", nil); err != nil || !got["dev"] {
 		t.Fatalf("%v %v", got, err)
+	}
+}
+
+func TestACallWithNoLimitGetsOne(t *testing.T) {
+	// A call whose caller set no limit gets the answer limit.
+	ctx, cancel := limited(context.Background())
+	defer cancel()
+	dl, ok := ctx.Deadline()
+	if left := time.Until(dl); !ok || left > answerLimit || left < answerLimit-time.Second {
+		t.Fatalf("deadline in %s, %v", left, ok)
+	}
+	// One with a limit of its own keeps it, longer or not.
+	own, cancelOwn := context.WithTimeout(context.Background(), time.Hour)
+	defer cancelOwn()
+	got, cancelGot := limited(own)
+	defer cancelGot()
+	want, _ := own.Deadline()
+	if dl, _ := got.Deadline(); !dl.Equal(want) {
+		t.Fatalf("own limit %v became %v", want, dl)
+	}
+}
+
+// hangs is a wsl.exe that never answers, with what wslExe does around a
+// call: the limit, and the error once it runs out.
+func hangs(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := limited(ctx)
+	defer cancel()
+	limit := timeLeft(ctx)
+	<-ctx.Done()
+	if err := noAnswer(ctx, args, limit); err != nil {
+		return "", err
+	}
+	return "", ctx.Err()
+}
+
+func TestAWSLThatNeverAnswersEndsInNoAnswer(t *testing.T) {
+	defer func(l time.Duration) { answerLimit = l }(answerLimit)
+	answerLimit = 100 * time.Millisecond
+	// Listing ends in an error that says so, within the limit, and asks
+	// once: a second question to a WSL that did not answer would double
+	// the wait.
+	calls := 0
+	count := func(ctx context.Context, args ...string) (string, error) {
+		calls++
+		return hangs(ctx, args...)
+	}
+	start := time.Now()
+	_, err := buildDistros(context.Background(), []regEntry{{id: "{1}", name: "Dev", flags: vmMode}}, "", count)
+	if !errors.Is(err, ErrNoAnswer) || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "--list --running --quiet") {
+		t.Fatalf("got %v", err)
+	}
+	if took := time.Since(start); took > 3*time.Second || calls != 1 {
+		t.Fatalf("took %s and %d calls", took, calls)
+	}
+	// Asked for itself, it is not taken for an old WSL that cannot compact.
+	in, err := info(context.Background(), hangs)
+	if !errors.Is(err, ErrNoAnswer) || !in.NoAnswer || in.CanCompact || in.Version != "" {
+		t.Fatalf("%+v %v", in, err)
+	}
+}
+
+func TestInfoTellsAnOldWSLFromOneThatDidNotAnswer(t *testing.T) {
+	ctx := context.Background()
+	// The WSL built into Windows fails --version at once: an old WSL, which
+	// cannot compact, and no error.
+	old := func(context.Context, ...string) (string, error) { return "Usage: wsl.exe", errors.New("exit status 1") }
+	if in, err := info(ctx, old); err != nil || in != (Info{}) {
+		t.Fatalf("%+v %v", in, err)
+	}
+	// A --help that ends with a failing exit code still says --compact.
+	newer := func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "--version" {
+			return "WSL version: 3.0.3.0\n", nil
+		}
+		return "  --manage <Distro> <Options...>\n    --compact\n", errors.New("exit status 4294967295")
+	}
+	if in, err := info(ctx, newer); err != nil || !in.CanCompact || in.Version != "3.0.3.0" || in.NoAnswer {
+		t.Fatalf("%+v %v", in, err)
+	}
+	// Stopped by the caller, as by Ctrl+C: an error, not an old WSL.
+	stopped, cancel := context.WithCancel(ctx)
+	cancel()
+	quit := func(ctx context.Context, _ ...string) (string, error) { return "", ctx.Err() }
+	if in, err := info(stopped, quit); err == nil || in.NoAnswer {
+		t.Fatalf("%+v %v", in, err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/history"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
@@ -34,6 +35,7 @@ const (
 	modeRun                 // a run in progress, then its result
 	modeHistory             // past runs
 	modeHelp                // keys and how it works
+	modeForget              // the question before a cut-off run is forgotten
 )
 
 // Messages the model receives from its commands.
@@ -52,6 +54,11 @@ type (
 	recoverMsg struct {
 		said string
 		err  error
+	}
+	// forgetMsg is how forgetting a cut-off run went, and the run it was.
+	forgetMsg struct {
+		run journal.Entry
+		err error
 	}
 	infoMsg   wsl.Info
 	surveyMsg struct {
@@ -157,6 +164,12 @@ type model struct {
 	unfinished      journal.Entry
 	unfinishedState journal.State
 	toastUntil      time.Time
+	// settling is set while R or F is at work on the cut-off run: neither
+	// starts a second time meanwhile. recoverFailed is set once R could not
+	// start again what the run had stopped: from then on F offers to
+	// forget the run, until it is no longer cut off.
+	settling      bool
+	recoverFailed bool
 	// reopening is set while a new window is being opened for a run: no
 	// second run starts meanwhile.
 	reopening bool
@@ -277,12 +290,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case infoMsg:
-		m.info, m.infoKnown = wsl.Info(msg), true
+		// A WSL that did not answer leaves what it can do unknown: no
+		// distribution is held back for it, and the run's own calls say
+		// what is wrong.
+		m.info, m.infoKnown = wsl.Info(msg), !msg.NoAnswer
 		return m, nil
 	case disksMsg:
 		m.loading, m.loaded = false, true
 		m.list, m.err, m.now = msg.list, msg.err, time.Now()
+		// Another run than the one R failed on: F waits for R to fail on
+		// this one too, and a question about the other closes.
+		if !msg.unfinished.Same(m.unfinished) {
+			m.recoverFailed = false
+			if m.mode == modeForget {
+				m.mode = modeMain
+			}
+		}
 		m.unfinished, m.unfinishedState = msg.unfinished, msg.unfinishedState
+		// A run no longer cut off has nothing left to forget: the question
+		// about it closes, and F is offered again only after R fails anew.
+		if m.unfinishedState != journal.CutOff {
+			m.recoverFailed = false
+			if m.mode == modeForget {
+				m.mode = modeMain
+			}
+		}
 		m.hist = m.b.History()
 		m.reselect()
 		if m.pending != nil && m.err == nil {
@@ -315,13 +347,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recoverMsg:
 		// Said either way; the disks are read again, and with them whether
 		// a run is still unfinished.
+		m.settling = false
 		if msg.err != nil {
+			// A start that failed leaves the run cut off: F forgets it from
+			// now on. Any other failure is one to wait out or look into.
+			var still app.StillCutOff
+			if errors.As(msg.err, &still) {
+				m.recoverFailed = true
+			}
 			m.say(oneLine(msg.err.Error()), ui.CatBad)
 		} else {
 			// A line, as every toast: what was started again. A note the
 			// command line adds under it does not fit one.
 			said, _, _ := strings.Cut(msg.said, "\n")
 			m.say(said, ui.CatDone)
+		}
+		m.loading = true
+		return m, m.loadDisks()
+	case forgetMsg:
+		m.settling = false
+		if msg.err != nil {
+			// Still cut off: R and F stay as they were.
+			m.say(oneLine(msg.err.Error()), ui.CatBad)
+		} else {
+			// Closed: nothing holds shrinking back from here on, before
+			// the disks are read again as well.
+			m.unfinished, m.unfinishedState, m.recoverFailed = journal.Entry{}, journal.None, false
+			if msg.run.Disk == "" {
+				m.say(i18n.T("toast.forgot.unknown"), ui.CatDone)
+			} else {
+				m.say(i18n.T("toast.forgot", msg.run.Disk), ui.CatDone)
+			}
 		}
 		m.loading = true
 		return m, m.loadDisks()
@@ -535,12 +591,12 @@ func (m model) finishDisk(res shrink.Result) (tea.Model, tea.Cmd) {
 func (m model) queueFor() []disks.Disk {
 	var q []disks.Disk
 	for _, d := range m.list {
-		if m.marked[d.Name] && m.blocked(d) == "" {
+		if m.marked[d.Name] && m.block(d) == "" {
 			q = append(q, d)
 		}
 	}
 	if len(q) == 0 {
-		if d, ok := m.selected(); ok && m.blocked(d) == "" {
+		if d, ok := m.selected(); ok && m.block(d) == "" {
 			q = append(q, d)
 		}
 	}
@@ -560,7 +616,16 @@ func (m model) block(d disks.Disk) shrink.Block {
 
 // blocked says why a disk cannot be shrunk now, in words, or "" when it can.
 func (m model) blocked(d disks.Disk) string {
-	switch m.block(d) {
+	return blockWords(d, m.block(d))
+}
+
+// blockWords is a reason a disk cannot be shrunk now in the screen's words;
+// "" only for no reason at all.
+func blockWords(d disks.Disk, b shrink.Block) string {
+	switch b {
+	case "":
+		// Nothing stands in the way.
+		return ""
 	case shrink.BlockProtected:
 		return i18n.T("toast.protected", d.Name)
 	case shrink.BlockUnreadable:
@@ -569,12 +634,16 @@ func (m model) blocked(d disks.Disk) string {
 		return i18n.T("toast.encrypted", d.Name)
 	case shrink.BlockFSErrors:
 		return i18n.T("toast.fserrors", d.Name)
+	case shrink.BlockFixed:
+		return i18n.T("toast.fixed", d.Name)
 	case shrink.BlockHeld:
 		return i18n.T(heldKey(d, "toast.held"), d.Name)
 	case shrink.BlockNoCompact:
 		return i18n.T("toast.nocompact")
 	}
-	return ""
+	// A reason the screen has no words for yet is said in the engine's: a
+	// disk that cannot be shrunk never reads as one that can.
+	return d.Name + ": " + b.Reason(d)
 }
 
 // kindOrder is the order of the groups in the clean list: what is rebuilt

@@ -151,6 +151,22 @@ func (s Store) Begin(e Entry) error {
 	return f.Close()
 }
 
+// Name is the disk the entry's run shrinks, as a message says it: "a
+// disk" when the journal does not say, as a run's that is just starting.
+func (e Entry) Name() string {
+	if e.Disk == "" {
+		return "a disk"
+	}
+	return e.Disk
+}
+
+// Same reports whether e and o are the same run: the same process, started
+// at the same moment, on the same disk. Two entries of a journal that
+// does not parse are the same too: neither says more.
+func (e Entry) Same(o Entry) bool {
+	return e.PID == o.PID && e.Started.Equal(o.Started) && e.Disk == o.Disk
+}
+
 // youngJournal is how new a journal that does not parse yet must be to be
 // a run starting rather than one cut off.
 const youngJournal = 10 * time.Second
@@ -189,7 +205,7 @@ func (s Store) busy() error {
 		return err
 	}
 	if st == Going {
-		return fmt.Errorf("%w: %s is being shrunk by another wsl-shrinker", ErrBusy, old.Disk)
+		return fmt.Errorf("%w: %s is being shrunk by another wsl-shrinker", ErrBusy, old.Name())
 	}
 	if old.Disk == "" {
 		return fmt.Errorf("%w: a run was cut off; wsl-shrinker recover finishes it", ErrBusy)

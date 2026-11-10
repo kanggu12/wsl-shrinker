@@ -12,12 +12,13 @@ terminal's own; `WSL_SHRINKER_SCREEN=windows` keeps it in `wsl-shrinker.exe`.
 | `wsl-shrinker list [--json]` | every disk: its state, file size, size after a shrink, and what that gives back |
 | `wsl-shrinker inside DISTRO [--json]` | what can be removed inside a running distribution, each item with its id |
 | `wsl-shrinker shrink DISK... [--clean DISK=ID,ID]... [--yes] [--json]` | shrink the named disks one after another |
-| `wsl-shrinker recover` | finish a cut-off run: start its distribution and containers again |
-| `wsl-shrinker history [--json]` | past runs, each with its steps |
+| `wsl-shrinker recover [--forget] [--yes]` | finish a cut-off run: start its distribution and containers again. `--forget` closes it as it is, starting nothing |
+| `wsl-shrinker history [--json \| --clear [--yes]]` | past runs, each with its steps. `--clear` removes them |
 | `wsl-shrinker doctor` | what a shrink needs on this PC and how to fix what is missing; exits with 1 if something is missing |
 | `wsl-shrinker config path` | where the settings file is |
 | `wsl-shrinker config init` | write a settings file with every key at its default |
 | `wsl-shrinker version` | this build's version, commit and date (`dev` for a build that is not a release) |
+| `wsl-shrinker uninstall [--purge] [--yes]` | remove wsl-shrinker from this PC. `--purge` removes the settings and the history too |
 
 `--json` prints one object: `"schema": 1`, then `disks`, `runs`, `results`, or the look inside (the root filesystem's
 numbers, Docker, and the `items` with their ids). Each disk in `list --json` says whether it is `protected`, and in
@@ -99,8 +100,8 @@ Without `--yes` it asks once for all of them; with no terminal to ask in, it sto
 the question go to stderr, so stdout holds only the steps or the JSON. Ctrl+C at the question cancels. `--clean` can
 repeat; an id named twice is removed once.
 
-Nothing runs if a name is not a disk, a disk cannot be shrunk now (protected, encrypted, in use, with filesystem
-errors), a `--clean` id is not in the distribution, or another wsl-shrinker's run is not finished.
+Nothing runs if a name is not a disk, a disk cannot be shrunk now (protected, encrypted, fixed-size, in use, with
+filesystem errors), a `--clean` id is not in the distribution, or another wsl-shrinker's run is not finished.
 
 Each step prints a line: its name (`check`, `clean`, `stop`, `compact`, `verify`, `restart`, as in the JSON), how it
 ended, and what it found or did. A failure skips the disks after it, with a line on whether the disk was compacted and
@@ -117,6 +118,50 @@ distribution closes that terminal. The command exits with 0 once that window sta
 1; the result shows in the window and in `wsl-shrinker history`. `--json` is refused there, since nothing would be
 printed. Once the stop step starts, the run finishes: Ctrl+C does not leave a distribution or its containers stopped.
 
+## recover
+
+A run cut off (the window closed, a crash, the power) leaves its journal, and no other run starts until it is finished.
+`recover` starts again what the run had stopped: the distribution, writable, and its containers. If WSL is still
+compacting the disk, it says so; try again when it is done.
+
+If the distribution does not start, the run stays cut off and the message names both ways on: `wsl-shrinker recover`
+tries again, and `wsl-shrinker recover --forget` closes the run as it is. Forgetting starts nothing. It says what the
+run had stopped and asks first; with no terminal to ask in, it wants `--yes`. Then it prints how to start those by hand:
+
+```text
+✓ forgot the run of Ubuntu-24.04 that was cut off at compact; nothing was started again
+note: to start by hand what it had stopped: wsl -d Ubuntu-24.04, then docker start 0123456789ab inside it
+```
+
+A journal that cannot be read says so instead: what its run had stopped is not known. On the screen, `R` finishes the
+run, and `F` forgets it once `R` could not start it again.
+
+## history
+
+`history --clear` removes every past run, after a question that says how many; with no terminal to ask in, it wants
+`--yes`. It refuses while a run is going on, which writes its line as it ends, and takes no `--json`. The disks, the
+settings and a run that was cut off stay as they are.
+
+## uninstall
+
+```powershell
+wsl-shrinker uninstall
+wsl-shrinker uninstall --purge --yes
+```
+
+It removes `wsl-shrinker.exe` and the launcher beside it, then their folder and its PATH entry when the folder is named
+`wsl-shrinker` and holds nothing else, as the install script leaves it. A folder with other files, or named otherwise,
+keeps them and any PATH entry. The settings and the history stay unless `--purge` is given; then only the files
+wsl-shrinker writes go ([Settings](settings.md#files-wsl-shrinker-writes)), and a folder with anything else in it stays.
+It lists all this and asks first; with no terminal to ask in, it wants `--yes`. The program's own file goes a moment
+after it exits. Terminals opened afterwards no longer find `wsl-shrinker`.
+
+Nothing is removed while a run is not finished (let it finish, or `recover` it, or `recover --forget` when it cannot
+be finished), or while another wsl-shrinker runs from the same folder or a screen is open in WSL; it looks again after
+the question. When Scoop installed it, the program stays for `scoop uninstall wsl-shrinker`, and
+`wsl-shrinker uninstall --purge` before that removes the settings and the history. It reads no settings, so a settings file that
+does not load does not stop it. Typed in WSL, it runs in `wsl-shrinker.exe` like every command.
+
 ## Keys on the screen
 
 | Key | |
@@ -127,11 +172,13 @@ printed. Once the stop step starts, the run finishes: Ctrl+C does not leave a di
 | `c` | choose what to remove inside the selected running distribution; also in the confirm box, when there is a choice |
 | `r` | read the disks again |
 | `R` | finish a cut-off run, when the screen says there is one |
+| `F` | forget a cut-off run that `R` could not finish: nothing is started again, after a question |
 | `h` | past runs |
 | `?` | help |
 | `q` | quit |
 
-In the confirm box, `⏎` or `y` shrinks and `esc` or `n` cancels. The clean list groups items by what removing costs:
+In the confirm box, `⏎` or `y` shrinks and `esc` or `n` cancels; in the box before forgetting, `⏎` or `y` forgets and
+`esc`, `n` or `q` cancels. The clean list groups items by what removing costs:
 `space` chooses one, `a` every cache (nothing that needs a download or holds history), `n` none; `PgUp` `PgDn` move by
 pages and `Home` `End` to the first and the last, `⏎` goes on to the shrink, `esc` back. A long disk list scrolls with
 the selection. Help and history scroll with `↑` `↓` `PgUp` `PgDn` `Home` `End`; `q` quits, any other key goes back.

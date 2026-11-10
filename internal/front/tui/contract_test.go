@@ -537,9 +537,10 @@ func scanCode(t *testing.T, path string, namespaces map[string]bool, u *codeUse)
 			case *ast.CallExpr:
 				sel, ok := n.Fun.(*ast.SelectorExpr)
 				if id, isID := n.Fun.(*ast.Ident); isID && id.Name == "heldKey" && len(n.Args) == 2 {
-					// heldKey completes its key by the disk's kind: every kind.
-					for _, k := range constsOf(t, filepath.Join("..", "..", "engine", "disks", "disks.go"), "Kind") {
-						u.required[heldKey(disks.Disk{Kind: disks.Kind(k)}, unquote(t, n.Args[1]))] = at
+					// heldKey completes its key by the program that keeps the
+					// disk: every one the engine declares, and none.
+					for _, o := range constsOf(t, filepath.Join("..", "..", "engine", "shrink", "shrink.go"), "Owner") {
+						u.required[ownerKey(shrink.Owner(o), unquote(t, n.Args[1]))] = at
 					}
 				}
 				if !ok || len(n.Args) == 0 {

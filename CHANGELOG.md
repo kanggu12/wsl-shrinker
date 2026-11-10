@@ -6,6 +6,45 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
+### Added
+
+- `wsl-shrinker uninstall` removes wsl-shrinker from this PC with no download: the program and its WSL launcher, then
+  their folder and PATH entry when the install made them. `--purge` removes the settings and the history too, file by
+  file. It lists what goes and what stays and asks first. It refuses while a run is not finished, another
+  wsl-shrinker runs or a screen is open in WSL, and leaves one Scoop installed to `scoop uninstall`.
+- A cut-off run whose distribution does not start again can be closed as it is: `F` on the screen once `R` has failed,
+  or `wsl-shrinker recover --forget`. Both say first what stays stopped, start nothing, and say how to start it by
+  hand. Before, such a run held back every later one until its distribution started.
+- `wsl-shrinker history --clear` removes the past runs, after a question that says how many.
+- A fixed-size disk is marked `fixed` and not shrunk: Windows reports a compaction of one as done and leaves its file as
+  it is, so a run would stop the distribution for nothing. In `list --json` each estimate has `fixed`, and `blocked`
+  is `fixed` for such a disk.
+- Rancher Desktop's distributions and Podman machines are treated as Docker Desktop's are: not shrunk while their program
+  runs them, with what to quit or stop. In `list --json` such a running distribution is `blocked: "held"`, and
+  `shrink` refuses it.
+- The look inside lists the package caches of dnf (4 and 5), pacman and zypper beside apt's, each emptied by its own
+  tool, and Gradle's cache.
+
+### Fixed
+
+- In a distribution made from a small image, without awk, grep or xargs, the look inside, the containers' stop and
+  start, and the check of the root work; without find, no cache in a home folder is offered, since find empties them.
+  A distribution without grep no longer took Docker Desktop's containers and images for its own.
+- A WSL that does not answer within a minute, as while it starts or updates, is said to be that, with what to do,
+  rather than read as an old WSL or as no distribution running. The screen and the commands no longer wait for it
+  forever.
+- `R` and `recover` on a run whose disk stays held now offer the way out too, and say that another program may hold
+  the disk. A run that is just starting elsewhere is said as "a disk is being shrunk", not with a blank name.
+- Starting a distribution again after a shrink is tried three times, seconds apart: WSL can refuse a start right after
+  a compaction. A container that waits on another gets a second try.
+- With exactly one container to stop, the question before a shrink ended in "again.%!(EXTRA int=1)".
+- The screen says a run was cut off, with `R`, when no disk can be listed. A message takes up to three rows and marks
+  where it is cut, and a name like `Ubuntu-24.04`, a size or a command is no longer broken across lines.
+- Inside WSL, the screen's folder for crash reports, `~/.cache/wsl-shrinker`, goes as the screen ends when nothing is
+  in it.
+
 ## [0.5.1] - 2026-11-10
 
 ### Fixed
@@ -163,7 +202,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.0
 [0.5.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.1
 [0.5.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.5.0
 [0.2.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.2.2

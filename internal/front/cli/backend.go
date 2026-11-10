@@ -2,10 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,7 +28,7 @@ import (
 // a command for people.
 func backendCmd(p *apps) *cobra.Command {
 	cmd := &cobra.Command{Use: "backend", Hidden: true, Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return fmt.Errorf("%w: backend takes hello, info, settings, pending, crashes, shrink or reopen", errUsage)
+		return fmt.Errorf("%w: backend takes hello, info, settings, pending, recover, forget, crashes, shrink or reopen", errUsage)
 	}}
 	// hello names the build, so the launcher talks only to its own.
 	cmd.AddCommand(&cobra.Command{Use: "hello", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -46,7 +48,8 @@ func backendCmd(p *apps) *cobra.Command {
 			Schema     int    `json:"schema"`
 			Version    string `json:"version"`
 			CanCompact bool   `json:"can_compact"`
-		}{schema, info.Version, info.CanCompact})
+			NoAnswer   bool   `json:"no_answer,omitempty"`
+		}{schema, info.Version, info.CanCompact, info.NoAnswer})
 	}})
 	// settings are what the screen needs from config.toml, with the language
 	// already chosen the Windows way (the setting, WSL_SHRINKER_LANG, then
@@ -107,6 +110,55 @@ func backendCmd(p *apps) *cobra.Command {
 			Run    journal.Entry `json:"run"`
 		}{schema, stateWord(st), e})
 	}})
+	// recover finishes a run that was cut off, for the screen: what it did
+	// or why it could not, as JSON, so the screen tells a start that failed
+	// (the run stays cut off, and F forgets it) from every other failure.
+	// The failure is in the answer, not the exit code: the question itself
+	// was answered.
+	cmd.AddCommand(&cobra.Command{Use: "recover", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, err := p.get()
+		if err != nil {
+			return err
+		}
+		did, err := a.Recover(cmd.Context())
+		ans := struct {
+			Schema      int    `json:"schema"`
+			Did         string `json:"did,omitempty"`
+			Error       string `json:"error,omitempty"`
+			StillCutOff bool   `json:"still_cut_off,omitempty"`
+		}{Schema: schema, Did: did}
+		if err != nil {
+			var still app.StillCutOff
+			ans.Error, ans.StillCutOff = err.Error(), errors.As(err, &still)
+		}
+		return printJSON(cmd.OutOrStdout(), ans)
+	}})
+	// forget closes a run that was cut off as it is, for the screen, which
+	// has asked already: about the run named by its process, the moment it
+	// started and its disk. Nothing is printed: the exit code says how it
+	// went.
+	var pid int
+	var started, disk string
+	forget := &cobra.Command{Use: "forget", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, err := p.get()
+		if err != nil {
+			return err
+		}
+		var expect *journal.Entry
+		if cmd.Flags().Changed("pid") {
+			t, err := time.Parse(time.RFC3339Nano, started)
+			if err != nil {
+				return fmt.Errorf("%w: --started takes a time as RFC 3339 writes it", errUsage)
+			}
+			expect = &journal.Entry{PID: pid, Started: t, Disk: disk}
+		}
+		_, _, err = a.Forget(expect)
+		return err
+	}}
+	forget.Flags().IntVar(&pid, "pid", 0, "the process of the run the screen asked about")
+	forget.Flags().StringVar(&started, "started", "", "when that run started, as RFC 3339 writes it")
+	forget.Flags().StringVar(&disk, "disk", "", "that run's disk")
+	cmd.AddCommand(forget)
 	cmd.AddCommand(backendShrinkCmd(p))
 	// reopen continues a run in a new window, from the arguments after --,
 	// and returns once that window said it started.

@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kanggu12/wsl-shrinker/internal/app"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/disks"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
@@ -168,5 +170,46 @@ func TestReopenPassesTheHandoffAfterDashes(t *testing.T) {
 	}
 	if last := a.asked[len(a.asked)-1]; last != "backend reopen -- --reopened --run Ubuntu" {
 		t.Fatalf("asked %q", last)
+	}
+}
+
+func TestRecoverTellsAStartThatFailedApart(t *testing.T) {
+	a := thisBuild()
+	b, err := Open(context.Background(), a.run, "Ubuntu", "v9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, c := range []struct {
+		answer, did, err string
+		still            bool
+	}{
+		// What a recovery did, said as the Windows side says it.
+		{`{"schema":1,"did":"Ubuntu: running, 2 containers started again"}`, "Ubuntu: running, 2 containers started again", "", false},
+		// A start that failed: the run stays cut off, and F may forget it.
+		{`{"schema":1,"error":"the root filesystem stays read-only","still_cut_off":true}`, "", "the root filesystem stays read-only", true},
+		// Any other failure is a plain one: no forgetting is offered.
+		{`{"schema":1,"error":"WSL is still compacting Ubuntu; try again when it is done"}`, "", "WSL is still compacting Ubuntu; try again when it is done", false},
+	} {
+		a.out["backend recover"] = c.answer
+		did, err := b.Recover(ctx)
+		var still app.StillCutOff
+		if did != c.did || errors.As(err, &still) != c.still || (err == nil) != (c.err == "") || err != nil && err.Error() != c.err {
+			t.Errorf("%s: %q, %v", c.answer, did, err)
+		}
+	}
+	// Forget names the run asked about, each value in one argument with
+	// its flag, so an empty one survives; and says its failure.
+	run := journal.Entry{PID: 7, Started: time.Date(2026, 11, 10, 9, 0, 0, 5, time.UTC), Disk: "Docker Desktop data"}
+	line := "backend forget --pid=7 --started=2026-11-10T09:00:00.000000005Z --disk=Docker Desktop data"
+	a.err[line] = errors.New("Ubuntu is being shrunk by another wsl-shrinker; let it finish")
+	if err := b.Forget(ctx, run); err == nil || !strings.Contains(err.Error(), "let it finish") {
+		t.Fatalf("forget: %v", err)
+	}
+	if !slices.Contains(a.asked, line) {
+		t.Fatalf("asked %q", a.asked)
+	}
+	if err := b.Forget(ctx, journal.Entry{}); err != nil || !slices.Contains(a.asked, "backend forget --pid=0 --started=0001-01-01T00:00:00Z --disk=") {
+		t.Fatalf("forget of an unknown run: %v, asked %q", err, a.asked)
 	}
 }

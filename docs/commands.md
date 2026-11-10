@@ -12,7 +12,7 @@ terminal's own; `WSL_SHRINKER_SCREEN=windows` keeps it in `wsl-shrinker.exe`.
 | `wsl-shrinker list [--json]` | every disk: its state, file size, size after a shrink, and what that gives back |
 | `wsl-shrinker inside DISTRO [--json]` | what can be removed inside a running distribution, each item with its id |
 | `wsl-shrinker shrink DISK... [--clean DISK=ID,ID]... [--yes] [--json]` | shrink the named disks one after another |
-| `wsl-shrinker recover [--forget] [--yes]` | finish a cut-off run: start its distribution and containers again. `--forget` closes it as it is, starting nothing |
+| `wsl-shrinker recover [--forget [--yes]]` | finish a cut-off run: start its distribution and containers again. `--forget` closes it as it is, starting nothing |
 | `wsl-shrinker history [--json \| --clear [--yes]]` | past runs, each with its steps. `--clear` removes them |
 | `wsl-shrinker doctor` | what a shrink needs on this PC and how to fix what is missing; exits with 1 if something is missing |
 | `wsl-shrinker config path` | where the settings file is |

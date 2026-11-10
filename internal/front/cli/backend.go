@@ -152,7 +152,12 @@ func backendCmd(p *apps) *cobra.Command {
 			}
 			expect = &journal.Entry{PID: pid, Started: t, Disk: disk}
 		}
-		_, _, err = a.Forget(expect)
+		// The run ended meanwhile: the screen says so, rather than that it
+		// was forgotten.
+		_, st, err := a.Forget(expect)
+		if err == nil && st == journal.None {
+			return app.ErrNothingToForget
+		}
 		return err
 	}}
 	forget.Flags().IntVar(&pid, "pid", 0, "the process of the run the screen asked about")

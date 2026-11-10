@@ -170,10 +170,14 @@ func TestRecoverForgetWithoutATerminalWantsYes(t *testing.T) {
 	if len(fake.CallList()) != 0 {
 		t.Fatalf("calls %q", fake.CallList())
 	}
-	// --yes alone, without --forget, still finishes the run as before.
+	// --yes answers a question only --forget asks: alone it is a mistake
+	// in the command line, and nothing is done.
 	cutOffDev(t, a)
-	if code, out, errOut := shrinkWith(a, "recover", "--yes"); code != exitOK || !strings.HasPrefix(out, "Dev: ") || state(t, a) != journal.None {
-		t.Fatalf("recover --yes: exit %d, %q %q", code, out, errOut)
+	if code, _, errOut := shrinkWith(a, "recover", "--yes"); code != exitUsage || !strings.Contains(errOut, "--yes goes with --forget") || state(t, a) != journal.CutOff {
+		t.Fatalf("recover --yes: exit %d, %q", code, errOut)
+	}
+	if code, _, errOut := shrinkWith(a, "history", "--yes"); code != exitUsage || !strings.Contains(errOut, "--yes goes with --clear") {
+		t.Fatalf("history --yes: exit %d, %q", code, errOut)
 	}
 }
 
@@ -479,5 +483,15 @@ func TestRecoverForgetLeavesARunCutOffWhileItAsked(t *testing.T) {
 	}
 	if got, st, _ := a.Journal.Read(); st != journal.CutOff || got.Disk != "Debian" {
 		t.Fatalf("journal %v %+v, want the other run kept", st, got)
+	}
+}
+
+func TestTheBackendSaysARunThatEndedMeanwhile(t *testing.T) {
+	// The screen asked about a run another wsl-shrinker finished since:
+	// nothing to forget, said as such, for the screen to tell apart.
+	a, _ := flowApp(t)
+	code, _, errOut := shrinkWith(a, "backend", "forget", "--pid=7", "--started="+time.Now().Format(time.RFC3339Nano), "--disk=Dev")
+	if code != exitFail || !strings.Contains(errOut, app.ErrNothingToForget.Error()) {
+		t.Fatalf("exit %d: %q", code, errOut)
 	}
 }

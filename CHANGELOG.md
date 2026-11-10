@@ -13,6 +13,10 @@ that only fixes raises the patch number. Each release's section here is its rele
 - `uninstall` did not see that Scoop had installed wsl-shrinker: current Scoop names its files beside an app
   `scoop-manifest.json` and `scoop-install.json`, not `manifest.json`. It removed the launcher and the program from
   Scoop's folder instead of leaving them to `scoop uninstall`. It knows both names now.
+- `recover --yes` without `--forget`, and `history --yes` without `--clear`, are refused as the mistakes they are:
+  `--yes` answers a question only those ask.
+- On the screen, forgetting a run that another wsl-shrinker finished while the question stood says so, rather than
+  that the run was forgotten.
 
 ## [0.6.0] - 2026-11-10
 

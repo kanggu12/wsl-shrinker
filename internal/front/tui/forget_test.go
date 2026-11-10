@@ -769,3 +769,21 @@ func TestDockerStartStaysOneHoweverNarrow(t *testing.T) {
 		}
 	}
 }
+
+func TestARunEndedWhileTheQuestionStoodIsSaidSo(t *testing.T) {
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		b := cutOffRun()
+		b.recoverErr = stuck()
+		b.forgetErr = app.ErrNothingToForget
+		m := play(t, play(t, loaded(t, b, 120, 30), "R"), "F")
+		next, cmd := m.Update(snapshotKey("enter"))
+		next, _ = next.(model).Update(cmd())
+		m = next.(model)
+		// Said as what happened, and the run no longer holds anything back.
+		if m.toast != i18n.T("toast.forgot.gone") || m.unfinishedState != journal.None || m.recoverFailed {
+			t.Fatalf("%s: toast %q, state %v", lang, m.toast, m.unfinishedState)
+		}
+	}
+}

@@ -313,8 +313,14 @@ func (b *Backend) Recover(ctx context.Context) (string, error) {
 // one argument with its flag, so an empty one survives the trip to
 // Windows.
 func (b *Backend) Forget(ctx context.Context, run journal.Entry) error {
-	return b.run(ctx, []string{"backend", "forget", "--pid=" + strconv.Itoa(run.PID),
+	err := b.run(ctx, []string{"backend", "forget", "--pid=" + strconv.Itoa(run.PID),
 		"--started=" + run.Started.Format(time.RFC3339Nano), "--disk=" + run.Disk}, io.Discard)
+	// The same build says it in the same words: a run that ended meanwhile
+	// comes back as itself, for the screen to tell it apart.
+	if err != nil && strings.Contains(err.Error(), app.ErrNothingToForget.Error()) {
+		return app.ErrNothingToForget
+	}
+	return err
 }
 
 // lineWriter calls line for every whole line written to it.

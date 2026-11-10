@@ -579,6 +579,10 @@ func recoverCmd(p *apps) *cobra.Command {
 			"the start keeps failing. It says how to start by hand what the run had stopped.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// recover alone asks nothing: --yes would answer no question.
+			if yes && !forget {
+				return fmt.Errorf("%w: --yes goes with --forget; recover alone asks nothing", errUsage)
+			}
 			if forget {
 				return forgetRun(cmd, p, yes)
 			}
@@ -774,6 +778,10 @@ func historyCmd(p *apps) *cobra.Command {
 			"and a run that was cut off stay as they are.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// history alone asks nothing: --yes would answer no question.
+			if yes && !clear {
+				return fmt.Errorf("%w: --yes goes with --clear; history alone asks nothing", errUsage)
+			}
 			if clear {
 				// Nothing is printed for a script to read after a clear.
 				if asJSON {

@@ -366,10 +366,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadDisks()
 	case forgetMsg:
 		m.settling = false
-		if msg.err != nil {
+		switch {
+		case errors.Is(msg.err, app.ErrNothingToForget):
+			// Finished elsewhere while the question stood: nothing holds
+			// shrinking back, and nothing was forgotten.
+			m.unfinished, m.unfinishedState, m.recoverFailed = journal.Entry{}, journal.None, false
+			m.say(i18n.T("toast.forgot.gone"), ui.CatDone)
+		case msg.err != nil:
 			// Still cut off: R and F stay as they were.
 			m.say(oneLine(msg.err.Error()), ui.CatBad)
-		} else {
+		default:
 			// Closed: nothing holds shrinking back from here on, before
 			// the disks are read again as well.
 			m.unfinished, m.unfinishedState, m.recoverFailed = journal.Entry{}, journal.None, false

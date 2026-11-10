@@ -213,3 +213,16 @@ func TestRecoverTellsAStartThatFailedApart(t *testing.T) {
 		t.Fatalf("forget of an unknown run: %v, asked %q", err, a.asked)
 	}
 }
+
+func TestForgetTellsARunThatEndedMeanwhile(t *testing.T) {
+	a := thisBuild()
+	b, err := Open(context.Background(), a.run, "Ubuntu", "v9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "backend forget --pid=0 --started=0001-01-01T00:00:00Z --disk="
+	a.err[line] = errors.New(app.ErrNothingToForget.Error())
+	if err := b.Forget(context.Background(), journal.Entry{}); !errors.Is(err, app.ErrNothingToForget) {
+		t.Fatalf("got %v", err)
+	}
+}

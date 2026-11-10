@@ -256,3 +256,18 @@ func TestForgetLeavesARunOtherThanTheOneAskedAbout(t *testing.T) {
 		t.Fatal("Name")
 	}
 }
+
+func TestTheScreensForgetSaysARunThatEndedMeanwhile(t *testing.T) {
+	a, _ := testApp(t, func(int, string) bool { return false })
+	// Nothing cut off any more: the screen hears it, not "forgotten".
+	if err := (Backend{A: a}).Forget(context.Background(), stoppedDev); !errors.Is(err, ErrNothingToForget) {
+		t.Fatalf("got %v", err)
+	}
+	// The run there, and the one asked about: forgotten, no error.
+	if err := a.Journal.Begin(stoppedDev); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Backend{A: a}).Forget(context.Background(), stoppedDev); err != nil {
+		t.Fatalf("got %v", err)
+	}
+}

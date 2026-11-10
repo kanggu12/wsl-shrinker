@@ -301,6 +301,10 @@ func (a *App) Forget(expect *journal.Entry) (journal.Entry, journal.State, error
 	return e, st, a.Journal.End()
 }
 
+// ErrNothingToForget is the screen's Forget finding no run cut off: the
+// one it asked about ended meanwhile, finished by another wsl-shrinker.
+var ErrNothingToForget = errors.New("the run that was cut off had ended already; nothing was forgotten")
+
 // ErrRunChanged is Forget refusing a run cut off other than the one the
 // person was asked about: that one ended meanwhile, and this one started
 // and was cut off since.
@@ -382,7 +386,10 @@ func (b Backend) Recover(ctx context.Context) (string, error) { return b.A.Recov
 // Forget closes the run that was cut off the screen showed, starting
 // nothing again.
 func (b Backend) Forget(_ context.Context, run journal.Entry) error {
-	_, _, err := b.A.Forget(&run)
+	_, st, err := b.A.Forget(&run)
+	if err == nil && st == journal.None {
+		return ErrNothingToForget
+	}
 	return err
 }
 

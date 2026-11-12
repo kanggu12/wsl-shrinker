@@ -96,7 +96,7 @@ wsl-spawner stop of the distribution is running, say the sign-out's, the run sto
 that stop. When its stop did not run to its end, or WSL did not end the distribution after it, a distribution that is
 down goes on to the compaction, the step marked for a look with what wsl-spawner said. One that still runs, or whose
 state WSL does not say, fails the step: the run ends it, so that it starts afresh, with Docker, its units and
-wsl-spawner's own start, then starts it again with its containers.
+wsl-spawner's own start, then starts it again with its containers. When WSL does not end it either, the step says so.
 
 **Verify** reads the file once Windows lets go of it. It compares the file with the disk as read right before the
 compaction, once the stop settled it, so a file deleted after the disks were listed is not taken for data gone. The

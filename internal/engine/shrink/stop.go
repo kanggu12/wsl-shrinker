@@ -24,7 +24,8 @@ import (
 var errOtherStop = errors.New("another wsl-spawner stop is running")
 
 // stepError is a failed stop step's error with a code the screen has words
-// for (CodeOtherStop, CodeStillRuns, CodeNoState, CodeBackground), and what
+// for (CodeOtherStop, CodeStillRuns, CodeNoState, CodeBackground,
+// CodeNotEnded), and what
 // was heard from wsl-spawner of it, which the screen says after its own
 // words.
 type stepError struct {
@@ -250,16 +251,26 @@ func afterPartialStop(ctx context.Context, sys wsl.System, distro string, ids []
 		h.on(&e)
 		return e, nil
 	}
-	// Ended as wsl-spawner's stop would have ended it. A failure to end it
-	// is said with the rest: settle's start then finds it running.
-	ended := "wsl-shrinker ended it so that it starts afresh"
-	if terr := sys.Terminate(within(ctx, callLimit), distro); terr != nil {
-		ended = "wsl-shrinker could not end it either (" + oneLine(terr.Error()) + ")"
-	}
+	// Ended as wsl-spawner's stop would have ended it (endIt), or said to
+	// be one that could not be.
 	if state == stateUnknown {
-		return Event{}, stepError{code: CodeNoState, heard: h, err: fmt.Errorf("after wsl-spawner's stop (%s), WSL did not say whether %s still runs (%v); %s", whyOr(why), distro, serr, ended)}
+		ended, code := endIt(ctx, sys, distro, CodeNoState)
+		return Event{}, stepError{code: code, heard: h, err: fmt.Errorf("after wsl-spawner's stop (%s), WSL did not say whether %s still runs (%v); %s", whyOr(why), distro, serr, ended)}
 	}
-	return Event{}, stepError{code: CodeStillRuns, heard: h, err: fmt.Errorf("wsl-spawner's stop of %s did not end it (%s), and it still ran; %s", distro, whyOr(why), ended)}
+	ended, code := endIt(ctx, sys, distro, CodeStillRuns)
+	return Event{}, stepError{code: code, heard: h, err: fmt.Errorf("wsl-spawner's stop of %s did not end it (%s), and it still ran; %s", distro, whyOr(why), ended)}
+}
+
+// endIt ends distro, which wsl-spawner's stop left running or of which WSL
+// did not say, as that stop would have ended it, so that it starts afresh.
+// It says how that went in English, and gives the failed step's code: code,
+// or CodeNotEnded when WSL did not end it either, which the screen then
+// says rather than that it was ended. settle's start then finds it running.
+func endIt(ctx context.Context, sys wsl.System, distro, code string) (string, string) {
+	if err := sys.Terminate(within(ctx, callLimit), distro); err != nil {
+		return "wsl-shrinker could not end it either (" + oneLine(err.Error()) + ")", CodeNotEnded
+	}
+	return "wsl-shrinker ended it so that it starts afresh", code
 }
 
 // whyOr is what wsl-spawner said, or that it said nothing.
@@ -322,11 +333,8 @@ func stoppedInBackground(ctx context.Context, env Env, distro string, ids []stri
 	}
 	// Still not down after as long as such a stop may take: ended here, as
 	// that stop would have ended it, so it starts afresh.
-	ended := "wsl-shrinker ended it so that it starts afresh"
-	if terr := sys.Terminate(within(ctx, callLimit), distro); terr != nil {
-		ended = "wsl-shrinker could not end it either (" + oneLine(terr.Error()) + ")"
-	}
-	return Event{}, stepError{code: CodeBackground, err: fmt.Errorf("wsl-spawner went on stopping %s in the background, and it still ran; %s", distro, ended)}
+	ended, code := endIt(ctx, sys, distro, CodeBackground)
+	return Event{}, stepError{code: code, err: fmt.Errorf("wsl-spawner went on stopping %s in the background, and it still ran; %s", distro, ended)}
 }
 
 // spawnerLockScript looks at wsl-spawner's stop lock in a distribution, as

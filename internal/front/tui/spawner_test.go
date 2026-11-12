@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -336,6 +337,23 @@ func TestAStopThroughWslSpawnerThatNeedsALookSaysWhereItsStepsAre(t *testing.T) 
 			if got := strings.Contains(flat(lines), strings.Join(strings.Fields(i18n.T("detail.spawner.history")), " ")); got != c.says {
 				t.Errorf("%s %s: says where its steps are: %v:\n%s", lang, c.res.End, got, strings.Join(lines, "\n"))
 			}
+		}
+	}
+}
+
+func TestAStopThatCouldNotBeEndedIsNotSaidToHaveBeen(t *testing.T) {
+	// wsl-spawner's stop left Dev running, and so did the run's own end of
+	// it: the row says so, in either language, never that the run ended it.
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		w := newEngineWorld(t)
+		w.env.Spawner = spawnerStub{w: w, res: spawner.Result{End: spawner.EndError, Err: "the stop inside Dev did not run to its end"}, keepRunning: true}
+		w.fake.Fail = map[string]error{"terminate:Dev": errors.New("WSL did not answer in time")}
+		lines := screen(&engineBackend{Demo: demo(), w: w}, 120, 34, "s", "enter")
+		out := flat(lines)
+		if !strings.Contains(out, said("stop.fail.notended")) || strings.Contains(out, said("stop.fail.stillruns")) {
+			t.Errorf("%s:\n%s", lang, strings.Join(lines, "\n"))
 		}
 	}
 }

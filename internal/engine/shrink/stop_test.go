@@ -393,6 +393,32 @@ func TestAStopLeftHalfDoneIsEndedSoItStartsAfresh(t *testing.T) {
 	}
 }
 
+func TestAStopLeftHalfDoneThatCannotBeEndedIsSaidSo(t *testing.T) {
+	// The run's own end of the distribution fails too: the step's code says
+	// that, not that the run ended it, whichever way wsl-spawner left it.
+	for name, f := range map[string]*fakeSpawner{
+		"still running":     {err: fmt.Errorf("%w: killed", spawner.ErrNoResult), keepRunning: true},
+		"in the background": {res: spawner.Result{Detached: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			withSpawner(w, f)
+			w.fake.Fail = map[string]error{"terminate:Dev": errors.New("WSL did not answer in time")}
+			r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+			e := lastStop(t, r)
+			if e.Status != Failed || e.Code != CodeNotEnded || !strings.Contains(r.Err, "could not end it either (WSL did not answer in time)") {
+				t.Fatalf("%s %q: %s", e.Status, e.Code, r.Err)
+			}
+		})
+	}
+	// Ended, it keeps the code for how wsl-spawner left it.
+	w := newWorld(t)
+	withSpawner(w, &fakeSpawner{err: fmt.Errorf("%w: killed", spawner.ErrNoResult), keepRunning: true})
+	if e := lastStop(t, Run(context.Background(), w.env, w.disk(), Options{}, nil)); e.Code != CodeStillRuns {
+		t.Fatalf("%q", e.Code)
+	}
+}
+
 func TestAStopWhoseEndWSLDoesNotSayFailsTheStep(t *testing.T) {
 	// After wsl-spawner's stop, WSL does not answer which distributions
 	// run: whether this one still runs is not known, and the run does not

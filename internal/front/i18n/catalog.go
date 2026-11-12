@@ -453,6 +453,7 @@ var en = map[string]string{
 	"stop.fail.stillruns":       "wsl-spawner's stop did not end %s, which still ran; wsl-shrinker ended it, so that it starts afresh.",
 	"stop.fail.nostate":         "After wsl-spawner's stop, WSL did not say whether %s still runs; wsl-shrinker ended it, so that it starts afresh.",
 	"stop.fail.background":      "wsl-spawner went on stopping %s in the background and did not end it; wsl-shrinker ended it, so that it starts afresh.",
+	"stop.fail.notended":        "After wsl-spawner's stop, %s may still run, and wsl-shrinker could not end it either.",
 }
 
 // ko is the Korean catalog.
@@ -877,4 +878,5 @@ var ko = map[string]string{
 	"stop.fail.stillruns":       "wsl-spawner의 정지가 %s 배포판을 끝내지 못해 아직 실행 중이었습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
 	"stop.fail.nostate":         "wsl-spawner의 정지 뒤 WSL이 %s 배포판이 아직 실행 중인지 알려 주지 않았습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
 	"stop.fail.background":      "wsl-spawner가 %s 배포판을 뒤에서 계속 멈추다가 끝내지 못했습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
+	"stop.fail.notended":        "wsl-spawner의 정지 뒤 %s 배포판이 아직 실행 중일 수 있고, wsl-shrinker도 끝내지 못했습니다.",
 }

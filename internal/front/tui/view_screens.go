@@ -236,6 +236,9 @@ func (m model) failWords(e shrink.Event, d disks.Disk) string {
 		return withSaid(i18n.T("stop.fail.nostate", d.Distro), spawnerWords(e))
 	case shrink.CodeBackground:
 		return withSaid(i18n.T("stop.fail.background", d.Distro), spawnerWords(e))
+	case shrink.CodeNotEnded:
+		// Any of the last three, after which the run could not end it either.
+		return withSaid(i18n.T("stop.fail.notended", d.Distro), spawnerWords(e))
 	}
 	return e.Detail
 }

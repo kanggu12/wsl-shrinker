@@ -153,6 +153,10 @@ const (
 	// CodeBackground: wsl-spawner's stop went on in the background and did
 	// not end the distribution: the run ended it, to start it afresh.
 	CodeBackground = "background"
+	// CodeNotEnded: after any of the last three, the run could not end the
+	// distribution either, which may still run as wsl-spawner's stop left
+	// it.
+	CodeNotEnded = "notended"
 )
 
 // blockError is a check refused for a Block: its code goes on the event.

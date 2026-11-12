@@ -22,6 +22,8 @@ that only fixes raises the patch number. Each release's section here is its rele
   command line does.
 - A failed stop through wsl-spawner said wsl-shrinker "ends" the distribution, after it had ended it. Help's step 3
   now says that with wsl-spawner the pre-stop scripts run first, then its stop.
+- When wsl-shrinker could not end a distribution that wsl-spawner's stop left running, the screen still said it had.
+  The step now says the distribution may still run (`code` is `notended`).
 
 - `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
   the screen's question count them. The question counts them now.

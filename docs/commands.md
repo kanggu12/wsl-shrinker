@@ -119,7 +119,8 @@ wsl-spawner said, in its own words only: why it stopped nothing, or what went wr
 (why a call to it that gave no result said nothing of its own: `timeout` when it ran out of the time a run gives it,
 `silent` when it printed nothing, with its exit code in `spawner_exit`, `system` when Windows did not run it to its
 end) and `hooks_failed`, each left out when it has nothing to say. A failed stop step's `code` says why for the screen:
-`otherstop`, `stillruns`, `nostate` or `background`.
+`otherstop`, `stillruns`, `nostate` or `background`, or `notended` when after one of the last three wsl-shrinker could
+not end the distribution either.
 
 Run from a terminal inside a distribution it shrinks, the run moves to the screen in a new window, since stopping the
 distribution closes that terminal. The command exits with 0 once that window starts, or says it did not and exits with

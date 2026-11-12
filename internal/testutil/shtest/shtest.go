@@ -86,7 +86,7 @@ type Docker struct {
 	// OS is the operating system `docker info` names: "Docker Desktop" for
 	// Docker Desktop's integration, the distribution's own name otherwise.
 	OS string
-	// Running are the ids `docker ps -q` prints.
+	// Running are the ids `docker ps -q` (or --quiet) prints.
 	Running []string
 	// DF are the lines of `docker system df` ("Build Cache|3.4GB").
 	DF []string
@@ -132,7 +132,7 @@ func (d Docker) Put(t testing.TB, dir string) (asked string) {
 	Stub(t, dir, "docker", `case "$*" in
 info) ;;
 'info --format {{.OperatingSystem}}') `+lines([]string{d.OS})+` ;;
-'ps -q') `+lines(d.Running)+` ;;
+'ps -q' | 'ps --quiet') `+lines(d.Running)+` ;;
 'system df --format {{.Type}}|{{.Reclaimable}}') `+lines(d.DF)+` ;;
 'image ls --filter dangling=true --quiet --no-trunc') `+lines(d.Dangling)+` ;;
 'system df -v --format '*) `+lines(images)+` ;;

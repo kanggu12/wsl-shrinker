@@ -1,0 +1,10 @@
+{"event":"line","distro":"Ubuntu-24.04","kind":"plan","step":"docker","count":2}
+{"event":"line","distro":"Ubuntu-24.04","kind":"start","step":"docker","count":2}
+{"event":"line","distro":"Ubuntu-24.04","kind":"done","step":"docker","code":0,"took_seconds":21}
+{"event":"line","distro":"Ubuntu-24.04","kind":"start","step":"sync"}
+{"event":"line","distro":"Ubuntu-24.04","kind":"done","step":"sync","code":0,"took_seconds":0}
+{"event":"line","distro":"Ubuntu-24.04","kind":"end","result":"clean"}
+{"event":"terminate","distro":"Ubuntu-24.04"}
+{"event":"terminate","distro":"Ubuntu-24.04","done":true}
+{"event":"finished","distro":"Ubuntu-24.04","took_seconds":0.000306176,"result":"clean"}
+{"schema":1,"results":[{"name":"Ubuntu-24.04","result":"clean","clean":true,"took_seconds":0.000306176,"steps":[{"step":"docker","count":2,"code":0,"took_seconds":21},{"step":"sync","code":0,"took_seconds":0}],"error":""}],"shutdown":false,"error":"","detached_from":""}

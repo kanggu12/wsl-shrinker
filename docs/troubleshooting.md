@@ -70,6 +70,17 @@ running. Open a terminal in it: the containers with a restart policy (`unless-st
 start the others with `docker start`. To keep a distribution running with nothing open in it, set
 `instanceIdleTimeout=-1` under `[general]` in `%UserProfile%\.wslconfig` and run `wsl --shutdown` once.
 
+## The stop step names wsl-spawner
+
+With [wsl-spawner](https://github.com/kanggu12/wsl-spawner) installed, it stops the distribution
+([How it works](how-it-works.md#a-shrink)). A `!` on the stop step with "a step ran out of time" or "a step failed"
+means one of its steps did: `wsl-spawner history` shows which, with its exit code, and `stop_limit` in its settings
+gives the services more time. "wsl-spawner stopped nothing, so wsl-shrinker did" says why after it, often that its
+settings leave the distribution to WSL (`wsl-spawner set NAME --skip=false` changes that). "another wsl-spawner stop is
+running" means the sign-out's stop, or one asked by hand, is ending the distribution: shrink it once that is done.
+Earlier wsl-shrinker releases stopped a distribution themselves, so `wsl-spawner check` took the next start for one
+after a cut; that record stays in its history.
+
 ## "the root filesystem stays read-only"
 
 After compacting, WSL can leave a distribution's root mounted read-only. wsl-shrinker stops and starts the distribution

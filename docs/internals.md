@@ -11,7 +11,7 @@ sits with core, where every layer may reach it; `internal/testutil` serves tests
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/layers-dark.svg">
-  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="assets/layers-light.svg">
+  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, spawner, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="assets/layers-light.svg">
 </picture>
 
 | Layer | Package | What it holds |
@@ -30,6 +30,7 @@ sits with core, where every layer may reach it; `internal/testutil` serves tests
 | | `journal`, `history` | the run going on (`run.json`), and past runs |
 | settings | `config` | `config.toml`, read whole and written key by key |
 | machine | `wsl` | `wsl.exe` and the registry's list of distributions |
+| | `spawner` | `wsl-spawner stop`, when wsl-spawner is installed: its command line and the JSON it prints |
 | | `winapi` | file attributes, Windows' virtual disk API, the console, a new window; for uninstall, the user's PATH and the program's removal after it exits |
 | | `vhdx`, `ext4` | the disk file's block table with its log replayed, and the filesystem's bitmaps; both only read |
 | core | `units`, `version` | sizes as Windows shows them; the build's version |

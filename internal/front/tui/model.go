@@ -491,10 +491,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		if m.run != nil {
 			e := shrink.Event(msg)
-			m.run.steps[e.Step] = e
-			if e.Status == shrink.Running {
+			// A step already running that says more (the containers it
+			// names, wsl-spawner's step under way) keeps its start: its time
+			// counts on from the first event.
+			if prev, ok := m.run.steps[e.Step]; e.Status == shrink.Running && !(ok && prev.Status == shrink.Running) {
 				m.run.stepStart = e.At
 			}
+			m.run.steps[e.Step] = e
 		}
 		return m, m.waitRun()
 	case doneMsg:

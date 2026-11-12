@@ -55,6 +55,10 @@ sudo chmod +x /etc/wsl-shrinker/pre-stop.d/10-postgres
 A failed script is reported in the stop step; the run goes on. The whole stop step, containers and scripts, gets 15
 minutes; past that, the run ends and restarts the containers it stopped.
 
+With [wsl-spawner](https://github.com/kanggu12/wsl-spawner) installed, the scripts run first, before its stop, which
+keeps to its own `stop_limit`: wsl-spawner ends the distribution when its stop is done, so nothing runs in it after. Its
+own hooks, in `/etc/wsl-spawner/pre-stop.d`, run at sign-out too; a script needed at both times belongs there.
+
 ## Files wsl-shrinker writes
 
 | File | |

@@ -111,7 +111,10 @@ When a run starts a distribution and its containers again, a note under that dis
 terminal is open in the distribution ([Troubleshooting](troubleshooting.md#containers-stopped-a-little-after-a-shrink)).
 A failed stop step leaves the distribution running, with no note. `recover` adds the same note. In the JSON,
 `distro_started` marks a distribution started again, `containers_started` and `containers_not_started` count containers,
-and false or 0 values are left out.
+and false or 0 values are left out. A stop step's events say `by` (`wsl-spawner` when it stopped the distribution),
+`phase` (its step under way: `hook`, `units`, `docker`, `podman`, `sync`, `terminate`), `spawner` (how its stop went:
+`clean`, `limit`, `failed`, `error`; or `not-stopped` when it is installed but stopped nothing) and `hooks_failed`,
+each left out when it has nothing to say.
 
 Run from a terminal inside a distribution it shrinks, the run moves to the screen in a new window, since stopping the
 distribution closes that terminal. The command exits with 0 once that window starts, or says it did not and exits with

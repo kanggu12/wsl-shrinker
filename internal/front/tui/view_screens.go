@@ -14,6 +14,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/spawner"
 )
 
 // runView follows a run: the steps of the disk running, its sizes before and
@@ -83,6 +84,10 @@ func (m model) runView() string {
 			if s == shrink.StepCompact {
 				detail += "  " + i18n.T("run.compacting")
 			}
+			// wsl-spawner's step under way, when it stops the distribution.
+			if s == shrink.StepStop && e.Phase != "" {
+				detail += "  " + phaseWords(e.Phase)
+			}
 		case e.Status == shrink.Done:
 			mark, color, detail = "✓", t.Cat[ui.CatDone], stepDetail(e)
 		case e.Status == shrink.Skipped && s == shrink.StepClean && e.Count > 0:
@@ -137,6 +142,10 @@ func (m model) runView() string {
 					// A file WSL does not register: Windows compacts it, with
 					// no distribution to stop and no trim.
 					about = i18n.T("run.about.compact.file")
+				}
+				if s == shrink.StepStop && e.By == shrink.BySpawner {
+					// wsl-spawner stops it, its own way.
+					about = i18n.T("run.about.stop.spawner")
 				}
 				body = append(body, m.wrap(about, "   ", ui.Fg(t.Muted))...)
 			}
@@ -217,6 +226,27 @@ func (m model) failWords(e shrink.Event, d disks.Disk) string {
 	return e.Detail
 }
 
+// phaseWords names wsl-spawner's step under way, in the language in use;
+// one this program has no words for (a later wsl-spawner's) by its name.
+// The names are wsl-spawner's own, as its --events lines give them.
+func phaseWords(phase string) string {
+	switch phase {
+	case "hook":
+		return i18n.T("run.spawner.hook")
+	case "units":
+		return i18n.T("run.spawner.units")
+	case "docker":
+		return i18n.T("run.spawner.docker")
+	case "podman":
+		return i18n.T("run.spawner.podman")
+	case "sync":
+		return i18n.T("run.spawner.sync")
+	case spawner.StepTerminate:
+		return i18n.T("run.spawner.terminate")
+	}
+	return i18n.T("run.spawner.other", phase)
+}
+
 // stepDetail says what a finished step found or did, in the language in
 // use, from the event's numbers.
 func stepDetail(e shrink.Event) string {
@@ -230,11 +260,26 @@ func stepDetail(e shrink.Event) string {
 		return i18n.TN("detail.clean", e.Count, e.Count, units.Bytes(e.Bytes))
 	case shrink.StepStop:
 		s := i18n.TN("detail.stop", e.Count, e.Count)
+		if e.By == shrink.BySpawner {
+			s = i18n.TN("detail.stop.spawner", e.Count, e.Count)
+		}
 		if e.Hooks > 0 {
 			s += ", " + i18n.TN("detail.hooks", e.Hooks, e.Hooks)
 		}
-		if e.Status == shrink.Warned {
+		// The person's scripts that failed: counted since wsl-spawner, and
+		// before that a warned stop of this program's own meant them.
+		if e.HooksFailed > 0 || e.Status == shrink.Warned && e.By == "" && e.Spawner == "" {
 			s += ", " + i18n.T("detail.hooks.failed")
+		}
+		switch {
+		case e.By == shrink.BySpawner && e.Spawner == spawner.EndLimit:
+			s += ", " + i18n.T("detail.spawner.limit")
+		case e.By == shrink.BySpawner && e.Spawner == spawner.EndFailed:
+			s += ", " + i18n.T("detail.spawner.failed")
+		case e.By == shrink.BySpawner && e.Spawner == spawner.EndError:
+			s += ", " + i18n.T("detail.spawner.error")
+		case e.Spawner == shrink.SpawnerNotStopped:
+			s += ", " + i18n.T("detail.spawner.notstopped")
 		}
 		return s
 	case shrink.StepCompact:

@@ -28,6 +28,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/ext4"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/spawner"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/vhdx"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
@@ -89,7 +90,29 @@ type Event struct {
 	// Code names why a check failed, for words other than Detail's English:
 	// a Block, or CodeNoDistro, CodeWSL, CodeBusy.
 	Code string `json:"code,omitempty"`
+	// By is who stopped the distribution in the stop step: BySpawner when
+	// wsl-spawner did, "" when this program did.
+	By string `json:"by,omitempty"`
+	// Phase is, on a stop step still running, the step wsl-spawner began:
+	// hook, units, docker, podman, sync, or terminate (WSL ending the rest).
+	Phase string `json:"phase,omitempty"`
+	// Spawner is, on a finished stop step, how wsl-spawner's stop went when
+	// it stopped the distribution (clean, limit, failed, error), or
+	// SpawnerNotStopped when it is installed but stopped nothing, so this
+	// program did. "" when wsl-spawner had no part, or its stop went on in
+	// the background, where how it went is in its own history.
+	Spawner string `json:"spawner,omitempty"`
+	// HooksFailed counts the person's pre-stop scripts that failed.
+	HooksFailed int `json:"hooks_failed,omitempty"`
 }
+
+// BySpawner is Event.By for a distribution wsl-spawner stopped.
+const BySpawner = "wsl-spawner"
+
+// SpawnerNotStopped is Event.Spawner when wsl-spawner is installed but
+// stopped nothing (it leaves the distribution to WSL, say, or did not
+// start): this program stopped it, as without wsl-spawner.
+const SpawnerNotStopped = "not-stopped"
 
 // Codes of a failed check besides the Blocks.
 const (
@@ -125,11 +148,16 @@ type eventJSON struct {
 	At            time.Time `json:"at"`
 	Containers    []string  `json:"containers,omitempty"`
 	Code          string    `json:"code,omitempty"`
+	By            string    `json:"by,omitempty"`
+	Phase         string    `json:"phase,omitempty"`
+	Spawner       string    `json:"spawner,omitempty"`
+	HooksFailed   int       `json:"hooks_failed,omitempty"`
 }
 
 // MarshalJSON writes the event with took_seconds.
 func (e Event) MarshalJSON() ([]byte, error) {
-	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.DistroStarted, e.At, e.Containers, e.Code})
+	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.DistroStarted, e.At, e.Containers, e.Code,
+		e.By, e.Phase, e.Spawner, e.HooksFailed})
 }
 
 // UnmarshalJSON reads what MarshalJSON writes.
@@ -138,7 +166,8 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &j); err != nil {
 		return err
 	}
-	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.DistroStarted, j.At, j.Containers, j.Code}
+	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.DistroStarted, j.At, j.Containers, j.Code,
+		j.By, j.Phase, j.Spawner, j.HooksFailed}
 	return nil
 }
 
@@ -181,6 +210,11 @@ type Env struct {
 	// Protected says whether the settings protect a disk, by name: the run
 	// refuses it whatever front asked. nil protects none.
 	Protected func(name string) bool
+	// Spawner is wsl-spawner, when it is installed: the stop step asks it to
+	// stop a running distribution, so its services get their time and it
+	// records the stop (without, it takes the next start for one after a
+	// distribution cut off). nil when it is not installed.
+	Spawner spawner.Stopper
 }
 
 // Block is a reason a disk cannot be shrunk now. The run's check refuses
@@ -454,20 +488,35 @@ func runningIDs(listed string) []string {
 // containers ids, each with its own stop timeout (Docker waits that long
 // after SIGTERM), then the person's own pre-stop scripts, then a sync.
 func stopScript(ids []string) string {
+	return containersStopScript(ids, false) + hooksScript + "sync\n"
+}
+
+// containersStopScript stops the containers ids in one call, each with its
+// own stop timeout, and with sync, writes what is in memory to the disk
+// after: the stop of a run wsl-spawner stopped nothing of, its hooks run
+// already.
+func containersStopScript(ids []string, sync bool) string {
 	var b strings.Builder
 	if len(ids) > 0 {
 		b.WriteString("docker stop " + strings.Join(ids, " ") + " >/dev/null\n")
 	}
-	b.WriteString(`if [ -d /etc/wsl-shrinker/pre-stop.d ]; then
+	if sync {
+		b.WriteString("sync\n")
+	}
+	return b.String()
+}
+
+// hooksScript runs the person's own pre-stop scripts, each as root up to
+// two minutes, in name order, and says of each "hook|ok|FILE" or
+// "hook|failed|FILE". Before wsl-spawner's stop it runs alone: wsl-spawner
+// ends the distribution as its stop ends, so nothing runs in it after.
+const hooksScript = `if [ -d /etc/wsl-shrinker/pre-stop.d ]; then
   for f in /etc/wsl-shrinker/pre-stop.d/*; do
     [ -x "$f" ] || continue
     timeout 120 "$f" >/dev/null 2>&1 && echo "hook|ok|$f" || echo "hook|failed|$f"
   done
 fi
-sync
-`)
-	return b.String()
-}
+`
 
 // Run shrinks one disk and reports each step through emit. However it ends,
 // at a failed step or at a panic in this program's own code, what it stopped
@@ -673,22 +722,25 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		if len(restartIDs) > 0 {
 			sayE(Event{Step: StepStop, Status: Running, Containers: restartIDs})
 		}
-		out, err := sys.Run(within(ctx, stopLimit), d.Distro, "root", stopScript(restartIDs))
-		// Read what the script said even when it failed.
-		hooks, failed := readHooks(out)
 		res.Notes["containers"] = strings.Join(restartIDs, " ")
+		var e Event
+		if env.Spawner != nil {
+			// wsl-spawner stops it, its way: what it records of the stop
+			// is what makes its next start a start after a clean stop.
+			e, err = stopBySpawner(ctx, env, d.Distro, restartIDs, sayE)
+		} else {
+			e, err = stopItself(ctx, sys, d.Distro, restartIDs)
+		}
+		if errors.Is(err, errOtherStop) {
+			// Another wsl-spawner stop of it runs: that stop ends it, and the
+			// run stopped none of it, so it is not started again.
+			touched = false
+		}
 		if err != nil {
-			// The distribution still runs (only the compaction stops it):
-			// settle starts what was stopped.
+			// A distribution that still runs (only the compaction, or
+			// wsl-spawner's stop, stops it) gets what was stopped started
+			// again by settle.
 			return fail(StepStop, err, false)
-		}
-		detail := fmt.Sprintf("%d containers", len(restartIDs))
-		if hooks > 0 {
-			detail += fmt.Sprintf(", %d hooks", hooks)
-		}
-		e := Event{Step: StepStop, Status: Done, Detail: detail, Count: len(restartIDs), Hooks: hooks, Containers: restartIDs}
-		if failed > 0 {
-			e.Status, e.Detail = Warned, fmt.Sprintf("%s, %d failed", detail, failed)
 		}
 		sayE(e)
 	}
@@ -982,11 +1034,16 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 			sleep(2 * time.Second)
 		}
 		// One start per container, each reported: one that fails does not
-		// count the others as failed too.
+		// count the others as failed too. One that runs already (started
+		// with the distribution, by wsl-spawner or by its restart policy)
+		// is not started a second time, and runs again all the same.
 		started := map[string]bool{}
 		read := func(out string) {
 			for line := range strings.SplitSeq(out, "\n") {
-				if id, ok := strings.CutPrefix(strings.TrimSpace(line), "started|"); ok {
+				line = strings.TrimSpace(line)
+				if id, ok := strings.CutPrefix(line, "started|"); ok {
+					started[id] = true
+				} else if id, ok := strings.CutPrefix(line, "running|"); ok {
 					started[id] = true
 				}
 			}
@@ -1106,9 +1163,20 @@ func runningNow(ctx context.Context, sys wsl.System, distro string) bool {
 }
 
 // startScript starts each container on its own and prints "started|id" or
-// "failed|id" for it. The ids are hex only (safeIDs), so they need no quoting.
+// "failed|id" for it, or "running|id" for one that runs already and is
+// left as it is: wsl-spawner's start, or Docker for a container with a
+// restart policy, may have started it with the distribution. The ids are
+// hex only (safeIDs), so they need no quoting; the running ones are read
+// once, with the shell alone, as docker ps -q prints them.
 func startScript(ids []string) string {
-	return "for id in " + strings.Join(ids, " ") + `; do if docker start "$id" >/dev/null 2>&1; then echo "started|$id"; else echo "failed|$id"; fi; done`
+	return `running=" $(echo $(docker ps --quiet 2>/dev/null)) "
+for id in ` + strings.Join(ids, " ") + `; do
+  case "$running" in
+  (*" $id "*) echo "running|$id" ;;
+  (*) if docker start "$id" >/dev/null 2>&1; then echo "started|$id"; else echo "failed|$id"; fi ;;
+  esac
+done
+`
 }
 
 // Limits on the calls made once a distribution is stopped, so that one that

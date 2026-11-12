@@ -1,0 +1,4 @@
+{"event":"terminate","distro":"Ubuntu-24.04"}
+{"event":"terminate","distro":"Ubuntu-24.04","done":true}
+{"event":"finished","distro":"Ubuntu-24.04","took_seconds":0.00003183,"result":"error","error":"the stop inside Ubuntu-24.04 did not run to its end: wsl: the distribution did not answer"}
+{"schema":1,"results":[{"name":"Ubuntu-24.04","result":"error","clean":false,"took_seconds":0.00003183,"steps":[],"error":"the stop inside Ubuntu-24.04 did not run to its end: wsl: the distribution did not answer"}],"shutdown":false,"error":"","detached_from":""}

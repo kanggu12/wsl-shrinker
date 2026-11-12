@@ -68,7 +68,8 @@ The first start opens a short wizard, one choice per page with a preview. `wsl-s
 - **Only what you choose goes.** Caches, downloads, the trash, the system journal and unused Docker images are listed
   with their sizes. Docker volumes and containers are never removed.
 - **Containers stop properly.** Each with its own timeout, then your scripts in `/etc/wsl-shrinker/pre-stop.d/`; the
-  ones that ran start again afterwards.
+  ones that ran start again afterwards. Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed, the
+  distribution stops through it, as it does at sign-out.
 - **It checks the result.** The disk is read again after the compaction. One that does not read as before stays
   stopped.
 - **A closed window is not a lost run.** A journal lets the next start finish a run that was cut off.
@@ -94,7 +95,7 @@ estimate counts them that way.
 |:---|:---|
 | **Check** | WSL's version, an encrypted file, a fixed-size disk, a disk another program holds, errors the filesystem recorded |
 | **Clean** | Only what you chose |
-| **Stop** | Containers, each with its own timeout, then your pre-stop scripts |
+| **Stop** | Containers, each with its own timeout, then your pre-stop scripts. With wsl-spawner installed, your scripts, then its stop |
 | **Compact** | WSL's own `wsl --manage --compact`; Windows' virtual disk API for files WSL does not register |
 | **Verify** | The disk must read without errors and hold what it held, less what you removed |
 | **Start again** | The distribution, writable, with the containers that ran. With no terminal open in it, WSL stops it again about 15 seconds later; the run says so |

@@ -10,7 +10,7 @@ The code under `internal/` sits in layers. Imports go down, never up; `internal/
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/layers-dark.svg">
-  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="../docs/assets/layers-light.svg">
+  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, spawner, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="../docs/assets/layers-light.svg">
 </picture>
 
 | Layer | Packages | |
@@ -19,7 +19,7 @@ The code under `internal/` sits in layers. Imports go down, never up; `internal/
 | app | `app`, `app/remote` | puts the rest together for this PC; the screen's backend from WSL, over `wsl-shrinker.exe` |
 | engine | `disks`, `estimate`, `survey`, `shrink`, `history`, `journal` | finding disks, what a shrink gives back, looking inside, a shrink's steps, past runs, the run in progress |
 | settings | `config` | `config.toml` |
-| machine | `vhdx`, `ext4`, `wsl`, `winapi` | reading disk files, talking to WSL and Windows |
+| machine | `vhdx`, `ext4`, `wsl`, `spawner`, `winapi` | reading disk files, talking to WSL, wsl-spawner and Windows |
 | core | `units`, `version` | sizes as Windows shows them, with no I/O; the build's version |
 
 `machine/vhdx` and `machine/ext4` only read, and refuse what they do not fully understand rather than guess. Only

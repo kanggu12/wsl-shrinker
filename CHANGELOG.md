@@ -6,6 +6,22 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Added
+
+- Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed, the stop step stops a running
+  distribution through it: your pre-stop scripts, then `wsl-spawner stop`, with its hooks and units, Docker and Podman,
+  each container with its own timeout. It records the stop, so its next start no longer takes a shrink for a
+  distribution cut off, and `wsl-spawner check` no longer marks it. The screen shows each of its steps as it begins.
+  When it stops nothing (its settings leave the distribution to WSL), the run stops the containers itself and says
+  why; when another wsl-spawner stop of the distribution is running, the run leaves the distribution to it.
+- A stop step's events in `--json` say who stopped the distribution (`by`), wsl-spawner's step under way (`phase`),
+  how its stop went (`spawner`) and how many pre-stop scripts failed (`hooks_failed`).
+
+### Changed
+
+- Starting the containers again leaves one that runs already as it is (started with the distribution by wsl-spawner,
+  or by its restart policy), and counts it as running again.
+
 ## [0.6.2] - 2026-11-10
 
 ### Changed

@@ -67,7 +67,7 @@ every stored block, so it can only come out low, and the screen says so.
 |:---|:---|:---|
 | check | WSL's version, the file's attributes, whether the disk is fixed-size, whether something holds it, whether the distribution runs now, recorded filesystem errors | nothing |
 | clean | | removes the items you chose, with the one command each was listed with |
-| stop | the running containers | stops them (`docker stop`, each with its own timeout; not when `docker` there is Docker Desktop's, whose containers run in its own distribution), runs `/etc/wsl-shrinker/pre-stop.d/*`, syncs |
+| stop | the running containers | stops them (`docker stop`, each with its own timeout; not when `docker` there is Docker Desktop's, whose containers run in its own distribution), runs `/etc/wsl-shrinker/pre-stop.d/*`, syncs; with wsl-spawner installed, runs the scripts, then `wsl-spawner stop` |
 | compact | | `wsl --manage <distro> --compact`: WSL stops the distribution, trims it and compacts the file; other files go through Windows' virtual disk API |
 | verify | the disk file again | nothing |
 | start again | the root's mount options | starts the distribution and the containers that were running |
@@ -84,6 +84,17 @@ listed, since `find` is what empties it. A test fails if any command
 there could remove a volume, a container or anything else. Ids given on the command line are looked up in a fresh look
 inside, so only commands built this way run.
 
+**Stop** goes through [wsl-spawner](https://github.com/kanggu12/wsl-spawner) when it is installed (on the PATH, or in
+`%LOCALAPPDATA%\Programs\wsl-spawner`). Your pre-stop scripts run first, then `wsl-spawner stop <distro> --yes --json
+--events`: its own hooks and units, then Docker and Podman, each container with its own timeout, within its
+`stop_limit`. WSL then ends the distribution, and wsl-spawner records the stop, so its next start counts the one before
+as stopped in time, not cut off. The screen shows each of its steps as it begins. A step that ran out of time or failed
+marks the stop step for a look (`wsl-spawner history` has the steps); the run goes on, as the distribution is down. When
+wsl-spawner stops nothing (its settings leave the distribution to WSL, or it does not start), wsl-shrinker stops the
+containers itself and says why. When another wsl-spawner stop of the distribution is running, say the sign-out's, the
+run stops there and leaves the distribution to that stop. A stop that did not run to its end fails the step if the
+distribution still runs, and the run starts its containers again.
+
 **Verify** reads the file once Windows lets go of it. It compares the file with the disk as read right before the
 compaction, once the stop settled it, so a file deleted after the disks were listed is not taken for data gone. The
 file must be a valid VHDX (with no log left to replay, for Docker Desktop's disk and other files). Its filesystem must
@@ -92,13 +103,14 @@ settling, 0.5 % plus 32 MiB), never by more. On a distribution's disk, every blo
 must still be stored. Other files skip that check: Windows' compaction also drops blocks of zeros the filesystem uses,
 which read back as the zeros they were. Errors recorded before the run stop it at the check, for e2fsck to see first.
 
-**Start again** checks the root is mounted read-write. WSL can refuse a start for a moment right after a compaction,
-so the start is tried three times, seconds apart. If the root is read-only, the distribution is stopped and started
-once more. If it stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, as it stops every
-distribution. Containers that were running before the stop come back one at a time, by id, with `docker start`. One
-that waits on another (its network, a link) that had not started yet gets a second try a few seconds later. One that
-still does not start is counted; one that was already stopped stays stopped. Docker may still be starting with the
-distribution (systemd, or a `[boot]` command in `/etc/wsl.conf`): the run waits up to a minute for it.
+**Start again** checks the root is mounted read-write. WSL can refuse a start for a moment right after a compaction, so
+the start is tried three times, seconds apart. If the root is read-only, the distribution is stopped and started once
+more. If it stays read-only, the run says `wsl --shutdown` clears it, and leaves that to you, as it stops every
+distribution. Containers that were running before the stop come back one at a time, by id, with `docker start`. One that
+runs already, started with the distribution by wsl-spawner or by its restart policy, is left as it is and counted as
+running again. One that waits on another (its network, a link) that had not started yet gets a second try a few seconds
+later. One that still does not start is counted; one that was already stopped stays stopped. Docker may still be
+starting with the distribution (systemd, or a `[boot]` command in `/etc/wsl.conf`): the run waits up to a minute for it.
 
 WSL stops a distribution once no terminal or other program from Windows runs in it, after `instanceIdleTimeout` in
 `.wslconfig` (15 seconds by default; `-1` turns it off). Everything inside stops with it: Docker, its containers,

@@ -426,6 +426,23 @@ var en = map[string]string{
 	"run.state.verify.stopped":  "The disk was compacted, but could not be read again to check it. r reads the disks again.",
 	"run.state.verify.warned":   "The disk was compacted, but could not be read again to check it; %s was started again, but some of its containers did not start.",
 	"run.state.verify.down":     "The disk was compacted, but could not be read again to check it, and %[1]s did not start again; to start it: wsl -d %[1]s",
+
+	// A stop wsl-spawner made, or one it left to this program, and the
+	// step of its stop under way.
+	"detail.stop.spawner":       "%d containers, by wsl-spawner",
+	"detail.stop.spawner.one":   "%d container, by wsl-spawner",
+	"detail.spawner.limit":      "a step ran out of time",
+	"detail.spawner.failed":     "a step failed",
+	"detail.spawner.error":      "its stop did not run to its end",
+	"detail.spawner.notstopped": "wsl-spawner stopped nothing, so wsl-shrinker did",
+	"run.spawner.hook":          "hooks",
+	"run.spawner.units":         "units",
+	"run.spawner.docker":        "Docker",
+	"run.spawner.podman":        "Podman",
+	"run.spawner.sync":          "sync",
+	"run.spawner.terminate":     "WSL ends the rest",
+	"run.spawner.other":         "%s",
+	"run.about.stop.spawner":    "The pre-stop scripts ran; wsl-spawner stops the distribution: its hooks and units, then Docker and Podman, each container with its own timeout. WSL then ends the rest.",
 }
 
 // ko is the Korean catalog.
@@ -824,4 +841,20 @@ var ko = map[string]string{
 	"run.state.verify.stopped":  "압축은 됐지만 확인하려고 디스크를 다시 읽지 못했습니다. r을 누르면 디스크를 다시 읽습니다.",
 	"run.state.verify.warned":   "압축은 됐지만 확인하려고 디스크를 다시 읽지 못했습니다. %s 배포판은 다시 켰지만 컨테이너 일부가 시작되지 않았습니다.",
 	"run.state.verify.down":     "압축은 됐지만 확인하려고 디스크를 다시 읽지 못했고, %[1]s 배포판이 다시 켜지지 않았습니다. 켜려면: wsl -d %[1]s",
+
+	// A stop wsl-spawner made, or one it left to this program, and the
+	// step of its stop under way.
+	"detail.stop.spawner":       "컨테이너 %d개, wsl-spawner가 멈춤",
+	"detail.spawner.limit":      "한 단계가 시간을 넘김",
+	"detail.spawner.failed":     "한 단계가 실패함",
+	"detail.spawner.error":      "정지가 끝까지 가지 못함",
+	"detail.spawner.notstopped": "wsl-spawner가 멈추지 않아 wsl-shrinker가 멈춤",
+	"run.spawner.hook":          "훅",
+	"run.spawner.units":         "유닛",
+	"run.spawner.docker":        "Docker",
+	"run.spawner.podman":        "Podman",
+	"run.spawner.sync":          "디스크에 쓰기",
+	"run.spawner.terminate":     "WSL이 나머지를 끝냄",
+	"run.spawner.other":         "%s",
+	"run.about.stop.spawner":    "종료 전 스크립트를 실행했고, wsl-spawner가 배포판을 멈춥니다. 그 훅과 유닛, Docker와 Podman 순서이고 컨테이너마다 각자의 종료 대기 시간을 줍니다. 그다음 WSL이 나머지를 끝냅니다.",
 }

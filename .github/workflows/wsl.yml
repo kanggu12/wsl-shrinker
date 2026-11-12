@@ -140,6 +140,46 @@ jobs:
           $runs = ./wss.exe history --json | ConvertFrom-Json
           if (@($runs.runs).Count -ne 1) { 'the run is not in the history'; exit 1 }
           exit 0
+      - name: with wsl-spawner installed, the stop goes through it
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The release whose stop --yes --json --events this one reads.
+          SPAWNER: v0.1.2
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $env:APPDATA = $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'state'
+          # wsl-spawner's release, held against its checksums, on the PATH
+          # as its installer and Scoop put it there.
+          $dir = (New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'spawner')).FullName
+          gh release download $env:SPAWNER -R kanggu12/wsl-spawner -p 'wsl-spawner_*_windows_amd64.zip' -p checksums.txt -D $dir
+          if ($LASTEXITCODE -ne 0) { "downloading wsl-spawner $env:SPAWNER exited $LASTEXITCODE"; exit 1 }
+          $zip = Get-ChildItem $dir -Filter '*_windows_amd64.zip' | Select-Object -First 1
+          $sum = (Get-Content (Join-Path $dir 'checksums.txt') | Where-Object { $_ -match [regex]::Escape($zip.Name) } | Select-Object -First 1) -split '\s+' | Select-Object -First 1
+          if (-not $sum -or (Get-FileHash $zip.FullName -Algorithm SHA256).Hash -ne $sum) { "$($zip.Name) does not match its checksum"; exit 1 }
+          Expand-Archive $zip.FullName -DestinationPath $dir
+          $env:PATH = "$dir;$env:PATH"
+          # Something to give back again, so the run goes through each step.
+          wsl.exe -d wss-ci -u root -- sh -c 'dd if=/dev/zero of=/fill bs=1M count=64 2>/dev/null && sync && rm /fill && sync'
+          $out = ./wss.exe shrink wss-ci --yes --json
+          if ($LASTEXITCODE -ne 0) { $out; "shrink exited $LASTEXITCODE"; exit 1 }
+          $r = ($out | ConvertFrom-Json).results[0]
+          $stop = $r.events | Where-Object { $_.step -eq 'stop' -and $_.status -ne 'running' } | Select-Object -Last 1
+          "stop: $($stop.status) by $($stop.by), wsl-spawner's end $($stop.spawner): $($stop.detail)"
+          # wsl-spawner stopped it, every step in its time, and the steps it
+          # began showed on the way.
+          if ($stop.by -ne 'wsl-spawner' -or $stop.spawner -ne 'clean' -or $stop.status -ne 'done') { $out; 'the stop did not go through wsl-spawner'; exit 1 }
+          $phases = @($r.events | Where-Object { $_.step -eq 'stop' -and $_.phase } | ForEach-Object phase)
+          "its steps: $($phases -join ', ')"
+          if ($phases -notcontains 'docker' -or $phases -notcontains 'terminate') { 'its steps did not show'; exit 1 }
+          if (-not $r.compacted -or $r.left -ne 'running' -or $r.containers_started -ne 2 -or $r.containers_not_started) { "compacted $($r.compacted), left $($r.left), started $($r.containers_started)"; exit 1 }
+          # wsl-spawner keeps the stop in its history, as it does a sign-out's.
+          # By its .exe name: the zip holds its Linux launcher beside it.
+          $h = (wsl-spawner.exe history --json | ConvertFrom-Json).entries | Where-Object what -eq 'stop' | Select-Object -Last 1
+          $mine = $h.distributions | Where-Object name -eq 'wss-ci'
+          "wsl-spawner's history: $($h.by), wss-ci $($mine.result)"
+          if (-not $mine -or $mine.result -ne 'clean') { 'wsl-spawner has no clean stop of wss-ci'; exit 1 }
+          exit 0
       - name: copies of its disk as Docker Desktop's and a file from the settings, compacted from Windows
         shell: pwsh
         run: |

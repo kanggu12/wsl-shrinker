@@ -1,0 +1,3 @@
+{"event":"line","distro":"Ubuntu-24.04","kind":"end","result":"busy"}
+{"event":"finished","distro":"Ubuntu-24.04","took_seconds":0.000033233,"result":"busy","error":"another stop of Ubuntu-24.04 is running"}
+{"schema":1,"results":[{"name":"Ubuntu-24.04","result":"busy","clean":false,"took_seconds":0.000033233,"steps":[],"error":"another stop of Ubuntu-24.04 is running"}],"shutdown":false,"error":"","detached_from":""}

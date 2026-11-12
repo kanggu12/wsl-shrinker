@@ -21,6 +21,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/journal"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/shrink"
 	"github.com/kanggu12/wsl-shrinker/internal/engine/survey"
+	"github.com/kanggu12/wsl-shrinker/internal/machine/spawner"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/wsl"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
@@ -49,6 +50,11 @@ type App struct {
 	// long as each try says. Tests set it, so a start that keeps failing
 	// does not cost them the waits.
 	Sleep func(time.Duration)
+	// FindSpawner finds wsl-spawner for each run, which then stops a
+	// running distribution through it: installed while the screen was
+	// open, it counts from the next run on. nil finds none, as in a test,
+	// whose made-up distributions the real one must never be asked to stop.
+	FindSpawner func() (spawner.Stopper, bool)
 	// info is WSL's answer about itself, asked once it answers: a WSL that
 	// did not answer in time is asked again the next time.
 	info      wsl.Info
@@ -67,7 +73,13 @@ func New() (*App, error) {
 	}
 	dir := StateDir()
 	return &App{Config: c, ConfigPath: path, WSL: wsl.New(),
-		History: history.Open(dir), Journal: OpenJournal(dir, winapi.Running)}, nil
+		History: history.Open(dir), Journal: OpenJournal(dir, winapi.Running), FindSpawner: findSpawner}, nil
+}
+
+// findSpawner is the installed wsl-spawner, if any, as a Stopper.
+func findSpawner() (spawner.Stopper, bool) {
+	x, ok := spawner.Find()
+	return x, ok
 }
 
 // StateDir is the folder of the program's own files: the journal, the
@@ -114,8 +126,16 @@ func (a *App) shrinkEnv(ctx context.Context) shrink.Env {
 	// A WSL that did not answer is not refused for an old one: the run's
 	// own calls to it say what is wrong, in WSL's words or as no answer.
 	info := a.Info(ctx)
-	return shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: info.CanCompact || info.NoAnswer, Protected: a.Config.Protected,
+	env := shrink.Env{Disks: a.DisksEnv(), CompactFile: winapi.CompactFile, CanCompact: info.CanCompact || info.NoAnswer, Protected: a.Config.Protected,
 		Sleep: a.Sleep}
+	// Looked for at each run, not once: it may have been installed or
+	// removed since this program started.
+	if a.FindSpawner != nil {
+		if s, ok := a.FindSpawner(); ok {
+			env.Spawner = s
+		}
+	}
+	return env
 }
 
 // Shrink runs one disk and records it in the history. The journal holds the

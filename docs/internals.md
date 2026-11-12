@@ -11,7 +11,7 @@ sits with core, where every layer may reach it; `internal/testutil` serves tests
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/layers-dark.svg">
-  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, spawner, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="assets/layers-light.svg">
+  <img alt="The packages in seven layers, highest first: cmd, the program; front, with cli, tui, ui and i18n; app and remote; engine, with disks, estimate, survey, shrink, journal and history; settings, with config; machine, with wsl, spawner, winapi, vhdx and ext4; core, with units and version. Imports go down, never up." src="assets/layers-light.svg">
 </picture>
 
 | Layer | Package | What it holds |
@@ -39,7 +39,7 @@ sits with core, where every layer may reach it; `internal/testutil` serves tests
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/pieces-dark.svg">
-  <img alt="What runs where. wsl-shrinker.exe, the Windows program, reads the disks, runs each shrink and draws the screen or prints the commands. In a Windows terminal it takes the keys and shows the screen itself. In a WSL terminal, wsl-shrinker is the Linux build: it draws the screen there and asks wsl-shrinker.exe for every answer as JSON lines. wsl-shrinker.exe asks wsl.exe to list, stop, start and compact distributions and to run scripts inside them, compacts Docker Desktop's disk and other files through Windows' virtual disk API, and reads every disk file directly, without mounting it." src="assets/pieces-light.svg">
+  <img alt="What runs where. wsl-shrinker.exe, the Windows program, reads the disks and runs every shrink. A Windows terminal sends it keys and shows its screen; in a WSL terminal, the Linux build draws the screen and asks the .exe as JSON lines. It asks wsl.exe, compacts other disks through Windows' virtual disk API, and reads the disk files without mounting them." src="assets/pieces-light.svg">
 </picture>
 
 `wsl-shrinker.exe` does the work: the disks are Windows' to read and compact. In WSL, `wsl-shrinker` is the Linux build
@@ -63,7 +63,7 @@ new window (`start`, the default terminal), already confirmed. The old terminal 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/touches-dark.svg">
-  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; its own files: the settings, the history and the run's journal; and when you uninstall it, the program and its entry in your PATH. Nothing changes before you confirm a shrink or an uninstall, and a protected disk is never shrunk." src="assets/touches-light.svg">
+  <img alt="What wsl-shrinker reads: WSL's own answers, the disk files and the sizes inside a running distribution. It runs as you, with no administrator rights and no network. What it changes: a disk, only through Windows; inside a distribution, only what you chose and its containers; its own files. Nothing changes before you confirm." src="assets/touches-light.svg">
 </picture>
 
 A few rules keep that list short, each held in one place:
@@ -135,7 +135,7 @@ Windows through. [Contributing](../.github/CONTRIBUTING.md#run-the-tests) has th
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/release-dark.svg">
-  <img alt="From a change to a release. make check runs gofmt, go vet and staticcheck for Linux and Windows, shellcheck, the unit tests with the race detector, and the layers and changelog tests. make test-windows runs every package again as a Windows program, from WSL. CI runs both, fuzzing and govulncheck, builds the release zips and the demo image, tests on Windows x64 and ARM64, shrinks a throwaway distribution on a real WSL 2, and runs install.ps1 in PowerShell 5.1 and 7, on every push and pull request and once a week. A vX.Y.Z tag runs all of CI, then publishes the zips with checksums, build provenance and a Scoop manifest, and the demo image; then it installs the release to check it." src="assets/release-light.svg">
+  <img alt="From a change to a release. make check: gofmt, vet, staticcheck, the race tests and shellcheck. make test-windows: every package again as a Windows program. CI: both, fuzzing, govulncheck and a real shrink on WSL 2. A vX.Y.Z tag: all of CI, then the zips, the Scoop manifest and the demo image." src="assets/release-light.svg">
 </picture>
 
 **CI** (`.github/workflows/ci.yml`) runs on every push to `main`, every pull request and every Monday, so a new Go

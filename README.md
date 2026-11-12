@@ -79,7 +79,7 @@ The first start opens a short wizard, one choice per page with a preview. `wsl-s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/estimate-dark.svg">
-  <img alt="The disk file as blocks. Now: 312 GB, blocks of data that stay, a block freed inside but still stored, and space no block holds. After: 248 GB, only the data, packed; 64 GB goes back to Windows. The data that stays comes from ext4's block bitmaps; the stored blocks from the VHDX block table, its log replayed in memory." src="docs/assets/estimate-light.svg">
+  <img alt="The disk file as blocks. Now, 312 GB: blocks of data that stay, a block freed inside but still stored, and space no block holds. After, 248 GB: only the data, packed; 64 GB goes back to Windows. The data comes from ext4's block bitmaps, the stored blocks from the VHDX block table." src="docs/assets/estimate-light.svg">
 </picture>
 
 A compaction keeps exactly the stored blocks that hold data, so the size after is known before it runs. Docker
@@ -88,7 +88,7 @@ estimate counts them that way.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/steps-dark.svg">
-  <img alt="Six steps: check, clean, stop, compact, verify, start again. Check and verify only read; clean removes only what you chose; stop stops containers and runs pre-stop scripts; compact is WSL's own; start again brings the distribution and its containers back." src="docs/assets/steps-light.svg">
+  <img alt="Six steps: check, clean, stop, compact, verify, start again. Check and verify only read; clean removes only what you chose; stop stops the containers and runs the pre-stop scripts; compact is WSL's own; start again brings the distribution and its containers back." src="docs/assets/steps-light.svg">
 </picture>
 
 | Step | What happens |
@@ -203,7 +203,7 @@ shrink, so it is not listed.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/touches-dark.svg">
-  <img alt="What wsl-shrinker reads and what it changes. It reads WSL's own answers (the distributions Windows lists, which run, WSL's version), the disk files (the VHDX block table and its log, ext4's block bitmaps) and, inside a running distribution, the sizes of caches and images. It runs as you, with no administrator rights and no network. It changes a disk only through Windows, with wsl --manage --compact or the virtual disk API; inside a distribution only the items you chose, and the containers it stops and starts again; its own files: the settings, the history and the run's journal; and when you uninstall it, the program and its entry in your PATH. Nothing changes before you confirm a shrink or an uninstall, and a protected disk is never shrunk." src="docs/assets/touches-light.svg">
+  <img alt="What wsl-shrinker reads: WSL's own answers, the disk files and the sizes inside a running distribution. It runs as you, with no administrator rights and no network. What it changes: a disk, only through Windows; inside a distribution, only what you chose and its containers; its own files. Nothing changes before you confirm." src="docs/assets/touches-light.svg">
 </picture>
 
 ## Documentation

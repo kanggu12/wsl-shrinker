@@ -10,7 +10,7 @@ The code under `internal/` sits in layers. Imports go down, never up; `internal/
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/layers-dark.svg">
-  <img alt="The packages in layers, highest first. cmd holds the program, which runs where it is started or hands over to wsl-shrinker.exe. front holds cli, tui, ui and i18n. app puts the rest together, and remote is the screen's link to wsl-shrinker.exe from inside WSL. engine holds disks, estimate, survey, shrink, journal and history. settings holds config. machine holds wsl, spawner, winapi, vhdx and ext4. core holds units and version, and does no I/O. Imports go down the layers, never up." src="../docs/assets/layers-light.svg">
+  <img alt="The packages in seven layers, highest first: cmd, the program; front, with cli, tui, ui and i18n; app and remote; engine, with disks, estimate, survey, shrink, journal and history; settings, with config; machine, with wsl, spawner, winapi, vhdx and ext4; core, with units and version. Imports go down, never up." src="../docs/assets/layers-light.svg">
 </picture>
 
 | Layer | Packages | |
@@ -102,7 +102,7 @@ the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleased]`
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/assets/release-dark.svg">
-  <img alt="From a change to a release. make check runs gofmt, go vet and staticcheck for Linux and Windows, shellcheck, the unit tests with the race detector, and the layers and changelog tests. make test-windows runs every package again as a Windows program, from WSL. CI runs both, fuzzing and govulncheck, builds the release zips and the demo image, tests on Windows x64 and ARM64, shrinks a throwaway distribution on a real WSL 2, and runs install.ps1 in PowerShell 5.1 and 7, on every push and pull request and once a week. A vX.Y.Z tag runs all of CI, then publishes the zips with checksums, build provenance and a Scoop manifest, and the demo image; then it installs the release to check it." src="../docs/assets/release-light.svg">
+  <img alt="From a change to a release. make check: gofmt, vet, staticcheck, the race tests and shellcheck. make test-windows: every package again as a Windows program. CI: both, fuzzing, govulncheck and a real shrink on WSL 2. A vX.Y.Z tag: all of CI, then the zips, the Scoop manifest and the demo image." src="../docs/assets/release-light.svg">
 </picture>
 
 A release is a `## [X.Y.Z] - date` section in `CHANGELOG.md` with its link at the bottom, `make badges`, a commit, and

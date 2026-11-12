@@ -6,6 +6,12 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Changed
+
+- The documentation's figures share one look, wsl-shrinker's own: glass panels, its block glyph on its own parts, each
+  disk drawn as blocks as the screen draws it, and flows that turn at right angles. The figure of where to read in
+  [Troubleshooting](docs/troubleshooting.md) quotes `doctor` as it speaks: "cannot compact", "the run of … was cut off".
+
 ## [0.8.1] - 2026-11-13
 
 What the screen shortens keeps each name whole.

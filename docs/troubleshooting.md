@@ -4,7 +4,7 @@ Start with `wsl-shrinker doctor`: it checks WSL, the settings and every disk, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/trouble-dark.svg">
-  <img alt="Where to read first. doctor saying WSL cannot compact leads to this WSL cannot compact; a run of a disk cut off at compact, to The window closed during a run; a filesystem that records errors, to the filesystem records errors. The screen saying Docker Desktop's disk is in use leads to Docker Desktop's disk is in use. shrink saying another run is not finished leads to another run is not finished, and a disk that uses less after compacting than before, beyond what was cleaned, to more went than was cleaned." src="assets/trouble-light.svg">
+  <img alt="Where to read first. doctor: WSL cannot compact, a run cut off at compact, a filesystem that records errors. The screen: Docker Desktop's disk in use. shrink: another run is not finished, more went than was cleaned. Each leads to the Troubleshooting section of that name." src="assets/trouble-light.svg">
 </picture>
 
 Installing, and running it from inside WSL:

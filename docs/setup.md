@@ -5,7 +5,7 @@ PowerShell versions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/ways-dark.svg">
-  <img alt="The ways to install wsl-shrinker, and where it runs. The one-line PowerShell install checks the release's checksum, puts the folder on your PATH and opens setup. Scoop installs the manifest from the release, and scoop update keeps it current. By hand, the zip for your processor goes in any folder on your PATH; from source, make build. Each makes one folder holding wsl-shrinker.exe, the Windows program, and wsl-shrinker, the launcher for WSL. In PowerShell or Windows Terminal, wsl-shrinker opens the screen or prints the disks; inside WSL, the same name is found on the PATH Windows lends to WSL. Before installing, the demo image opens the screen on a made-up PC." src="assets/ways-light.svg">
+  <img alt="The ways to install wsl-shrinker: the one-line PowerShell install, Scoop, the zip by hand, or from source. Each makes one folder on your PATH holding wsl-shrinker.exe, the Windows program, and wsl-shrinker, the launcher for WSL. The first runs in PowerShell or Windows Terminal, the second inside WSL." src="assets/ways-light.svg">
 </picture>
 
 ## Requirements

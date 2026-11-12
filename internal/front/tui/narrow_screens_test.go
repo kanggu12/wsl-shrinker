@@ -134,3 +134,25 @@ func TestSetupMarksTheDisksItCounts(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+func TestTheDetailsKeepEveryNameWhole(t *testing.T) {
+	// The README's size: a finding's name too long for its column loses
+	// its note in brackets, not half a word; the disk's path loses whole
+	// folders, never half a name.
+	f := ansi.Strip(Snapshot(demo(), 132, 30, true, nil, ""))
+	var journal, path string
+	for _, l := range strings.Split(f, "\n") {
+		switch {
+		case strings.Contains(l, "System journal"):
+			journal = l
+		case strings.Contains(l, "ext4.vhdx"):
+			path = l
+		}
+	}
+	if journal == "" || strings.Contains(journal, "…") {
+		t.Errorf("the journal's row: %q\n%s", journal, f)
+	}
+	if i := strings.Index(path, "…"); path == "" || i < 0 || !strings.HasSuffix(path[:i], `\`) || !strings.HasPrefix(path[i+len("…"):], `\`) {
+		t.Errorf("the path: %q", path)
+	}
+}

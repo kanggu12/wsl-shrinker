@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -29,9 +30,43 @@ func TestMiddleCountsCellsNotLetters(t *testing.T) {
 		if lipgloss.Width(got) != w {
 			t.Errorf("%d: %d cells: %q", w, lipgloss.Width(got), got)
 		}
-		if w >= 40 && got[len(got)-len("에 저장"):] != "에 저장" {
+		// The end kept, before the spaces that pad a line whose whole
+		// folders went.
+		if end := strings.TrimRight(got, " "); w >= 40 && end[len(end)-len("에 저장"):] != "에 저장" {
 			t.Errorf("%d: lost its end: %q", w, got)
 		}
+	}
+}
+
+func TestMiddleDropsWholeFoldersNeverHalfAName(t *testing.T) {
+	// At every width that holds the drive, "…" and the file name, each name
+	// left is whole, the line exactly as wide as asked, the drive first and
+	// the file last.
+	p := `C:\Users\ann\AppData\Local\Packages\CanonicalGroupLimited.Ubuntu24.04LTS_79rhkp1fndgsc\LocalState\ext4.vhdx`
+	names := map[string]bool{}
+	for _, n := range strings.Split(p, `\`) {
+		names[n] = true
+	}
+	for w := len(`C:\…\ext4.vhdx`); w < len(p); w++ {
+		got := Middle(p, w)
+		if lipgloss.Width(got) != w {
+			t.Errorf("%d: %d cells: %q", w, lipgloss.Width(got), got)
+		}
+		trimmed := strings.TrimRight(got, " ")
+		if !strings.HasPrefix(trimmed, `C:\`) || !strings.HasSuffix(trimmed, `\ext4.vhdx`) || strings.Count(trimmed, "…") != 1 {
+			t.Errorf("%d: %q", w, got)
+			continue
+		}
+		for _, n := range strings.Split(trimmed, `\`) {
+			if n != "…" && !names[n] {
+				t.Errorf("%d: %q is half a name in %q", w, n, got)
+			}
+		}
+	}
+	// The folders nearest the file stay first: wide enough, the
+	// distribution's own folder is kept, the ones after the drive go.
+	if got := strings.TrimRight(Middle(p, 90), " "); got != `C:\…\Packages\CanonicalGroupLimited.Ubuntu24.04LTS_79rhkp1fndgsc\LocalState\ext4.vhdx` {
+		t.Errorf("90: %q", got)
 	}
 }
 

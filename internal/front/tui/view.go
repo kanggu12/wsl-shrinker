@@ -727,7 +727,7 @@ func (m model) inside(d disks.Disk, w, rows int) []string {
 		if m.picked[pickKey(d.Distro, it.ID)] {
 			check = ui.Fg(t.Mark).Render("✓")
 		}
-		out = append(out, " "+check+ui.FitRight(units.Bytes(it.Bytes), 8)+"  "+m.kindTag(it.Kind)+"  "+ui.Fit(itemLabel(it), w-14-kindWidth()))
+		out = append(out, " "+check+ui.FitRight(units.Bytes(it.Bytes), 8)+"  "+m.kindTag(it.Kind)+"  "+fitLabel(itemLabel(it), w-14-kindWidth()))
 	}
 	// The hint wraps rather than lose the amount at its end.
 	out = append(out, m.wrapTo(i18n.T("inside.hint", units.Bytes(total)), w, " ", ui.Fg(t.Muted))...)
@@ -755,6 +755,21 @@ func kindWidth() int {
 		w = max(w, lipgloss.Width(i18n.T("kind."+string(k))))
 	}
 	return w
+}
+
+// fitLabel fits a finding's name in w cells: whole where it fits, without
+// its note in brackets where only that does, as "System journal" for
+// "System journal (keeps the last 100 MB)", and cut only where not even the
+// name fits.
+func fitLabel(s string, w int) string {
+	if lipgloss.Width(s) > w && strings.HasSuffix(s, ")") {
+		if i := strings.LastIndex(s, "("); i > 0 {
+			if name := strings.TrimRight(s[:i], " "); lipgloss.Width(name) <= w {
+				return ui.Fit(name, w)
+			}
+		}
+	}
+	return ui.Fit(s, w)
 }
 
 // itemLabel names a finding: its kind of thing and where it is.

@@ -6,6 +6,18 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-13
+
+What the screen shortens keeps each name whole.
+
+### Fixed
+
+- The disk's path under the selected disk's details was cut in the middle of a name
+  (`…\AppData\Local\Pac…calGroupLimited…`). Whole folders go, the ones nearest the file kept first:
+  `C:\…\Packages\CanonicalGroupLimited.Ubuntu24.04LTS_…\LocalState\ext4.vhdx`.
+- A name in the list of what can be removed inside that was too long for its column was cut mid-word
+  (`System journal (keeps the last 10…`). It drops its note in brackets first: `System journal`.
+
 ## [0.8.0] - 2026-11-13
 
 A review of the commands and the screen: the question before a run with `--clean`, a disk named twice, what a quiet
@@ -314,7 +326,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.0
 [0.7.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.7.0
 [0.6.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.2

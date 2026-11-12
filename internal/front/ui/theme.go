@@ -184,16 +184,51 @@ func FitRight(s string, w int) string {
 }
 
 // Middle shortens a long path in its middle, keeping the drive and the file
-// name, which say the most: C:\Users\…\LocalState\ext4.vhdx.
+// name, which say the most: C:\Users\…\LocalState\ext4.vhdx. Folders go
+// whole, from the middle out: those nearest the file stay first, then those
+// after the drive, so no name is cut in two. Only where not even the drive,
+// "…" and the file name fit is the text cut by cells instead.
 func Middle(s string, w int) string {
 	if lipgloss.Width(s) <= w || w < 8 {
 		return Fit(s, w)
+	}
+	if seg := pathSegments(s); len(seg) >= 3 {
+		// seg[:i] stays at the head and seg[j:] at the tail, with "…" and
+		// the path's separator for what goes between.
+		sep := seg[0][len(seg[0])-1:]
+		width := func(i, j int) int {
+			return lipgloss.Width(strings.Join(seg[:i], "")) + lipgloss.Width("…"+sep) + lipgloss.Width(strings.Join(seg[j:], ""))
+		}
+		i, j := 1, len(seg)-1
+		if width(i, j) <= w {
+			for j-1 > i && width(i, j-1) <= w {
+				j--
+			}
+			for i+1 < j && width(i+1, j) <= w {
+				i++
+			}
+			return Fit(strings.Join(seg[:i], "")+"…"+sep+strings.Join(seg[j:], ""), w)
+		}
 	}
 	keep := w - 1
 	head := keep / 3
 	tail := keep - head
 	// Cut by cells, not letters: a Korean letter takes two.
 	return Fit(ansi.Truncate(s, head, "")+"…"+ansi.TruncateLeft(s, lipgloss.Width(s)-tail, ""), w)
+}
+
+// pathSegments splits s after each \\ or /, so that joined they give s
+// back: C:\, Users\, …, ext4.vhdx.
+func pathSegments(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' || s[i] == '/' {
+			out = append(out, s[start:i+1])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // Highlight paints a whole row's background, w cells wide. Styled parts of

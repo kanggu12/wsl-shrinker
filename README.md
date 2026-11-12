@@ -64,7 +64,7 @@ other way to install it, and a [sandbox](docs/setup.md#try-it-in-a-sandbox) to t
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/steps-dark.svg">
-    <img alt="Six steps: check, clean, stop, compact, verify, start again. Check and verify only read; clean removes only what you chose; stop stops the containers and runs the pre-stop scripts; compact is WSL's own; start again brings the distribution and its containers back." src="docs/assets/steps-light.svg">
+    <img alt="Six steps: check, clean, stop, compact, verify, start again. Check and verify only read, clean removes only what you chose, stop stops the containers, compact is WSL's own. Under them the disk, 312 GB now and 248 GB after: its mint blocks, 64 GB, go back to Windows at the compact step." src="docs/assets/steps-light.svg">
   </picture>
   <br>
   <i>A shrink, step by step: check and verify only read, and clean removes only what you chose.</i>
@@ -86,9 +86,9 @@ the code.
 
 | Using it | Understanding it | Changing it |
 |:---|:---|:---|
-| [Setup](docs/setup.md) | [How it works](docs/how-it-works.md) | [Internals](docs/internals.md) |
-| [Commands](docs/commands.md) | [Troubleshooting](docs/troubleshooting.md) | [Contributing](.github/CONTRIBUTING.md) |
-| [Settings](docs/settings.md) | [Questions](docs/questions.md) | [Changelog](CHANGELOG.md) · [Security](.github/SECURITY.md) |
+| [Setup](docs/setup.md): try, install, upgrade, remove | [How it works](docs/how-it-works.md): the estimate, each step | [Internals](docs/internals.md): layers, decisions, tests |
+| [Commands](docs/commands.md): flags, keys, JSON | [Troubleshooting](docs/troubleshooting.md): problems and what to do | [Contributing](.github/CONTRIBUTING.md): build, test, change |
+| [Settings](docs/settings.md): `config.toml`, pre-stop.d | [Questions](docs/questions.md): your files, a closed window, WSL 1 | [Changelog](CHANGELOG.md) · [Security](.github/SECURITY.md) |
 
 ## License
 

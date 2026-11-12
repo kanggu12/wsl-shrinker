@@ -6,6 +6,12 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Fixed
+
+- `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
+  the screen's question count them. The question counts them now.
+- A disk named twice on `shrink`'s command line, in any letter case, was stopped and compacted twice. It runs once.
+
 ## [0.7.0] - 2026-11-13
 
 Where wsl-spawner is installed, the stop step goes through it.

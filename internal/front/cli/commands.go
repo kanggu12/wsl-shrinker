@@ -256,6 +256,12 @@ func shrinkCmd(p *apps) *cobra.Command {
 				if i < 0 {
 					return hint(fmt.Errorf("%w: no disk named %q", errUsage, name), "see wsl-shrinker list")
 				}
+				// A disk named again, in any letter case as WSL's names go, is
+				// in the queue already: run twice, it would be stopped and
+				// compacted twice for nothing.
+				if slices.ContainsFunc(queue, func(d disks.Disk) bool { return d.Name == ds[i].Name }) {
+					continue
+				}
 				queue = append(queue, ds[i])
 			}
 			// The engine's own rule, before the question: a disk a run's
@@ -285,7 +291,17 @@ func shrinkCmd(p *apps) *cobra.Command {
 				for _, d := range queue {
 					gain := "?"
 					if d.Estimate != nil {
-						gain = units.Bytes(d.Estimate.Reclaim)
+						// With what --clean removes inside it first, as the run's
+						// check step and the screen's question count it: only in
+						// a distribution that runs, the one kind cleanChoices
+						// takes items for.
+						n := d.Estimate.Reclaim
+						if d.Running {
+							for _, it := range chosen[d.Name] {
+								n += it.Bytes
+							}
+						}
+						gain = units.Bytes(n)
 					}
 					fmt.Fprintf(talk, "%s: about %s back to Windows", d.Name, gain)
 					if d.Running {

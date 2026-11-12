@@ -96,9 +96,10 @@ wsl-shrinker shrink Ubuntu-24.04 --clean "Ubuntu-24.04=docker-build-cache,pip:/h
 ```
 
 Name disks as `list` shows them, in any letter case: a distribution's name, `Docker Desktop data`, or a file's name.
-Without `--yes` it asks once for all of them; with no terminal to ask in, it stops and asks for `--yes`. The summary and
-the question go to stderr, so stdout holds only the steps or the JSON. Ctrl+C at the question cancels. `--clean` can
-repeat; an id named twice is removed once.
+A disk named twice is shrunk once. Without `--yes` it asks once for all of them, with what each gives back, the items
+`--clean` removes included; with no terminal to ask in, it stops and asks for `--yes`. The summary and the question go
+to stderr, so stdout holds only the steps or the JSON. Ctrl+C at the question cancels. `--clean` can repeat; an id
+named twice is removed once.
 
 Nothing runs if a name is not a disk, a disk cannot be shrunk now (protected, encrypted, fixed-size, in use, with
 filesystem errors), a `--clean` id is not in the distribution, or another wsl-shrinker's run is not finished.

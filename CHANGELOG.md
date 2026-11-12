@@ -6,10 +6,20 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-13
+
+A review of the commands and the screen: the question before a run with `--clean`, a disk named twice, what a quiet
+wsl-spawner left untold in Korean, counts of one, and clearer words.
+
+### Added
+
+- A stop step's `--json` events say why a call to wsl-spawner that gave no result said nothing of its own, in
+  `spawner_quiet`: `timeout`, `silent`, with its exit code in `spawner_exit`, or `system`.
+- A step whose distribution wsl-shrinker could not end after wsl-spawner's stop has the `code` `notended`.
+
 ### Changed
 
-- In a stop step's `--json` events, `spawner_said` holds wsl-spawner's own words only. Why a call to it that gave no
-  result said nothing is in `spawner_quiet`: `timeout`, `silent` (with its exit code in `spawner_exit`) or `system`.
+- In a stop step's `--json` events, `spawner_said` holds wsl-spawner's own words only.
 - The made-up PC of `--demo` has WSL 3.0.5.0, as wsl-spawner's has. Setup's pictures are of the same PC: setup opened
   again, with Work protected, so it counts 87.0 GB as the screen does, not 100 GB.
 
@@ -304,7 +314,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.0
 [0.7.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.7.0
 [0.6.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.2
 [0.6.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.1

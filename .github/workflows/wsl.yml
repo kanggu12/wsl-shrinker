@@ -145,7 +145,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # The release whose stop --yes --json --events this one reads.
-          SPAWNER: v0.1.2
+          SPAWNER: v0.2.0
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $env:APPDATA = $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'state'

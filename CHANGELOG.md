@@ -6,6 +6,10 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+Where wsl-spawner is installed, the stop step goes through it.
+
 ### Added
 
 - Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed, the stop step stops a running distribution
@@ -264,7 +268,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.7.0
 [0.6.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.2
 [0.6.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.1
 [0.6.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.6.0

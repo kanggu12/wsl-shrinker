@@ -15,6 +15,13 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ### Fixed
 
+- `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
+  the screen's question count them. The question counts them now.
+- A disk named twice on `shrink`'s command line, in any letter case, was stopped and compacted twice. It runs once.
+- A run's steps on the command line counted one thing as several ("1 containers", "1 items") and called the pre-stop
+  scripts hooks; they say "1 container" and "1 pre-stop script" now, in the history's details too.
+- CLI mode's list of commands left out what `wsl-shrinker setup` does in a terminal 80 or 100 columns wide; it says
+  "change the settings" now, in both languages.
 - The Korean screen said in English why a stop through wsl-spawner went as it did when wsl-spawner said nothing of its
   own: it printed nothing and exited, it ran out of the time a run gives it, or Windows did not run it to its end. The
   screen says these in its own language now, and shows wsl-spawner's own words as they are.
@@ -24,22 +31,16 @@ that only fixes raises the patch number. Each release's section here is its rele
   command line does.
 - A failed stop through wsl-spawner said wsl-shrinker "ends" the distribution, after it had ended it. Help's step 3
   now says that with wsl-spawner the pre-stop scripts run first, then its stop.
-- When wsl-shrinker could not end a distribution that wsl-spawner's stop left running, the screen still said it had.
-  The step now says the distribution may still run (`code` is `notended`).
+- When wsl-shrinker could not end a distribution that wsl-spawner's stop left running, the screen still said that it
+  ends it. The step now says the distribution may still run (`code` is `notended`).
 - Below 110 columns, the items chosen inside a distribution showed nowhere on the main screen. The line on what is
   inside counts them, and the selected disk's verdict says what comes back with them, at any width.
 - `q` in the list of what to remove went back instead of quitting, as it does everywhere but in a question.
 - The question before a run said "Others keep running"; it says the other distributions do.
 - In Korean, closing a cut-off run read as "forgetting" it (잊기); the question, its keys, the status row and help say
   closing it (닫기) now. The footer and help name the past runs with one word.
-
-- `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
-  the screen's question count them. The question counts them now.
-- A disk named twice on `shrink`'s command line, in any letter case, was stopped and compacted twice. It runs once.
-- A run's steps on the command line counted one thing as several ("1 containers", "1 items") and called the pre-stop
-  scripts hooks; they say "1 container" and "1 pre-stop script" now, in the history's details too.
-- CLI mode's list of commands left out what `wsl-shrinker setup` does in a terminal 80 or 100 columns wide; it says
-  "change the settings" now, in both languages.
+- [Commands](docs/commands.md) said that false and 0 values are left out of `shrink --json`. It names the keys that are,
+  and those always there, 0 or false included.
 
 ## [0.7.0] - 2026-11-13
 

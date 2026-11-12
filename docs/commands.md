@@ -110,17 +110,23 @@ whether its distribution runs.
 
 When a run starts a distribution and its containers again, a note under that disk's result says WSL stops them once no
 terminal is open in the distribution ([Troubleshooting](troubleshooting.md#containers-stopped-a-little-after-a-shrink)).
-A failed stop step leaves the distribution running, with no note. `recover` adds the same note. In the JSON,
-`distro_started` marks a distribution started again, `containers_started` and `containers_not_started` count containers,
-and false or 0 values are left out. A stop step's events say `by` (`wsl-spawner` when it stopped the distribution),
-`phase` (its step under way: `hook`, `units`, `docker`, `podman`, `sync`, `terminate`), `spawner` (how its stop went:
-`clean`, `limit`, `failed`, `error`; or `not-stopped` when it is installed but stopped nothing), `spawner_said` (what
-wsl-spawner said, in its own words only: why it stopped nothing, or what went wrong past its steps), `spawner_quiet`
-(why a call to it that gave no result said nothing of its own: `timeout` when it ran out of the time a run gives it,
-`silent` when it printed nothing, with its exit code in `spawner_exit`, `system` when Windows did not run it to its
-end) and `hooks_failed`, each left out when it has nothing to say. A failed stop step's `code` says why for the screen:
-`otherstop`, `stillruns`, `nostate` or `background`, or `notended` when after one of the last three wsl-shrinker could
-not end the distribution either.
+A failed stop step leaves the distribution running, with no note. `recover` adds the same note.
+
+In the JSON, a result's `distro_started` marks a distribution started again, and `containers_started` and
+`containers_not_started` count containers; each is left out when false or 0, as are `before`, `after`, `file_after`,
+`error`, `failed_at` and `notes` when there is nothing to say. An event leaves out its `distro_started`, `containers`
+and `code` the same way, and a stop step's keys below. Every other key is always there, 0 or false included: a
+result's `disk`, `freed_bytes`, `events`, `compacted`, `left` and `took_seconds`, and an event's `step`, `status`,
+`detail`, `bytes`, `count`, `hooks`, `took_seconds`, `second_start`, `not_restarted` and `at`. A stop step's events
+say `by` (`wsl-spawner` when it stopped the distribution), `phase` (its step under way: `hook`, `units`, `docker`,
+`podman`, `sync`, `terminate`), `spawner` (how its stop went: `clean`, `limit`, `failed`, `error`; or `not-stopped`
+when it is installed but stopped nothing), `spawner_said` (what wsl-spawner said, in its own words only: why it
+stopped nothing, or what went wrong past its steps), `spawner_quiet` (why a call to it that gave no result said
+nothing of its own: `timeout` when it ran out of the time a run gives it, `silent` when it printed nothing, with its
+exit code in `spawner_exit` (left out for 0), `system` when Windows did not run it to its end) and `hooks_failed`,
+each left out when it has nothing to say. A failed stop step's `code` says why for the screen: `otherstop`,
+`stillruns`, `nostate` or `background`, or `notended` when after one of the last three wsl-shrinker could not end the
+distribution either.
 
 Run from a terminal inside a distribution it shrinks, the run moves to the screen in a new window, since stopping the
 distribution closes that terminal. The command exits with 0 once that window starts, or says it did not and exits with

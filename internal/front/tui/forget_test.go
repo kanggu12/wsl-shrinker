@@ -820,3 +820,47 @@ func TestTheClockSlowsDownWhenNothingMoves(t *testing.T) {
 		t.Error("an ended run keeps the quick frames")
 	}
 }
+
+func TestKoreanClosesACutOffRunAndNamesThePastRunsOnce(t *testing.T) {
+	// "Forget" in Korean reads as closing the cut-off run, never as 잊다:
+	// the question, its keys, the footer, the status row and help say 닫다.
+	// The past runs go by one word, in the footer as in help.
+	defer i18n.Set(i18n.English)
+	i18n.Set(i18n.Korean)
+	b := cutOffRun()
+	b.recoverErr = stuck()
+	m := play(t, loaded(t, b, 120, 30), "R")
+	main := atRest(m)
+	box := shown(play(t, m, "F"))
+	var helps []string
+	keys := []string{"?"}
+	for range 30 {
+		helps = append(helps, screen(demo(), 80, 24, keys...)...)
+		keys = append(keys, "down")
+	}
+	for _, want := range []string{"끊긴 Ubuntu-24.04 줄이기를 닫을까요?", "⏎ 닫기"} {
+		if !strings.Contains(joined(box), want) {
+			t.Errorf("no %q in the question:\n%s", want, strings.Join(box, "\n"))
+		}
+	}
+	if f := footerOf(main); !strings.Contains(f, "F 닫기") {
+		t.Errorf("footer %q", f)
+	}
+	if out := joined(helps); !strings.Contains(out, "R로 마무리하지 못한 끊긴 줄이기 닫기") {
+		t.Errorf("help:\n%s", out)
+	}
+	for _, lines := range [][]string{main, box, helps} {
+		if out := joined(lines); strings.Contains(out, "잊") {
+			t.Errorf("says 잊:\n%s", out)
+		}
+	}
+	// No Korean words of the program's say it either.
+	for k := range catalogKeys(t)[i18n.Korean] {
+		if strings.Contains(i18n.T(k), "잊") {
+			t.Errorf("%s: %q", k, i18n.T(k))
+		}
+	}
+	if i18n.T("help.history") != i18n.T("key.history") {
+		t.Errorf("help names the past runs %q, the footer %q", i18n.T("help.history"), i18n.T("key.history"))
+	}
+}

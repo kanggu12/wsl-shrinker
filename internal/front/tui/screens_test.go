@@ -889,3 +889,69 @@ func TestEveryReasonADiskIsRefusedForHasWords(t *testing.T) {
 		t.Errorf("no reason is said as %q", s)
 	}
 }
+
+func TestTheQuestionNamesWhatKeepsRunning(t *testing.T) {
+	// The other distributions keep running, not the other disks: Docker
+	// Desktop's and a file's are not running ones.
+	if out := joined(screen(demo(), 120, 30, "s")); !strings.Contains(out, "Other distributions keep running.") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestWhatIsChosenInsideShowsInANarrowWindowToo(t *testing.T) {
+	// Below 110 columns the list inside has no room at 24 rows, and its
+	// summary line says what is chosen; the verdict over it says what comes
+	// back with it, as the question then does.
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		for _, w := range []int{80, 100} {
+			out := joined(screen(demo(), w, 24, "c", "space", "esc"))
+			// The build cache: 14.8 GB, of the 38.5 GB found.
+			for _, want := range []string{i18n.TN("inside.summary.chosen", 1, "38.5 GB", 1, "14.8 GB"), i18n.T("verdict.gain.chosen", "64.0 GB", "78.8 GB")} {
+				if !strings.Contains(out, strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("%s %d: no %q:\n%s", lang, w, want, out)
+				}
+			}
+		}
+		// Beside the table, where the list has room and marks the item, the
+		// verdict says it too.
+		var pane []string
+		for _, l := range screen(demo(), 120, 24, "c", "space", "esc") {
+			if i := strings.LastIndex(l, "│"); i >= 0 {
+				pane = append(pane, l[i+len("│"):])
+			}
+		}
+		if want := i18n.T("verdict.gain.chosen", "64.0 GB", "78.8 GB"); !strings.Contains(joined(pane), strings.Join(strings.Fields(want), " ")) {
+			t.Errorf("%s 120: no %q:\n%s", lang, want, strings.Join(pane, "\n"))
+		}
+		// Nothing chosen: the verdict and the line as before.
+		if out := joined(screen(demo(), 80, 24)); !strings.Contains(out, i18n.T("verdict.gain", "64.0 GB")) || !strings.Contains(out, strings.Join(strings.Fields(i18n.T("inside.summary", "38.5 GB")), " ")) {
+			t.Errorf("%s: nothing chosen:\n%s", lang, out)
+		}
+	}
+	// In English, word for word.
+	i18n.Set(i18n.English)
+	out := joined(screen(demo(), 80, 24, "c", "space", "esc"))
+	for _, want := range []string{"Gives back about 64.0 GB, 78.8 GB with what you chose.", "Inside: 38.5 GB can be removed · 1 chosen, 14.8 GB · c chooses"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestQQuitsFromTheCleanListToo(t *testing.T) {
+	// q quits everywhere but in a question; esc goes back from the list.
+	m := playKeys(t, demo(), []string{"c"})
+	if m.mode != modeClean {
+		t.Fatalf("mode %v", m.mode)
+	}
+	if _, cmd := m.Update(snapshotKey("q")); cmd == nil {
+		t.Fatal("q did nothing")
+	} else if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("q gave %T", cmd())
+	}
+	if next, _ := m.Update(snapshotKey("esc")); next.(model).mode != modeMain {
+		t.Fatalf("esc: mode %v", next.(model).mode)
+	}
+}

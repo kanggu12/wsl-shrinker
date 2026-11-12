@@ -24,6 +24,12 @@ that only fixes raises the patch number. Each release's section here is its rele
   now says that with wsl-spawner the pre-stop scripts run first, then its stop.
 - When wsl-shrinker could not end a distribution that wsl-spawner's stop left running, the screen still said it had.
   The step now says the distribution may still run (`code` is `notended`).
+- Below 110 columns, the items chosen inside a distribution showed nowhere on the main screen. The line on what is
+  inside counts them, and the selected disk's verdict says what comes back with them, at any width.
+- `q` in the list of what to remove went back instead of quitting, as it does everywhere but in a question.
+- The question before a run said "Others keep running"; it says the other distributions do.
+- In Korean, closing a cut-off run read as "forgetting" it (잊기); the question, its keys, the status row and help say
+  closing it (닫기) now. The footer and help name the past runs with one word.
 
 - `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
   the screen's question count them. The question counts them now.

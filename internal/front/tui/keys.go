@@ -188,7 +188,10 @@ func (m model) keyClean(s string) (tea.Model, tea.Cmd) {
 	m.pickSel = min(max(m.pickSel, 0), last)
 	page := max(1, m.cleanVisible()-1)
 	switch s {
-	case "esc", "q":
+	case "q":
+		// Quits, as everywhere but in a question.
+		return m, tea.Quit
+	case "esc":
 		m.mode = modeMain
 		return m, nil
 	case "up", "k":

@@ -190,8 +190,8 @@ does not load does not stop it. Typed in WSL, it runs in `wsl-shrinker.exe` like
 In the confirm box, `⏎` or `y` shrinks and `esc` or `n` cancels; in the box before forgetting, `⏎` or `y` forgets and
 `esc`, `n` or `q` cancels. The clean list groups items by what removing costs:
 `space` chooses one, `a` every cache (nothing that needs a download or holds history), `n` none; `PgUp` `PgDn` move by
-pages and `Home` `End` to the first and the last, `⏎` goes on to the shrink, `esc` back. A long disk list scrolls with
-the selection. Help and history scroll with `↑` `↓` `PgUp` `PgDn` `Home` `End`; `q` quits, any other key goes back.
+pages and `Home` `End` to the first and the last, `⏎` goes on to the shrink, `esc` back, and `q` quits. A long disk
+list scrolls with the selection. Help and history scroll with `↑` `↓` `PgUp` `PgDn` `Home` `End`; `q` quits, any other key goes back.
 
 ## Exit codes
 

@@ -484,6 +484,16 @@ func (m model) details(w, h int) []string {
 	section := func(s string) string { return lipgloss.NewStyle().Bold(true).Foreground(t.Muted).Render(s) }
 	cat := m.category(d)
 	lines := []string{bold.Render(d.Name) + ui.Fg(t.Muted).Render("  "+m.kindWords(d))}
+	// What was chosen to remove inside a running distribution, which the
+	// verdict and the line on what is inside say, as the question will.
+	var chosen int64
+	var nChosen int
+	if d.Running && d.Distro != "" {
+		for _, it := range m.chosenItems(d.Distro) {
+			chosen += it.Bytes
+			nChosen++
+		}
+	}
 	// The verdict, in the disk's color.
 	var verdict string
 	switch m.block(d) {
@@ -502,9 +512,13 @@ func (m model) details(w, h int) []string {
 	case shrink.BlockNoCompact:
 		verdict = i18n.T("verdict.nocompact", units.Bytes(d.Estimate.Reclaim))
 	case "":
-		if cat == ui.CatGain {
+		switch {
+		case cat == ui.CatGain && nChosen > 0:
+			// With what is chosen: the disk's own, then the whole.
+			verdict = i18n.T("verdict.gain.chosen", units.Bytes(d.Estimate.Reclaim), units.Bytes(d.Estimate.Reclaim+chosen))
+		case cat == ui.CatGain:
 			verdict = i18n.T("verdict.gain", units.Bytes(d.Estimate.Reclaim))
-		} else {
+		default:
 			verdict = i18n.T("verdict.small", units.Bytes(d.Estimate.Reclaim))
 		}
 	}
@@ -574,7 +588,13 @@ func (m model) details(w, h int) []string {
 				for _, it := range s.r.Items {
 					found += it.Bytes
 				}
-				add([]string{ui.Fg(t.Muted).Render(i18n.T("inside.summary", units.Bytes(found)))})
+				// What is chosen too, which the list would mark: before the
+				// key, which a narrow pane cuts first.
+				summary := i18n.T("inside.summary", units.Bytes(found))
+				if nChosen > 0 {
+					summary = i18n.TN("inside.summary.chosen", nChosen, units.Bytes(found), nChosen, units.Bytes(chosen))
+				}
+				add([]string{ui.Fg(t.Muted).Render(summary)})
 			}
 		}
 	}

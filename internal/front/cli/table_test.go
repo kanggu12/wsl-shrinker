@@ -143,7 +143,8 @@ func TestLeftWordsSayWhatToDoNext(t *testing.T) {
 		// A check that refused changed nothing, and says so in its error.
 		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepCheck, Left: shrink.LeftRunning}, ""},
 		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepCompact, Left: shrink.LeftRunning}, "the disk was not changed; Dev runs as it did"},
-		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepStop, Left: shrink.LeftRunning, ContainersNotStarted: 1}, "the disk was not changed; Dev runs again, 1 containers did not start"},
+		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepStop, Left: shrink.LeftRunning, ContainersNotStarted: 1}, "the disk was not changed; Dev runs again, 1 container did not start"},
+		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepStop, Left: shrink.LeftRunning, ContainersNotStarted: 2}, "the disk was not changed; Dev runs again, 2 containers did not start"},
 		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepRestart, Compacted: true, Left: shrink.LeftDown}, "the disk was compacted; Dev did not start again: wsl -d Dev starts it"},
 		{shrink.Result{Disk: "Dev", FailedAt: shrink.StepVerify, Compacted: true, Left: shrink.LeftSuspect}, "the disk was compacted, but it does not read as before; Dev stays stopped until you know why (see Troubleshooting)"},
 		{shrink.Result{Disk: "data.vhdx", FailedAt: shrink.StepCompact, Left: shrink.LeftFile}, "the disk was not changed"},

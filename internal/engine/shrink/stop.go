@@ -56,11 +56,12 @@ func stopItself(ctx context.Context, sys wsl.System, distro string, ids []string
 }
 
 // stoppedItself is the last event of a stop this program made: the
-// containers, the hooks, and those that failed.
+// containers, the person's pre-stop scripts, and those that failed.
 func stoppedItself(ids []string, hooks, failed int) Event {
-	detail := fmt.Sprintf("%d containers", len(ids))
+	// Named as everything else names them: one container, pre-stop scripts.
+	detail := counted(len(ids), "container")
 	if hooks > 0 {
-		detail += fmt.Sprintf(", %d hooks", hooks)
+		detail += ", " + counted(hooks, "pre-stop script")
 	}
 	e := Event{Step: StepStop, Status: Done, Count: len(ids), Hooks: hooks, HooksFailed: failed, Containers: ids}
 	if failed > 0 {
@@ -150,9 +151,10 @@ func stopBySpawner(ctx context.Context, env Env, distro string, ids []string, sa
 // stoppedBySpawner is the last event of a stop wsl-spawner made: end is its
 // word for how it went, why what it said went wrong.
 func stoppedBySpawner(ids []string, hooks, failed int, end, why string) Event {
-	detail := fmt.Sprintf("%d containers, by wsl-spawner", len(ids))
+	// The same words as this program's own stop, and who stopped it.
+	detail := counted(len(ids), "container") + ", by wsl-spawner"
 	if hooks > 0 {
-		detail += fmt.Sprintf(", %d hooks", hooks)
+		detail += ", " + counted(hooks, "pre-stop script")
 	}
 	e := Event{Step: StepStop, Status: Done, Count: len(ids), Hooks: hooks, HooksFailed: failed, Containers: ids, By: BySpawner, Spawner: end, SpawnerSaid: why}
 	if failed > 0 {

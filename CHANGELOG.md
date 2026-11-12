@@ -11,6 +11,10 @@ that only fixes raises the patch number. Each release's section here is its rele
 - `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
   the screen's question count them. The question counts them now.
 - A disk named twice on `shrink`'s command line, in any letter case, was stopped and compacted twice. It runs once.
+- A run's steps on the command line counted one thing as several ("1 containers", "1 items") and called the pre-stop
+  scripts hooks; they say "1 container" and "1 pre-stop script" now, in the history's details too.
+- CLI mode's list of commands left out what `wsl-shrinker setup` does in a terminal 80 or 100 columns wide; it says
+  "change the settings" now, in both languages.
 
 ## [0.7.0] - 2026-11-13
 

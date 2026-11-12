@@ -292,6 +292,29 @@ func TestTheOverviewOfTheMadeUpPC(t *testing.T) {
 	i18n.Set(i18n.English)
 }
 
+func TestTheOverviewSaysWhatEachCommandDoesIn80Columns(t *testing.T) {
+	// A command's words go where they do not fit whole: at 80 and 100
+	// columns, in either language, every one of them fits, setup's too.
+	var o, e bytes.Buffer
+	for _, lang := range []string{"en", "ko"} {
+		for _, w := range []int{80, 100} {
+			o.Reset()
+			if code := run([]string{"--snapshot", fmt.Sprintf("%dx24", w), "--cli", "--lang", lang}, &o, &e); code != exitOK {
+				t.Fatalf("exit %d: %s", code, e.String())
+			}
+			plain := ansi.Strip(o.String())
+			for _, cmd := range []string{"shrink", "inside", "tui", "setup", "--help"} {
+				// The command, its disks if any, two spaces or more, then words,
+				// all on its own line.
+				if !regexp.MustCompile(`(?m)^  wsl-shrinker ` + regexp.QuoteMeta(cmd) + `\b[^\n]*? {2,}\S`).MatchString(plain) {
+					t.Errorf("%s %d: no words beside wsl-shrinker %s:\n%s", lang, w, cmd, plain)
+				}
+			}
+		}
+	}
+	i18n.Set(i18n.English)
+}
+
 func TestCtrlCOnTheFirstSetupStopsEverything(t *testing.T) {
 	// Ctrl+C is out: no settings written, nothing opened after it, and the
 	// next start asks again.

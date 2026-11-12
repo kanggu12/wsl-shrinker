@@ -464,7 +464,7 @@ func leftWords(r shrink.Result) string {
 	switch r.Left {
 	case shrink.LeftRunning:
 		if r.ContainersNotStarted > 0 {
-			return fmt.Sprintf("%s; %s runs again, %d containers did not start", changed, r.Disk, r.ContainersNotStarted)
+			return fmt.Sprintf("%s; %s runs again, %s did not start", changed, r.Disk, counted(r.ContainersNotStarted, "container"))
 		}
 		if r.FailedAt == shrink.StepCheck {
 			return ""

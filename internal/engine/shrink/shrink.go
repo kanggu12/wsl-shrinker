@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -722,10 +723,10 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		} else if strings.Contains(out, "failed: ") {
 			// One item failing does not stop the run; the rest was removed.
 			cleaned = n
-			sayE(Event{Step: StepClean, Status: Warned, Detail: fmt.Sprintf("%d items, some failed", len(opt.Clean)), Count: len(opt.Clean), Bytes: n})
+			sayE(Event{Step: StepClean, Status: Warned, Detail: counted(len(opt.Clean), "item") + ", some failed", Count: len(opt.Clean), Bytes: n})
 		} else {
 			cleaned = n
-			sayE(Event{Step: StepClean, Status: Done, Detail: fmt.Sprintf("%d items, about %s", len(opt.Clean), units.Bytes(n)), Count: len(opt.Clean), Bytes: n})
+			sayE(Event{Step: StepClean, Status: Done, Detail: counted(len(opt.Clean), "item") + ", about " + units.Bytes(n), Count: len(opt.Clean), Bytes: n})
 		}
 	}
 
@@ -1022,9 +1023,20 @@ func verify(env Env, d disks.Disk, cleaned int64, base baseline) verdict {
 		}
 	}
 	if lost > 0 {
-		return bad("%d blocks the filesystem uses are no longer stored after compacting: data went missing", lost)
+		return bad("%s", lostWords(lost))
 	}
 	return verdict{}
+}
+
+// lostWords is the verify step's failure for n blocks the filesystem uses
+// that the compaction no longer stores.
+func lostWords(n int) string {
+	// One block is, several are.
+	are := "are"
+	if n == 1 {
+		are = "is"
+	}
+	return counted(n, "block") + " the filesystem uses " + are + " no longer stored after compacting: data went missing"
 }
 
 // restart starts the distribution again, makes sure its root is writable,
@@ -1108,9 +1120,9 @@ func restart(ctx context.Context, env Env, distro string, ids []string, sleep fu
 		}
 		if e.NotRestarted > 0 {
 			e.Status = Warned
-			e.Detail += fmt.Sprintf(", %d of %d containers not started again", e.NotRestarted, len(ids))
+			e.Detail += fmt.Sprintf(", %d of %s not started again", e.NotRestarted, counted(len(ids), "container"))
 		} else {
-			e.Detail += fmt.Sprintf(", %d containers started again", len(ids))
+			e.Detail += ", " + counted(len(ids), "container") + " started again"
 		}
 	}
 	return e, nil
@@ -1283,4 +1295,13 @@ func Startable(ids []string) []string { return safeIDs(ids) }
 func oneLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	return s
+}
+
+// counted is n of a thing, for a step's detail: "1 container", named for
+// one, or "2 containers".
+func counted(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return strconv.Itoa(n) + " " + thing + "s"
 }

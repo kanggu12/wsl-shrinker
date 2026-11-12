@@ -103,7 +103,7 @@ func TestShrinkFromStartToEnd(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, errOut, out)
 	}
-	for _, want := range []string{"Dev\n", "  check    done", "  stop     done     1 containers", "  compact  done", "  verify   done", "  restart  done", "  freed "} {
+	for _, want := range []string{"Dev\n", "  check    done", "  stop     done     1 container\n", "  compact  done", "  verify   done", "  restart  done", "  freed "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}

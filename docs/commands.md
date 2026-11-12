@@ -49,10 +49,24 @@ later run in a terminal names that file as it ends; inside WSL the screen does t
 
 ## TUI and CLI
 
-A bare start in a terminal opens the mode the settings name. TUI, the default, is the screen. CLI prints, in the
-terminal's own colors, the disks with the screen's notes (what stands in a disk's way, what to do about it), what is
-worth shrinking, and the commands to go on with, with the disk that gives back most in them. Every command works in both
-modes.
+A bare start in a terminal opens the mode the settings name. TUI, the default, is the screen: every WSL 2
+distribution, Docker Desktop's data disk and any VHDX file from the settings, with its size now, after a shrink, and
+what comes back. Nothing is started to read a disk, and a protected disk is never shrunk. Its keys are
+[below](#keys-on-the-screen).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
+  <img alt="The disks with their file sizes, sizes after a shrink and what each gives back, the selected disk's space as a bar, its checks, and the largest things inside it." src="assets/screenshot-light.png">
+</picture>
+
+CLI prints, in the terminal's own colors, the disks with the screen's notes (what stands in a disk's way, what to do
+about it), what is worth shrinking, and the commands to go on with, with the disk that gives back most in them. Every
+command works in both modes, and `wsl-shrinker tui` opens the screen in either.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/cli-dark.png">
+  <img alt="CLI mode in a terminal: a headline saying WSL can compact, the disks as a table with their state, file size, size after and what each frees, a line saying two disks are worth shrinking for about 87 GB, and the commands wsl-shrinker shrink Ubuntu-24.04 Debian, inside Ubuntu-24.04, tui, setup and --help." src="assets/cli-light.png">
+</picture>
 
 ## setup
 
@@ -62,10 +76,17 @@ wsl-shrinker setup --mode cli --min-gain 5 --protect Work
 wsl-shrinker setup --language ko --theme light --unprotect Work
 ```
 
-Without flags it opens a wizard: a page per choice, then one to check them. `↑` `↓` choose, and the page shows the
-result at once, the language and colors on the wizard itself. `⏎` or `→` goes on, `←` back. On the disks' page, `↑` `↓`
-select a disk and `space` toggles its protection. `⏎` on the last page writes the choices, `esc` leaves without them,
-and `Ctrl+C` leaves writing nothing. With flags there is no screen, so it works anywhere, scripts included:
+Without flags it opens a wizard: a page per choice, then one to check them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/setup-dark.png">
+  <img alt="The setup wizard at step 3 of 6. A rail lists the steps: Language and Colors done, Mode the one now. The page asks what wsl-shrinker should open, TUI or CLI, with a preview of the screen TUI opens: two disks and what each gives back. The keys: esc quits, left goes back, up and down choose, enter goes on." src="assets/setup-light.png">
+</picture>
+
+`↑` `↓` choose, and the page shows the result at once, the language and colors on the wizard itself. `⏎` or `→` goes
+on, `←` back. On the disks' page, `↑` `↓` select a disk and `space` toggles its protection. `⏎` on the last page writes
+the choices, `esc` leaves without them, and `Ctrl+C` leaves writing nothing. With flags there is no screen, so it works
+anywhere, scripts included:
 
 | Flag | |
 |:---|:---|
@@ -190,7 +211,7 @@ does not load does not stop it. Typed in WSL, it runs in `wsl-shrinker.exe` like
 | `R` | finish a cut-off run, when the screen says there is one |
 | `F` | forget a cut-off run that `R` could not finish: nothing is started again, after a question |
 | `h` | past runs |
-| `?` | help |
+| `?` | help: every key, and what each color means |
 | `q` | quit |
 
 In the confirm box, `⏎` or `y` shrinks and `esc` or `n` cancels; in the box before forgetting, `⏎` or `y` forgets and

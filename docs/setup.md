@@ -1,7 +1,7 @@
 # Setup
 
-Every way to install, upgrade and remove wsl-shrinker, what it needs, and what differs between Windows, WSL and
-PowerShell versions.
+Every way to install, upgrade and remove wsl-shrinker, what it needs, a sandbox to try it first, and what differs
+between Windows, WSL and PowerShell versions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/ways-dark.svg">
@@ -17,10 +17,19 @@ PowerShell versions.
 | Install script | Windows PowerShell 5.1, which every Windows has, or PowerShell 7 ([what differs](#powershell)) | |
 | Distributions | `sh` and the core utilities, BusyBox's included. Without `find`, no cache in a home folder is offered | |
 | Screen | a VT terminal of 40 by 12 cells: Windows Terminal, the Windows console, VS Code's terminal, or any Linux terminal inside WSL ([what differs](#terminals)) | Windows Terminal, 120 by 30 cells |
-| Demo sandbox | Docker | |
+| [Demo sandbox](#try-it-in-a-sandbox) | Docker | |
 
 The program and its WSL launcher are about 8 MB each; neither needs another library. It runs as you, only while you use it:
 no administrator rights, no service, no network.
+
+## Try it in a sandbox
+
+```sh
+docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo
+```
+
+The screen on a made-up PC with five disks, in any terminal with Docker; nothing real is read or changed. Add
+`-e WSL_SHRINKER_LANG=ko` before the image name for Korean. Once installed, `wsl-shrinker --demo` opens the same PC.
 
 ## Install
 
@@ -222,5 +231,5 @@ That needs WSL's interop, also on by default. For a distribution without either,
 ## Not offered
 
 There are no Linux packages, Helm chart or server image: wsl-shrinker must run on the Windows host, out of reach of a
-Linux package manager, container or cluster. The only image is the demo, the screen on a made-up PC:
-`docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`.
+Linux package manager, container or cluster. The only image is the demo, the screen on a made-up PC
+([Try it in a sandbox](#try-it-in-a-sandbox)).

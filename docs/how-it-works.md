@@ -1,5 +1,35 @@
 # How it works
 
+## Why wsl-shrinker
+
+A WSL 2 distribution's disk file grows but never shrinks on its own. WSL 3.0.1 and later can compact it, with
+`wsl --manage <distro> --compact`; wsl-shrinker runs that command itself and adds what comes before and after it:
+
+- **The size after, before anything runs.** It reads the VHDX block table and ext4's bitmaps without mounting the
+  disk; on disks WSL made, [the estimate](#the-estimate) matched the compacted file to the byte.
+- **Only what you choose goes.** Caches, downloads, the trash, the system journal and unused Docker images are listed
+  with their sizes. Docker volumes and containers are never removed.
+- **Containers stop properly.** Each with its own timeout, then your scripts in `/etc/wsl-shrinker/pre-stop.d/`; the
+  ones that ran start again afterwards. Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed,
+  the distribution stops through it, as it does at sign-out.
+- **It checks the result.** The disk is read again after the compaction. One that does not read as before stays
+  stopped.
+- **A closed window is not a lost run.** A journal lets the next start finish a run that was
+  [cut off](#a-run-cut-off).
+- **Light.** One program: no service, no administrator rights, no network.
+
+[A shrink](#a-shrink) has each step and what it checks.
+
+### How it compares
+
+| | Says what it gives back | Shows what fills it | Stops services first | Checks the result | Screen |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **wsl-shrinker** | exact, before | yes | yes | yes | terminal |
+| `wsl --manage --compact` (WSL 3.0.1) | no | no | no, stops them as they are | no | none |
+| `Optimize-VHD` / `diskpart` scripts | no | no | no | no | none |
+| Export-and-import tools | estimate | no | no | no | none |
+| WSL managers with a compact button | after | no | no | no | window |
+
 ## Finding the disks
 
 - **Distributions**: every WSL 2 distribution registered for your user, at its `BasePath` and `VhdFileName`
@@ -16,6 +46,13 @@
 distribution is never started to look at it.
 
 ## The estimate
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/estimate-dark.svg">
+  <img alt="The disk file as blocks. Now, 312 GB: blocks of data that stay, a block freed inside but still stored, and space no block holds. After, 248 GB: only the data, packed; 64 GB goes back to Windows. The data comes from ext4's block bitmaps, the stored blocks from the VHDX block table." src="assets/estimate-light.svg">
+</picture>
+
+A compaction keeps exactly the stored blocks that hold data, so the size after is known before it runs.
 
 A VHDX file is a set of regions (headers, a log, metadata, the block allocation table) and payload blocks of a size the
 file sets: 1 MiB on WSL's disks, up to 256 MiB on others. The block table says whether and where the file stores each

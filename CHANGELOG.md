@@ -11,6 +11,10 @@ that only fixes raises the patch number. Each release's section here is its rele
 - The documentation's figures share one look, wsl-shrinker's own: glass panels, its block glyph on its own parts, each
   disk drawn as blocks as the screen draws it, and flows that turn at right angles. The figure of where to read in
   [Troubleshooting](docs/troubleshooting.md) quotes `doctor` as it speaks: "cannot compact", "the run of … was cut off".
+- The README is short: what wsl-shrinker does, how to install it, a shrink step by step and what runs where. Why it
+  exists and how it compares moved to [How it works](docs/how-it-works.md), the pictures of the screen, CLI mode and
+  setup to [Commands](docs/commands.md), the sandbox to [Setup](docs/setup.md), and the questions to a new
+  [Questions](docs/questions.md) page.
 
 ## [0.8.1] - 2026-11-13
 

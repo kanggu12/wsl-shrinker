@@ -18,7 +18,7 @@ func TestOneOfAThingIsCountedAsOne(t *testing.T) {
 		{stoppedItself(one, 1, 0).Detail, "1 container, 1 pre-stop script"},
 		{stoppedItself(twoIDs, 2, 1).Detail, "2 containers, 2 pre-stop scripts, 1 failed"},
 		{stoppedBySpawner(one, 1, 0, spawner.EndClean, "").Detail, "1 container, by wsl-spawner, 1 pre-stop script"},
-		{stoppedItselfInstead(one, 0, 0, "Dev is left to WSL").Detail, "1 container; wsl-spawner stopped nothing (Dev is left to WSL), so wsl-shrinker did"},
+		{stoppedItselfInstead(one, 0, 0, "Dev is left to WSL", heard{said: "Dev is left to WSL"}).Detail, "1 container; wsl-spawner stopped nothing (Dev is left to WSL), so wsl-shrinker did"},
 		{lostWords(1), "1 block the filesystem uses is no longer stored after compacting: data went missing"},
 		{lostWords(3), "3 blocks the filesystem uses are no longer stored after compacting: data went missing"},
 	} {

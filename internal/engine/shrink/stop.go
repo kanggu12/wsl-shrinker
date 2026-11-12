@@ -25,11 +25,46 @@ var errOtherStop = errors.New("another wsl-spawner stop is running")
 
 // stepError is a failed stop step's error with a code the screen has words
 // for (CodeOtherStop, CodeStillRuns, CodeNoState, CodeBackground), and what
-// wsl-spawner said of it, which the screen shows after its own words.
+// was heard from wsl-spawner of it, which the screen says after its own
+// words.
 type stepError struct {
-	code, said string
-	err        error
+	code  string
+	heard heard
+	err   error
 }
+
+// heard is what the screen says of a call to wsl-spawner after its own
+// words for the step: what wsl-spawner said, in its own words alone, or,
+// when it said nothing, why, as this program knows it (spawner.QuietTimeout
+// and the others), with its exit code for one that printed nothing. The
+// English the command line says of the call is the step's detail.
+type heard struct {
+	said, quiet string
+	exit        int
+}
+
+// heardOf takes a call's error apart: wsl-spawner's own words, or why it
+// said none. The call's own error holds them apart (spawner.CallError); any
+// other is the words of its kind, then wsl-spawner's, as another stopper (a
+// test's) gives them.
+func heardOf(err error) heard {
+	var ce spawner.CallError
+	if errors.As(err, &ce) {
+		return heard{said: ce.Said, quiet: ce.Quiet, exit: ce.Exit}
+	}
+	s := err.Error()
+	for _, kind := range []error{spawner.ErrNotStopped, spawner.ErrNoResult} {
+		// The words of its kind are this program's: what follows them is
+		// wsl-spawner's.
+		if rest, ok := strings.CutPrefix(s, kind.Error()); ok {
+			return heard{said: strings.TrimSpace(strings.TrimPrefix(rest, ":"))}
+		}
+	}
+	return heard{said: s}
+}
+
+// on puts what was heard on the stop step's event e.
+func (h heard) on(e *Event) { e.SpawnerSaid, e.SpawnerQuiet, e.SpawnerExit = h.said, h.quiet, h.exit }
 
 // Error is the step's failure in English, for the command line and the
 // history.
@@ -79,13 +114,15 @@ const noReason = "it gave no reason"
 
 // stoppedItselfInstead is the last event of a stop this program made
 // because wsl-spawner, installed, stopped nothing: what kept it from this
-// distribution is said, as its own words give it, or noReason.
-func stoppedItselfInstead(ids []string, hooks, failed int, why string) Event {
+// distribution is said in English, why (its own words, what is known of a
+// call that said none, or noReason), and for the screen as h heard it.
+func stoppedItselfInstead(ids []string, hooks, failed int, why string, h heard) Event {
 	if why == "" {
 		why = noReason
 	}
 	e := stoppedItself(ids, hooks, failed)
-	e.Spawner, e.SpawnerSaid = SpawnerNotStopped, why
+	e.Spawner = SpawnerNotStopped
+	h.on(&e)
 	e.Detail += "; wsl-spawner stopped nothing (" + why + "), so wsl-shrinker did"
 	return e
 }
@@ -112,17 +149,20 @@ func stopBySpawner(ctx context.Context, env Env, distro string, ids []string, sa
 	case errors.Is(err, spawner.ErrNotStopped):
 		// Nothing of it stopped: the containers stop as without wsl-spawner,
 		// the hooks run already. What it said is kept up to its "; ", after
-		// which it says what to change in its own settings.
+		// which it says what to change in its own settings: in the English,
+		// and in its own words for the screen.
 		why := strings.TrimSpace(strings.TrimPrefix(err.Error(), spawner.ErrNotStopped.Error()+":"))
 		why, _, _ = strings.Cut(why, "; ")
+		h := heardOf(err)
+		h.said, _, _ = strings.Cut(h.said, "; ")
 		if _, err := sys.Run(within(ctx, stopLimit), distro, "root", containersStopScript(ids, true)); err != nil {
 			return Event{}, err
 		}
-		return stoppedItselfInstead(ids, hooks, failed, why), nil
+		return stoppedItselfInstead(ids, hooks, failed, why, h), nil
 	case err != nil:
 		// It began and said no result (it was killed at the limit, or broke
 		// off): what counts is whether the distribution still runs.
-		return afterPartialStop(ctx, sys, distro, ids, hooks, failed, spawner.EndError, err.Error())
+		return afterPartialStop(ctx, sys, distro, ids, hooks, failed, spawner.EndError, err.Error(), heardOf(err))
 	case st.Detached:
 		// It went on in the background: the compaction waits for its end.
 		return stoppedInBackground(ctx, env, distro, ids, hooks, failed)
@@ -145,7 +185,7 @@ func stopBySpawner(ctx context.Context, env Env, distro string, ids []string, sa
 	if end != spawner.EndClean && end != spawner.EndLimit && end != spawner.EndFailed {
 		end = spawner.EndError
 	}
-	return afterPartialStop(ctx, sys, distro, ids, hooks, failed, end, st.Err)
+	return afterPartialStop(ctx, sys, distro, ids, hooks, failed, end, st.Err, heard{said: st.Err})
 }
 
 // stoppedBySpawner is the last event of a stop wsl-spawner made: end is its
@@ -200,11 +240,15 @@ func stoppedBySpawner(ids []string, hooks, failed int, end, why string) Event {
 // wsl-spawner may have stopped Docker's daemon through systemd, its units
 // and Podman, which only a fresh start of the distribution brings back,
 // with wsl-spawner's own start where it is set up; the start settle makes
-// only starts containers.
-func afterPartialStop(ctx context.Context, sys wsl.System, distro string, ids []string, hooks, failed int, end, why string) (Event, error) {
+// only starts containers. why is what went wrong in English, h what the
+// screen says of it.
+func afterPartialStop(ctx context.Context, sys wsl.System, distro string, ids []string, hooks, failed int, end, why string, h heard) (Event, error) {
 	state, serr := stateOf(ctx, sys, distro)
 	if state == stateStopped {
-		return stoppedBySpawner(ids, hooks, failed, end, why), nil
+		e := stoppedBySpawner(ids, hooks, failed, end, why)
+		// For the screen, wsl-spawner's words alone, or why there are none.
+		h.on(&e)
+		return e, nil
 	}
 	// Ended as wsl-spawner's stop would have ended it. A failure to end it
 	// is said with the rest: settle's start then finds it running.
@@ -213,9 +257,9 @@ func afterPartialStop(ctx context.Context, sys wsl.System, distro string, ids []
 		ended = "wsl-shrinker could not end it either (" + oneLine(terr.Error()) + ")"
 	}
 	if state == stateUnknown {
-		return Event{}, stepError{code: CodeNoState, said: why, err: fmt.Errorf("after wsl-spawner's stop (%s), WSL did not say whether %s still runs (%v); %s", whyOr(why), distro, serr, ended)}
+		return Event{}, stepError{code: CodeNoState, heard: h, err: fmt.Errorf("after wsl-spawner's stop (%s), WSL did not say whether %s still runs (%v); %s", whyOr(why), distro, serr, ended)}
 	}
-	return Event{}, stepError{code: CodeStillRuns, said: why, err: fmt.Errorf("wsl-spawner's stop of %s did not end it (%s), and it still ran; %s", distro, whyOr(why), ended)}
+	return Event{}, stepError{code: CodeStillRuns, heard: h, err: fmt.Errorf("wsl-spawner's stop of %s did not end it (%s), and it still ran; %s", distro, whyOr(why), ended)}
 }
 
 // whyOr is what wsl-spawner said, or that it said nothing.

@@ -115,9 +115,11 @@ A failed stop step leaves the distribution running, with no note. `recover` adds
 and false or 0 values are left out. A stop step's events say `by` (`wsl-spawner` when it stopped the distribution),
 `phase` (its step under way: `hook`, `units`, `docker`, `podman`, `sync`, `terminate`), `spawner` (how its stop went:
 `clean`, `limit`, `failed`, `error`; or `not-stopped` when it is installed but stopped nothing), `spawner_said` (what
-wsl-spawner said, in its words: why it stopped nothing, or what went wrong past its steps) and `hooks_failed`, each
-left out when it has nothing to say. A failed stop step's `code` says why for the screen: `otherstop`, `stillruns`,
-`nostate` or `background`.
+wsl-spawner said, in its own words only: why it stopped nothing, or what went wrong past its steps), `spawner_quiet`
+(why a call to it that gave no result said nothing of its own: `timeout` when it ran out of the time a run gives it,
+`silent` when it printed nothing, with its exit code in `spawner_exit`, `system` when Windows did not run it to its
+end) and `hooks_failed`, each left out when it has nothing to say. A failed stop step's `code` says why for the screen:
+`otherstop`, `stillruns`, `nostate` or `background`.
 
 Run from a terminal inside a distribution it shrinks, the run moves to the screen in a new window, since stopping the
 distribution closes that terminal. The command exits with 0 once that window starts, or says it did not and exits with

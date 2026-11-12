@@ -435,7 +435,7 @@ func TestTheHistoryIsNamedOnlyForWslSpawnersOwnSteps(t *testing.T) {
 
 func TestWhatWslSpawnerSaidGoesWithTheStepAndItsFailure(t *testing.T) {
 	// Said on the stop step's event, for the screen to show in its row.
-	e := stoppedItselfInstead(twoIDs, 0, 0, "Dev is left to WSL in the settings")
+	e := stoppedItselfInstead(twoIDs, 0, 0, "Dev is left to WSL in the settings", heard{said: "Dev is left to WSL in the settings"})
 	if e.SpawnerSaid != "Dev is left to WSL in the settings" {
 		t.Errorf("%+v", e)
 	}
@@ -455,6 +455,66 @@ func TestWhatWslSpawnerSaidGoesWithTheStepAndItsFailure(t *testing.T) {
 	withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndBusy}})
 	if f := lastStop(t, Run(context.Background(), w.env, w.disk(), Options{}, nil)); f.Code != CodeOtherStop {
 		t.Errorf("%+v", f)
+	}
+}
+
+func TestOnlyWslSpawnersOwnWordsGoAsWhatItSaid(t *testing.T) {
+	// What this program says of a call that said nothing (it printed
+	// nothing, it ran out of time, Windows did not run it) is a code the
+	// screen has words for; what wsl-spawner said is its own words alone.
+	// The English detail and error are the command line's, as before.
+	for _, c := range []struct {
+		name string
+		f    *fakeSpawner
+		// status, said, quiet and exit are the stop step's last event's.
+		status Status
+		said   string
+		quiet  string
+		exit   int
+		// english is a part of the step's detail, or of the run's error.
+		english string
+	}{
+		{name: "stopped nothing, silent", f: &fakeSpawner{err: spawner.CallError{Kind: spawner.ErrNotStopped, Quiet: spawner.QuietSilent, Exit: 2}},
+			status: Done, quiet: spawner.QuietSilent, exit: 2, english: "wsl-spawner stopped nothing (it printed nothing and exited 2), so wsl-shrinker did"},
+		{name: "stopped nothing, in its words", f: &fakeSpawner{err: spawner.CallError{Kind: spawner.ErrNotStopped, Said: "Dev is left to WSL; wsl-spawner set Dev --skip=false"}},
+			status: Done, said: "Dev is left to WSL", english: "wsl-spawner stopped nothing (Dev is left to WSL), so wsl-shrinker did"},
+		{name: "no result, out of time, still running", f: &fakeSpawner{err: spawner.CallError{Kind: spawner.ErrNoResult, Quiet: spawner.QuietTimeout, System: "context deadline exceeded"}, keepRunning: true},
+			status: Failed, quiet: spawner.QuietTimeout, english: "(wsl-spawner said no result: wsl-spawner ran out of the time a run gives it (context deadline exceeded))"},
+		{name: "no result, in its words, ended", f: &fakeSpawner{err: spawner.CallError{Kind: spawner.ErrNoResult, Said: "panic: out of memory"}},
+			status: Warned, said: "panic: out of memory", english: "(wsl-spawner said no result: panic: out of memory)"},
+		{name: "no result, system, ended", f: &fakeSpawner{err: spawner.CallError{Kind: spawner.ErrNoResult, Quiet: spawner.QuietSystem, System: "exec: WaitDelay expired before I/O complete"}},
+			status: Warned, quiet: spawner.QuietSystem, english: "(wsl-spawner said no result: exec: WaitDelay expired before I/O complete)"},
+		// An error of another stopper's, not one of the call's: what follows
+		// the words of its kind is taken for wsl-spawner's.
+		{name: "no result, as another stopper says it", f: &fakeSpawner{err: fmt.Errorf("%w: killed", spawner.ErrNoResult)},
+			status: Warned, said: "killed", english: "(wsl-spawner said no result: killed)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			withSpawner(w, c.f)
+			r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+			e := lastStop(t, r)
+			if e.Status != c.status || e.SpawnerSaid != c.said || e.SpawnerQuiet != c.quiet || e.SpawnerExit != c.exit {
+				t.Fatalf("%s, said %q, quiet %q, exit %d: %+v", e.Status, e.SpawnerSaid, e.SpawnerQuiet, e.SpawnerExit, e)
+			}
+			if !strings.Contains(e.Detail+" "+r.Err, c.english) {
+				t.Fatalf("no %q in %q / %q", c.english, e.Detail, r.Err)
+			}
+		})
+	}
+	// Into the JSON when there is something to say, and back.
+	e := Event{Step: StepStop, Status: Done, Spawner: SpawnerNotStopped, SpawnerQuiet: spawner.QuietSilent, SpawnerExit: 2, At: time.Unix(0, 0).UTC()}
+	b, err := json.Marshal(e)
+	if err != nil || !strings.Contains(string(b), `"spawner_quiet":"silent"`) || !strings.Contains(string(b), `"spawner_exit":2`) {
+		t.Fatalf("%v %s", err, b)
+	}
+	var back Event
+	if err := json.Unmarshal(b, &back); err != nil || back.SpawnerQuiet != spawner.QuietSilent || back.SpawnerExit != 2 {
+		t.Fatalf("%+v %v", back, err)
+	}
+	b, _ = json.Marshal(Event{Step: StepStop, Status: Done})
+	if strings.Contains(string(b), "spawner_quiet") || strings.Contains(string(b), "spawner_exit") {
+		t.Fatalf("%s", b)
 	}
 }
 

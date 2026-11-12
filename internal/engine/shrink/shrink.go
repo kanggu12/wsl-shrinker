@@ -107,8 +107,18 @@ type Event struct {
 	HooksFailed int `json:"hooks_failed,omitempty"`
 	// SpawnerSaid is what wsl-spawner said, in its own words, on a stop step
 	// it stopped nothing of (why), or that went wrong past its steps (WSL
-	// did not end it, say): the screen shows it after its own words.
+	// did not end it, say): the screen shows it after its own words. Only
+	// its words: what this program says of a call that said nothing is in
+	// SpawnerQuiet.
 	SpawnerSaid string `json:"spawner_said,omitempty"`
+	// SpawnerQuiet is, on a stop step whose call to wsl-spawner ended with
+	// no result and no words of its own, why, as this program knows it:
+	// spawner.QuietTimeout, QuietSilent (it printed nothing, and exited
+	// with SpawnerExit) or QuietSystem (Windows did not run it to its end).
+	// The screen says it in its own language; Detail has it in English.
+	SpawnerQuiet string `json:"spawner_quiet,omitempty"`
+	// SpawnerExit is wsl-spawner's exit code, with QuietSilent.
+	SpawnerExit int `json:"spawner_exit,omitempty"`
 }
 
 // BySpawner is Event.By for a distribution wsl-spawner stopped.
@@ -174,12 +184,14 @@ type eventJSON struct {
 	Spawner       string    `json:"spawner,omitempty"`
 	HooksFailed   int       `json:"hooks_failed,omitempty"`
 	SpawnerSaid   string    `json:"spawner_said,omitempty"`
+	SpawnerQuiet  string    `json:"spawner_quiet,omitempty"`
+	SpawnerExit   int       `json:"spawner_exit,omitempty"`
 }
 
 // MarshalJSON writes the event with took_seconds.
 func (e Event) MarshalJSON() ([]byte, error) {
 	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.DistroStarted, e.At, e.Containers, e.Code,
-		e.By, e.Phase, e.Spawner, e.HooksFailed, e.SpawnerSaid})
+		e.By, e.Phase, e.Spawner, e.HooksFailed, e.SpawnerSaid, e.SpawnerQuiet, e.SpawnerExit})
 }
 
 // UnmarshalJSON reads what MarshalJSON writes.
@@ -189,7 +201,7 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.DistroStarted, j.At, j.Containers, j.Code,
-		j.By, j.Phase, j.Spawner, j.HooksFailed, j.SpawnerSaid}
+		j.By, j.Phase, j.Spawner, j.HooksFailed, j.SpawnerSaid, j.SpawnerQuiet, j.SpawnerExit}
 	return nil
 }
 
@@ -642,9 +654,10 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		var se stepError
 		switch {
 		case errors.As(err, &se):
-			// A failure with words of the screen's own, and what wsl-spawner
-			// said of it.
-			e.Code, e.SpawnerSaid = se.code, se.said
+			// A failure with words of the screen's own, and what was heard
+			// from wsl-spawner of it.
+			e.Code = se.code
+			se.heard.on(&e)
 		case s != StepCheck:
 		case errors.As(err, &be):
 			e.Code = string(be.block)

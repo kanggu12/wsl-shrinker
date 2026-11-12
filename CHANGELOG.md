@@ -6,7 +6,22 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Changed
+
+- In a stop step's `--json` events, `spawner_said` holds wsl-spawner's own words only. Why a call to it that gave no
+  result said nothing is in `spawner_quiet`: `timeout`, `silent` (with its exit code in `spawner_exit`) or `system`.
+
 ### Fixed
+
+- The Korean screen said in English why a stop through wsl-spawner went as it did when wsl-spawner said nothing of its
+  own: it printed nothing and exited, it ran out of the time a run gives it, or Windows did not run it to its end. The
+  screen says these in its own language now, and shows wsl-spawner's own words as they are.
+- On the screen, a stop through wsl-spawner marked `!` cut its reason with "…" where it did not fit one line. It wraps
+  under the step as a failed step's reason does, and so does a stop with wsl-spawner's words. After a step of
+  wsl-spawner's own ran out of time or failed, the row also says that `wsl-spawner history` has the steps, as the
+  command line does.
+- A failed stop through wsl-spawner said wsl-shrinker "ends" the distribution, after it had ended it. Help's step 3
+  now says that with wsl-spawner the pre-stop scripts run first, then its stop.
 
 - `shrink` with `--clean` asked about what the disk gives back without the items it removes, while its check step and
   the screen's question count them. The question counts them now.

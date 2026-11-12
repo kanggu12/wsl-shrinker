@@ -77,6 +77,57 @@ var ErrNotStopped = errors.New("wsl-spawner stopped nothing")
 // broke off. Whether the distribution still runs is not known from it.
 var ErrNoResult = errors.New("wsl-spawner said no result")
 
+// Why a call that ended with no result left no words of wsl-spawner's own
+// to say why, as this program knows it (CallError.Quiet). The screen says
+// these in its own language; wsl-spawner's own words it shows as they are.
+const (
+	// QuietTimeout: the call ran out of the time a run gives it, and was
+	// ended.
+	QuietTimeout = "timeout"
+	// QuietSilent: it printed nothing of its own, and exited with Exit.
+	QuietSilent = "silent"
+	// QuietSystem: Windows did not run it to its end (it did not start, or
+	// its end is not known); the system's words are in System.
+	QuietSystem = "system"
+)
+
+// CallError is a call that ended with no result of wsl-spawner's: it
+// stopped nothing (Kind ErrNotStopped), or it began and said no result
+// (ErrNoResult). Error is the English the command line and the history
+// say; Said and Quiet keep wsl-spawner's own words apart from what this
+// program says of the call, for the screen's words.
+type CallError struct {
+	// Kind is ErrNotStopped or ErrNoResult.
+	Kind error
+	// Said is what wsl-spawner said of it, in its own words: its error, or
+	// the first line it printed on stderr. "" when it said nothing.
+	Said string
+	// Quiet is why it said nothing (QuietTimeout, QuietSilent or
+	// QuietSystem), "" when it did.
+	Quiet string
+	// Exit is its exit code, with QuietSilent.
+	Exit int
+	// System is the system's words, with QuietTimeout and QuietSystem.
+	System string
+}
+
+// Error says the call's end in English: Kind's words, then wsl-spawner's,
+// or what is known of an end it said nothing of.
+func (e CallError) Error() string {
+	switch e.Quiet {
+	case QuietTimeout:
+		return e.Kind.Error() + ": wsl-spawner ran out of the time a run gives it (" + e.System + ")"
+	case QuietSilent:
+		return fmt.Sprintf("%v: it printed nothing and exited %d", e.Kind, e.Exit)
+	case QuietSystem:
+		return e.Kind.Error() + ": " + e.System
+	}
+	return e.Kind.Error() + ": " + e.Said
+}
+
+// Unwrap gives Kind, for errors.Is.
+func (e CallError) Unwrap() error { return e.Kind }
+
 // Stopper stops one distribution through wsl-spawner and says each step it
 // begins to on, in the goroutine that reads its output.
 type Stopper interface {
@@ -320,20 +371,23 @@ func (r *reader) say(s Step) {
 // outcome reads how the call went from what the program printed and how
 // it ended: runErr is cmd.Run's error, errOut what it printed on stderr.
 func (r *reader) outcome(ctx context.Context, runErr error, errOut string) (Result, error) {
+	// A call with no result began stopping the distribution, or stopped
+	// nothing of it: whichever the lines said, its error is of that kind.
+	kind := ErrNotStopped
+	if r.began {
+		kind = ErrNoResult
+	}
 	// Out of the run's time, it was killed: whatever it printed last is not
 	// its end. Whether it stopped anything is all that is known.
 	if ctx.Err() != nil {
-		why := fmt.Sprintf("wsl-spawner ran out of the time a run gives it (%v)", ctx.Err())
-		if r.began {
-			return Result{}, fmt.Errorf("%w: %s", ErrNoResult, why)
-		}
-		return Result{}, fmt.Errorf("%w: %s", ErrNotStopped, why)
+		return Result{}, CallError{Kind: kind, Quiet: QuietTimeout, System: ctx.Err().Error()}
 	}
 	// A program that did not start, or whose exit is not known, stopped
-	// nothing this call can tell of, unless it said so first.
+	// nothing this call can tell of, unless it said so first: the system's
+	// words say why, none of its own.
 	var exited *exec.ExitError
 	if runErr != nil && !errors.As(runErr, &exited) && !r.began {
-		return Result{}, fmt.Errorf("%w: %v", ErrNotStopped, runErr)
+		return Result{}, CallError{Kind: ErrNotStopped, Quiet: QuietSystem, System: runErr.Error()}
 	}
 	if r.last != nil {
 		// It went on in the background, as when the variable that names the
@@ -350,8 +404,9 @@ func (r *reader) outcome(ctx context.Context, runErr error, errOut string) (Resu
 		case r.began:
 			// Steps were said, then no result for it: its end is not known.
 		case r.last.Err != "":
-			// Its error came before any step of this distribution's.
-			return Result{}, fmt.Errorf("%w: %s", ErrNotStopped, r.last.Err)
+			// Its error came before any step of this distribution's, in its
+			// own words.
+			return Result{}, CallError{Kind: ErrNotStopped, Said: r.last.Err}
 		default:
 			// Nothing to stop: it found the distribution not running.
 			return Result{NotRunning: true}, nil
@@ -362,25 +417,22 @@ func (r *reader) outcome(ctx context.Context, runErr error, errOut string) (Resu
 	if r.finished != nil {
 		return Result{End: r.finished.Result, Err: r.finished.Err, Took: seconds(r.finished.Took)}, nil
 	}
-	said := firstWords(errOut)
-	if said == "" {
-		// It said nothing on stderr: what is known of its end is said
-		// instead, so the reason is never empty (a broken install, say).
-		switch {
-		case exited != nil:
-			said = fmt.Sprintf("it printed nothing and exited %d", exited.ExitCode())
-		case runErr != nil:
-			said = runErr.Error()
-		default:
-			said = "it printed nothing and exited 0"
-		}
+	// Refused (exit 2: a name it does not have, or one it leaves be), failed
+	// before it began (exit 1), or broke off after: its own words say why.
+	if said := firstWords(errOut); said != "" {
+		return Result{}, CallError{Kind: kind, Said: said}
 	}
-	if r.began {
-		return Result{}, fmt.Errorf("%w: %s", ErrNoResult, said)
+	// It said nothing on stderr: what is known of its end is said instead,
+	// so the reason is never empty (a broken install, say).
+	switch {
+	case exited != nil:
+		return Result{}, CallError{Kind: kind, Quiet: QuietSilent, Exit: exited.ExitCode()}
+	case runErr != nil:
+		// It began, then Windows did not say how it ended (its output held
+		// open past the wait, say).
+		return Result{}, CallError{Kind: kind, Quiet: QuietSystem, System: runErr.Error()}
 	}
-	// Refused (exit 2: a name it does not have, or one it leaves be) or
-	// failed before it began (exit 1): its own words say why.
-	return Result{}, fmt.Errorf("%w: %s", ErrNotStopped, said)
+	return Result{}, CallError{Kind: kind, Quiet: QuietSilent, Exit: 0}
 }
 
 // firstWords is the first line the program printed on stderr, without the

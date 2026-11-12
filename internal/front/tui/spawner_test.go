@@ -24,10 +24,16 @@ type spawnerStub struct {
 	// keepRunning leaves the distribution running, as a stop left half
 	// done may.
 	keepRunning bool
+	// endsAnyway ends the distribution before it answers with err, as a
+	// call that began and said no result may have.
+	endsAnyway bool
 }
 
 func (s spawnerStub) Stop(ctx context.Context, distro string, on func(spawner.Step)) (spawner.Result, error) {
 	if s.err != nil {
+		if s.endsAnyway {
+			_ = s.w.fake.Terminate(ctx, distro)
+		}
 		return s.res, s.err
 	}
 	on(spawner.Step{Name: "docker", Count: 2})
@@ -229,5 +235,107 @@ func TestAStopThatFailedThroughWslSpawnerSaysWhyInTheScreensLanguage(t *testing.
 				t.Errorf("want %q:\n%s", want, strings.Join(lines, "\n"))
 			}
 		})
+	}
+}
+
+// flat is a screen's lines as one line, its spaces run together, for words
+// that may wrap.
+func flat(lines []string) string { return strings.Join(strings.Fields(strings.Join(lines, " ")), " ") }
+
+func TestWhatThisProgramKnowsOfACallIsSaidInTheScreensLanguage(t *testing.T) {
+	// A call to wsl-spawner that said nothing of its own: the screen says
+	// why in Korean, never in the engine's English, and wsl-spawner's own
+	// words, when there are any, as they are.
+	defer i18n.Set(i18n.English)
+	i18n.Set(i18n.Korean)
+	for _, c := range []struct {
+		name string
+		stub spawnerStub
+		// want are words the screen says.
+		want []string
+	}{
+		{name: "stopped nothing, silent", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNotStopped, Quiet: spawner.QuietSilent, Exit: 2}},
+			want: []string{i18n.T("detail.spawner.notstopped"), i18n.T("detail.spawner.silent", 2)}},
+		{name: "stopped nothing, out of time", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNotStopped, Quiet: spawner.QuietTimeout, System: "context deadline exceeded"}},
+			want: []string{i18n.T("detail.spawner.notstopped"), i18n.T("detail.spawner.timeout")}},
+		{name: "no result, out of time, still running", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNoResult, Quiet: spawner.QuietTimeout, System: "context deadline exceeded"}, keepRunning: true},
+			want: []string{i18n.T("stop.fail.stillruns", "Dev"), i18n.T("detail.spawner.timeout")}},
+		{name: "no result, silent, ended", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNoResult, Quiet: spawner.QuietSilent, Exit: 1}, endsAnyway: true},
+			want: []string{i18n.T("detail.spawner.error"), i18n.T("detail.spawner.silent", 1)}},
+		{name: "no result, system, ended", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNoResult, Quiet: spawner.QuietSystem, System: "exec: WaitDelay expired before I/O complete"}, endsAnyway: true},
+			want: []string{i18n.T("detail.spawner.error"), i18n.T("detail.spawner.system")}},
+		{name: "no result, its own words, ended", stub: spawnerStub{err: spawner.CallError{Kind: spawner.ErrNoResult, Said: "panic: out of memory"}, endsAnyway: true},
+			want: []string{i18n.T("detail.spawner.error"), "panic: out of memory"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newEngineWorld(t)
+			c.stub.w = w
+			w.env.Spawner = c.stub
+			lines := screen(&engineBackend{Demo: demo(), w: w}, 120, 34, "s", "enter")
+			out := flat(lines)
+			for _, want := range c.want {
+				if !strings.Contains(out, strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("no %q:\n%s", want, strings.Join(lines, "\n"))
+				}
+			}
+			// None of the engine's English for it.
+			for _, english := range []string{"printed nothing", "ran out of the time", "said no result", "context deadline", "WaitDelay", "gave no reason"} {
+				if strings.Contains(out, english) {
+					t.Errorf("says %q:\n%s", english, strings.Join(lines, "\n"))
+				}
+			}
+		})
+	}
+}
+
+func TestAStepThatWarnsSaysWhyInFull(t *testing.T) {
+	// A step marked for a look wraps under its detail as a failed one does:
+	// wsl-spawner's words, then where its steps are, never cut.
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		w := newEngineWorld(t)
+		w.env.Spawner = spawnerStub{w: w, res: spawner.Result{End: spawner.EndLimit, Err: "WSL did not end Dev in the time it was given: the operation timed out"}}
+		lines := screen(&engineBackend{Demo: demo(), w: w}, 100, 34, "s", "enter")
+		if m := stepMarks(lines)[shrink.StepStop]; m != "!" {
+			t.Fatalf("%s: stop marked %q:\n%s", lang, m, strings.Join(lines, "\n"))
+		}
+		out := flat(lines)
+		for _, want := range []string{"WSL did not end Dev in the time it was given: the operation timed out", i18n.T("detail.spawner.limit"), i18n.T("detail.spawner.history")} {
+			if !strings.Contains(out, strings.Join(strings.Fields(want), " ")) {
+				t.Errorf("%s: no %q:\n%s", lang, want, strings.Join(lines, "\n"))
+			}
+		}
+		for _, l := range lines {
+			if strings.HasSuffix(strings.TrimRight(l, " "), "…") {
+				t.Errorf("%s: cut: %q", lang, l)
+			}
+		}
+	}
+}
+
+func TestAStopThroughWslSpawnerThatNeedsALookSaysWhereItsStepsAre(t *testing.T) {
+	// A step of wsl-spawner's own out of time, failed, or its stop not run to
+	// its end: its history has them, as the command line says. A clean stop,
+	// or a script of the person's own that failed, says nothing of it.
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		for _, c := range []struct {
+			res  spawner.Result
+			says bool
+		}{
+			{res: spawner.Result{End: spawner.EndLimit}, says: true},
+			{res: spawner.Result{End: spawner.EndFailed}, says: true},
+			{res: spawner.Result{End: spawner.EndError, Err: "the stop inside Dev did not run to its end"}, says: true},
+			{res: spawner.Result{End: spawner.EndClean}},
+		} {
+			w := newEngineWorld(t)
+			w.env.Spawner = spawnerStub{w: w, res: c.res}
+			lines := screen(&engineBackend{Demo: demo(), w: w}, 120, 34, "s", "enter")
+			if got := strings.Contains(flat(lines), strings.Join(strings.Fields(i18n.T("detail.spawner.history")), " ")); got != c.says {
+				t.Errorf("%s %s: says where its steps are: %v:\n%s", lang, c.res.End, got, strings.Join(lines, "\n"))
+			}
+		}
 	}
 }

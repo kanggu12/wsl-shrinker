@@ -62,11 +62,12 @@ func (m model) runView() string {
 	default:
 		body = append(body, " "+bold.Render(title), "")
 	}
-	// A failure's reason takes up to six rows. In a window too short for
-	// all, where things stand comes first: the reason keeps the rows the
-	// outcome leaves, two at least, cut with an ellipsis.
+	// A failure's reason, or why a step needs a look, takes up to six rows.
+	// In a window too short for all, where things stand comes first: the
+	// reason keeps the rows the outcome leaves, two at least, cut with an
+	// ellipsis.
 	detailRows := 6
-	if failed {
+	if r.done {
 		fixed := len(body) + len(shrink.Steps) + 1 + len(m.outcome(0))
 		detailRows = max(2, min(6, 1+m.bodyHeight()+1-fixed))
 	}
@@ -111,9 +112,12 @@ func (m model) runView() string {
 			name = ui.Fg(t.Muted).Render(name)
 		}
 		lead := "   " + ui.Fg(color).Render(mark) + "  " + name + "  "
-		// A failure says why in full: its lines wrap under the detail column,
-		// 22 cells in, up to a few of them.
-		if seen && e.Status == shrink.Failed {
+		// A failure says why in full, and so do a step that needs a look and
+		// a stop with wsl-spawner's words (why it stopped nothing, what went
+		// wrong, where its steps are): its lines wrap under the detail
+		// column, 22 cells in, up to a few of them. Any other row is short.
+		wraps := e.Status == shrink.Failed || e.Status == shrink.Warned || s == shrink.StepStop && (e.SpawnerSaid != "" || e.SpawnerQuiet != "")
+		if seen && wraps {
 			wrapped := m.wrapTo(detail, m.width-22, "", lipgloss.NewStyle())
 			if len(wrapped) > detailRows {
 				wrapped = wrapped[:detailRows]
@@ -225,13 +229,13 @@ func (m model) failWords(e shrink.Event, d disks.Disk) string {
 	// A stop through wsl-spawner that failed: the screen's words, then
 	// what wsl-spawner said, in its own.
 	case shrink.CodeOtherStop:
-		return withSaid(i18n.T("stop.fail.otherstop", d.Distro), e.SpawnerSaid)
+		return withSaid(i18n.T("stop.fail.otherstop", d.Distro), spawnerWords(e))
 	case shrink.CodeStillRuns:
-		return withSaid(i18n.T("stop.fail.stillruns", d.Distro), e.SpawnerSaid)
+		return withSaid(i18n.T("stop.fail.stillruns", d.Distro), spawnerWords(e))
 	case shrink.CodeNoState:
-		return withSaid(i18n.T("stop.fail.nostate", d.Distro), e.SpawnerSaid)
+		return withSaid(i18n.T("stop.fail.nostate", d.Distro), spawnerWords(e))
 	case shrink.CodeBackground:
-		return withSaid(i18n.T("stop.fail.background", d.Distro), e.SpawnerSaid)
+		return withSaid(i18n.T("stop.fail.background", d.Distro), spawnerWords(e))
 	}
 	return e.Detail
 }
@@ -243,6 +247,22 @@ func withSaid(words, said string) string {
 		return words
 	}
 	return words + " (" + said + ")"
+}
+
+// spawnerWords is what the screen says of the call to wsl-spawner after its
+// own words for the stop step: what wsl-spawner said, in its words, or, for
+// a call that said nothing, why, in the screen's language; "" for neither.
+// The engine's English for such a call is the CLI's, never shown here.
+func spawnerWords(e shrink.Event) string {
+	switch e.SpawnerQuiet {
+	case spawner.QuietTimeout:
+		return i18n.T("detail.spawner.timeout")
+	case spawner.QuietSilent:
+		return i18n.T("detail.spawner.silent", e.SpawnerExit)
+	case spawner.QuietSystem:
+		return i18n.T("detail.spawner.system")
+	}
+	return e.SpawnerSaid
 }
 
 // phaseWords names wsl-spawner's step under way, in the language in use;
@@ -290,19 +310,26 @@ func stepDetail(e shrink.Event) string {
 		if e.HooksFailed > 0 || e.Status == shrink.Warned && e.By == "" && e.Spawner == "" {
 			s += ", " + i18n.T("detail.hooks.failed")
 		}
+		// One of wsl-spawner's own steps did not go in its time: its history
+		// has them, as the command line says.
+		history := false
 		switch {
 		case e.By == shrink.BySpawner && e.Spawner == spawner.EndLimit:
-			s += ", " + i18n.T("detail.spawner.limit")
+			s, history = s+", "+i18n.T("detail.spawner.limit"), true
 		case e.By == shrink.BySpawner && e.Spawner == spawner.EndFailed:
-			s += ", " + i18n.T("detail.spawner.failed")
+			s, history = s+", "+i18n.T("detail.spawner.failed"), true
 		case e.By == shrink.BySpawner && e.Spawner == spawner.EndError:
-			s += ", " + i18n.T("detail.spawner.error")
+			s, history = s+", "+i18n.T("detail.spawner.error"), true
 		case e.Spawner == shrink.SpawnerNotStopped:
 			s += ", " + i18n.T("detail.spawner.notstopped")
 		}
 		// Why it stopped nothing, or what went wrong past its steps, in its
-		// own words.
-		return withSaid(s, e.SpawnerSaid)
+		// own words, or why it said nothing in the screen's.
+		s = withSaid(s, spawnerWords(e))
+		if history {
+			s += ", " + i18n.T("detail.spawner.history")
+		}
+		return s
 	case shrink.StepCompact:
 		return elapsed(e.Took)
 	case shrink.StepVerify:

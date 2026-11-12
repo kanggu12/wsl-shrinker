@@ -208,7 +208,8 @@ var en = map[string]string{
 	"help.how":          "What a shrink does",
 	"help.steps": "1. Checks that Windows can compact the disk, before anything changes.\n" +
 		"2. Removes only what you chose inside the distribution.\n" +
-		"3. Stops its containers with their own timeouts, then runs the pre-stop scripts.\n" +
+		"3. Stops its containers with their own timeouts, then runs the pre-stop scripts;\n" +
+		"   with wsl-spawner, the scripts run first, then its stop.\n" +
 		"4. Compacts the disk with WSL's own wsl --manage --compact (trim, then compact);\n" +
 		"   Docker Desktop's disk and other files, with Windows' virtual disk API (no trim).\n" +
 		"5. Reads the disk again: a clean filesystem holding the same data.\n" +
@@ -435,6 +436,10 @@ var en = map[string]string{
 	"detail.spawner.failed":     "a step failed",
 	"detail.spawner.error":      "its stop did not run to its end",
 	"detail.spawner.notstopped": "wsl-spawner stopped nothing, so wsl-shrinker did",
+	"detail.spawner.history":    "wsl-spawner history has the steps",
+	"detail.spawner.timeout":    "it ran out of the time a run gives it",
+	"detail.spawner.silent":     "it printed nothing and exited %d",
+	"detail.spawner.system":     "Windows did not run it to its end",
 	"run.spawner.hook":          "hooks",
 	"run.spawner.units":         "units",
 	"run.spawner.docker":        "Docker",
@@ -445,9 +450,9 @@ var en = map[string]string{
 	"run.about.stop.spawner":    "The pre-stop scripts ran; wsl-spawner stops the distribution: its hooks and units, then Docker and Podman, each container with its own timeout. WSL then ends the rest.",
 	"run.state.stop.otherstop":  "The disk was not changed: another wsl-spawner stop is ending %s, the sign-out's or one asked by hand. Shrink it once that stop is done.",
 	"stop.fail.otherstop":       "Another wsl-spawner stop is ending %s, the sign-out's or one asked by hand; wsl-shrinker left it to that stop.",
-	"stop.fail.stillruns":       "wsl-spawner's stop did not end %s, which still ran; wsl-shrinker ends it, so that it starts afresh.",
-	"stop.fail.nostate":         "After wsl-spawner's stop, WSL did not say whether %s still runs; wsl-shrinker ends it, so that it starts afresh.",
-	"stop.fail.background":      "wsl-spawner went on stopping %s in the background and did not end it; wsl-shrinker ends it, so that it starts afresh.",
+	"stop.fail.stillruns":       "wsl-spawner's stop did not end %s, which still ran; wsl-shrinker ended it, so that it starts afresh.",
+	"stop.fail.nostate":         "After wsl-spawner's stop, WSL did not say whether %s still runs; wsl-shrinker ended it, so that it starts afresh.",
+	"stop.fail.background":      "wsl-spawner went on stopping %s in the background and did not end it; wsl-shrinker ended it, so that it starts afresh.",
 }
 
 // ko is the Korean catalog.
@@ -635,6 +640,7 @@ var ko = map[string]string{
 	"help.steps": "1. 바꾸기 전에 Windows가 이 디스크를 압축할 수 있는지 점검합니다.\n" +
 		"2. 배포판 안에서 고른 것만 지웁니다.\n" +
 		"3. 컨테이너를 각자의 종료 대기 시간에 맞춰 멈추고 종료 전 스크립트를 실행합니다.\n" +
+		"   wsl-spawner가 설치되어 있으면 스크립트를 먼저 실행한 뒤 wsl-spawner가 멈춥니다.\n" +
 		"4. WSL 자체 기능 wsl --manage --compact로 압축합니다(trim 후 압축).\n" +
 		"   Docker Desktop 디스크와 그 밖의 파일은 Windows 가상 디스크 API로 압축합니다(trim 없음).\n" +
 		"5. 디스크를 다시 읽어 파일시스템이 깨끗하고 데이터가 그대로인지 확인합니다.\n" +
@@ -854,6 +860,10 @@ var ko = map[string]string{
 	"detail.spawner.failed":     "한 단계가 실패함",
 	"detail.spawner.error":      "정지가 끝까지 가지 못함",
 	"detail.spawner.notstopped": "wsl-spawner가 멈추지 않아 wsl-shrinker가 멈춤",
+	"detail.spawner.history":    "단계는 wsl-spawner history에서 볼 수 있음",
+	"detail.spawner.timeout":    "실행에 주어진 시간을 넘김",
+	"detail.spawner.silent":     "아무것도 출력하지 않고 끝남, 종료 코드 %d",
+	"detail.spawner.system":     "Windows가 끝까지 실행하지 못함",
 	"run.spawner.hook":          "훅",
 	"run.spawner.units":         "유닛",
 	"run.spawner.docker":        "Docker",
@@ -864,7 +874,7 @@ var ko = map[string]string{
 	"run.about.stop.spawner":    "종료 전 스크립트를 실행했고, wsl-spawner가 배포판을 멈춥니다. 그 훅과 유닛, Docker와 Podman 순서이고 컨테이너마다 각자의 종료 대기 시간을 줍니다. 그다음 WSL이 나머지를 끝냅니다.",
 	"run.state.stop.otherstop":  "디스크는 그대로입니다. 로그아웃 때나 직접 시작한 다른 wsl-spawner 정지가 %s 배포판을 끝내는 중입니다. 그 정지가 끝난 뒤 다시 줄이세요.",
 	"stop.fail.otherstop":       "로그아웃 때나 직접 시작한 다른 wsl-spawner 정지가 %s 배포판을 끝내는 중이라, wsl-shrinker는 그 정지에 맡겼습니다.",
-	"stop.fail.stillruns":       "wsl-spawner의 정지가 %s 배포판을 끝내지 못해 아직 실행 중이었습니다. wsl-shrinker가 끝내고 새로 켭니다.",
-	"stop.fail.nostate":         "wsl-spawner의 정지 뒤 WSL이 %s 배포판이 아직 실행 중인지 알려 주지 않았습니다. wsl-shrinker가 끝내고 새로 켭니다.",
-	"stop.fail.background":      "wsl-spawner가 %s 배포판을 뒤에서 계속 멈추다가 끝내지 못했습니다. wsl-shrinker가 끝내고 새로 켭니다.",
+	"stop.fail.stillruns":       "wsl-spawner의 정지가 %s 배포판을 끝내지 못해 아직 실행 중이었습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
+	"stop.fail.nostate":         "wsl-spawner의 정지 뒤 WSL이 %s 배포판이 아직 실행 중인지 알려 주지 않았습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
+	"stop.fail.background":      "wsl-spawner가 %s 배포판을 뒤에서 계속 멈추다가 끝내지 못했습니다. 새로 켜지도록 wsl-shrinker가 끝냈습니다.",
 }

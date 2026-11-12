@@ -328,6 +328,63 @@ func TestFindLooksOnThePathThenInEachInstallFolder(t *testing.T) {
 	}
 }
 
+func TestWhatWslSpawnerSaidIsKeptApartFromThisProgramsWords(t *testing.T) {
+	// The screen shows wsl-spawner's own words as they are and says the rest
+	// in its own language: the error holds them apart, and its English is
+	// the command line's as before.
+	call := func(t *testing.T, err error) CallError {
+		t.Helper()
+		var ce CallError
+		if !errors.As(err, &ce) {
+			t.Fatalf("%v (%T) is no CallError", err, err)
+		}
+		return ce
+	}
+	// Refused, in its own words, without its name in front.
+	x, _ := fake(t, "skipped")
+	_, _, err := stop(t, x)
+	if ce := call(t, err); ce.Kind != ErrNotStopped || ce.Said != "Work is left to WSL in the settings; wsl-spawner set Work --skip=false makes it wsl-spawner's to stop" || ce.Quiet != "" {
+		t.Fatalf("%+v", ce)
+	}
+	// Nothing printed, exit 1: no words of its own, and why.
+	x, _ = fake(t, "silent")
+	_, _, err = stop(t, x)
+	if ce := call(t, err); ce.Kind != ErrNotStopped || ce.Said != "" || ce.Quiet != QuietSilent || ce.Exit != 1 || err.Error() != "wsl-spawner stopped nothing: it printed nothing and exited 1" {
+		t.Fatalf("%+v: %v", ce, err)
+	}
+	// A program that is not there: the system's words, none of its own.
+	_, _, err = stop(t, Exe{Path: filepath.Join(t.TempDir(), "wsl-spawner.exe")})
+	if ce := call(t, err); ce.Kind != ErrNotStopped || ce.Said != "" || ce.Quiet != QuietSystem || ce.System == "" || err.Error() != ErrNotStopped.Error()+": "+ce.System {
+		t.Fatalf("%+v: %v", ce, err)
+	}
+	// Killed at the run's limit after it began: no result, and why.
+	x, _ = fake(t, "clean")
+	t.Setenv(fakeHang, "30s")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = x.Stop(ctx, "Ubuntu-24.04", nil)
+	if ce := call(t, err); ce.Kind != ErrNoResult || ce.Said != "" || ce.Quiet != QuietTimeout || !strings.HasPrefix(err.Error(), "wsl-spawner said no result: wsl-spawner ran out of the time a run gives it (") {
+		t.Fatalf("%+v: %v", ce, err)
+	}
+	// Its error in the results, before any step of the distribution.
+	r := &reader{distro: "Ubuntu-24.04", last: &results{Schema: 1, Err: "cannot reach WSL"}}
+	_, err = r.outcome(context.Background(), nil, "")
+	if ce := call(t, err); ce.Kind != ErrNotStopped || ce.Said != "cannot reach WSL" || ce.Quiet != "" {
+		t.Fatalf("%+v", ce)
+	}
+	// Steps said, then its words on stderr and no result: they are its own.
+	r = &reader{distro: "Ubuntu-24.04", began: true}
+	_, err = r.outcome(context.Background(), errors.New("exit status 2"), "wsl-spawner: panic: out of memory\n")
+	if ce := call(t, err); ce.Kind != ErrNoResult || ce.Said != "panic: out of memory" || ce.Quiet != "" || err.Error() != "wsl-spawner said no result: panic: out of memory" {
+		t.Fatalf("%+v: %v", ce, err)
+	}
+	// Nothing printed and exit 0, after steps: why, without words of its own.
+	_, err = r.outcome(context.Background(), nil, "")
+	if ce := call(t, err); ce.Kind != ErrNoResult || ce.Quiet != QuietSilent || ce.Exit != 0 {
+		t.Fatalf("%+v", ce)
+	}
+}
+
 func TestAStopThatSaysNothingStillSaysWhyItStoppedNothing(t *testing.T) {
 	// Nothing printed, exit 1: it stopped nothing, and the reason is not
 	// empty, so the run does not read as one without wsl-spawner.

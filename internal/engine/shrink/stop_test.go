@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +27,9 @@ type fakeSpawner struct {
 	err         error
 	steps       []spawner.Step
 	keepRunning bool
+	// after runs as its stop returns: what changes then (WSL that stops
+	// answering, say).
+	after func()
 	// asked are the distributions it was asked to stop; log is the world's
 	// order of scripts and calls, "spawner" for this one.
 	asked []string
@@ -41,6 +47,9 @@ func (f *fakeSpawner) Stop(ctx context.Context, distro string, on func(spawner.S
 	if ends && !f.keepRunning {
 		// WSL ends what is left, as wsl-spawner's last step.
 		_ = f.w.fake.Terminate(ctx, distro)
+	}
+	if f.after != nil {
+		f.after()
 	}
 	return f.res, f.err
 }
@@ -220,7 +229,9 @@ func TestAnotherWslSpawnerStopIsLeftToEndIt(t *testing.T) {
 	w := newWorld(t)
 	f := withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndBusy, Err: "another stop of Dev is running"}})
 	r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
-	if r.FailedAt != StepStop || !strings.Contains(r.Err, "another wsl-spawner stop is running for Dev") || r.Left != LeftRunning {
+	// Left as that stop leaves it: not "running as it was", which it is
+	// not for long.
+	if r.FailedAt != StepStop || !strings.Contains(r.Err, "another wsl-spawner stop is running for Dev") || r.Left != LeftOtherStop {
 		t.Fatalf("failed at %q: %q, left %q", r.FailedAt, r.Err, r.Left)
 	}
 	calls := strings.Join(w.fake.CallList(), " ")
@@ -250,12 +261,13 @@ func TestAStopThatWentOnInTheBackgroundIsWaitedFor(t *testing.T) {
 	if r.Err != "" || e.By != BySpawner || !strings.Contains(e.Detail, "in the background") || polls != 3 || statuses(r)[StepCompact] != Done {
 		t.Fatalf("%s %+v, %d polls, %v", r.Err, e, polls, statuses(r))
 	}
-	// One that never ends it fails the step, once the waits are over.
+	// One that never ends it fails the step, once the waits are over, and
+	// is ended so that it starts afresh, as that stop would have ended it.
 	w = newWorld(t)
 	withSpawner(w, &fakeSpawner{res: spawner.Result{Detached: true}})
 	r = Run(context.Background(), w.env, w.disk(), Options{}, nil)
-	if r.FailedAt != StepStop || !strings.Contains(r.Err, "in the background, and it still runs") {
-		t.Fatalf("failed at %q: %s", r.FailedAt, r.Err)
+	if r.FailedAt != StepStop || !strings.Contains(r.Err, "in the background, and it still ran") || !callsBefore(w.fake.CallList(), "terminate:Dev", "start:Dev") {
+		t.Fatalf("failed at %q: %s; calls %v", r.FailedAt, r.Err, w.fake.CallList())
 	}
 }
 
@@ -333,5 +345,210 @@ func TestTheStopsNewWordsGoIntoTheJSONOnlyWhenSaid(t *testing.T) {
 		if strings.Contains(string(b), `"`+key+`"`) {
 			t.Errorf("%q in %s", key, b)
 		}
+	}
+}
+
+func TestAWslSpawnerThatGaveNoReasonStillReadsAsOneThatStoppedNothing(t *testing.T) {
+	// It stopped nothing and said nothing: the stop is this program's, and
+	// the step says wsl-spawner stopped nothing, with a reason all the same.
+	w := newWorld(t)
+	withSpawner(w, &fakeSpawner{err: fmt.Errorf("%w:", spawner.ErrNotStopped)})
+	r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+	e := lastStop(t, r)
+	if r.Err != "" || e.Spawner != SpawnerNotStopped || !strings.Contains(e.Detail, "wsl-spawner stopped nothing (") || strings.Contains(e.Detail, "nothing ()") {
+		t.Fatalf("%s %+v", r.Err, e)
+	}
+}
+
+// callsBefore reports whether call a comes before call b in the fake's
+// calls, both there.
+func callsBefore(calls []string, a, b string) bool {
+	i, j := slices.Index(calls, a), slices.Index(calls, b)
+	return i >= 0 && j >= 0 && i < j
+}
+
+func TestAStopLeftHalfDoneIsEndedSoItStartsAfresh(t *testing.T) {
+	// wsl-spawner's stop did not run to its end, or said no result, and
+	// the distribution still runs: wsl-spawner may have stopped Docker's
+	// daemon, its units and Podman, which only a fresh start brings back.
+	// The run ends it before it starts it again, and compacts nothing.
+	for name, f := range map[string]*fakeSpawner{
+		"error":     {res: spawner.Result{End: spawner.EndError, Err: "the stop inside Dev did not run to its end"}, keepRunning: true},
+		"no result": {err: fmt.Errorf("%w: killed", spawner.ErrNoResult), keepRunning: true},
+		// Every step in its time, then WSL did not end it: the same.
+		"not ended": {res: spawner.Result{End: spawner.EndClean, Err: "WSL did not end Dev: the operation timed out"}, keepRunning: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			withSpawner(w, f)
+			r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+			calls := w.fake.CallList()
+			if r.FailedAt != StepStop || slices.Contains(calls, "compact:Dev") || r.Left != LeftRunning || r.ContainersStarted != 2 {
+				t.Fatalf("failed at %q, left %q, %d started, calls %v", r.FailedAt, r.Left, r.ContainersStarted, calls)
+			}
+			if !callsBefore(calls, "terminate:Dev", "start:Dev") {
+				t.Fatalf("not ended before its start: %v", calls)
+			}
+		})
+	}
+}
+
+func TestAStopWhoseEndWSLDoesNotSayFailsTheStep(t *testing.T) {
+	// After wsl-spawner's stop, WSL does not answer which distributions
+	// run: whether this one still runs is not known, and the run does not
+	// compact it on a guess.
+	w := newWorld(t)
+	withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndError, Err: "the distribution did not answer"}, keepRunning: true,
+		after: func() { w.fake.DistrosErr = errors.New("WSL did not answer in time") }})
+	r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+	if r.FailedAt != StepStop || slices.Contains(w.fake.CallList(), "compact:Dev") {
+		t.Fatalf("failed at %q: %s; calls %v", r.FailedAt, r.Err, w.fake.CallList())
+	}
+}
+
+func TestAStopWSLDidNotEndThatEndedAnywayIsMarkedWithWhy(t *testing.T) {
+	// Every step in its time, wsl-spawner says WSL did not end it, yet it
+	// is down: the run goes on, the step marked for a look with what
+	// wsl-spawner said, not done.
+	w := newWorld(t)
+	withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndClean, Err: "WSL did not end Dev: the operation timed out"}})
+	r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+	e := lastStop(t, r)
+	if r.Err != "" || e.Status != Warned || !strings.Contains(e.Detail, "WSL did not end Dev") || statuses(r)[StepCompact] != Done {
+		t.Fatalf("%s %+v %v", r.Err, e, statuses(r))
+	}
+}
+
+func TestTheHistoryIsNamedOnlyForWslSpawnersOwnSteps(t *testing.T) {
+	// Its steps did not all go in their time: its history has them.
+	e := stoppedBySpawner(twoIDs, 1, 0, spawner.EndLimit, "")
+	if !strings.Contains(e.Detail, "wsl-spawner history has the steps") {
+		t.Errorf("%q", e.Detail)
+	}
+	// Only a script of the person's own failed: nothing of wsl-spawner's
+	// to look up there.
+	e = stoppedBySpawner(twoIDs, 1, 1, spawner.EndClean, "")
+	if e.Status != Warned || strings.Contains(e.Detail, "wsl-spawner history") {
+		t.Errorf("%s %q", e.Status, e.Detail)
+	}
+}
+
+func TestWhatWslSpawnerSaidGoesWithTheStepAndItsFailure(t *testing.T) {
+	// Said on the stop step's event, for the screen to show in its row.
+	e := stoppedItselfInstead(twoIDs, 0, 0, "Dev is left to WSL in the settings")
+	if e.SpawnerSaid != "Dev is left to WSL in the settings" {
+		t.Errorf("%+v", e)
+	}
+	e = stoppedBySpawner(twoIDs, 0, 0, spawner.EndClean, "WSL did not end Dev")
+	if e.SpawnerSaid != "WSL did not end Dev" {
+		t.Errorf("%+v", e)
+	}
+	// And on a failed step, with a code the screen has words for.
+	w := newWorld(t)
+	withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndError, Err: "the stop inside Dev did not run to its end"}, keepRunning: true})
+	r := Run(context.Background(), w.env, w.disk(), Options{}, nil)
+	f := lastStop(t, r)
+	if f.Status != Failed || f.Code != CodeStillRuns || f.SpawnerSaid != "the stop inside Dev did not run to its end" {
+		t.Errorf("%+v", f)
+	}
+	w = newWorld(t)
+	withSpawner(w, &fakeSpawner{res: spawner.Result{End: spawner.EndBusy}})
+	if f := lastStop(t, Run(context.Background(), w.env, w.disk(), Options{}, nil)); f.Code != CodeOtherStop {
+		t.Errorf("%+v", f)
+	}
+}
+
+func TestTheLookAtWslSpawnersLockSeesAStopAtWork(t *testing.T) {
+	root := t.TempDir()
+	locks := filepath.Join(root, "run", "wsl-spawner")
+	if err := os.MkdirAll(locks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	look := func(tools string) string {
+		t.Helper()
+		out, err := shtest.Run(t, tools, spawnerLockScript(root))
+		if err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+		return out
+	}
+	// With flock, as wsl-spawner holds its stop.lock: held while a stop
+	// runs, free after, and no lock file is no stop.
+	withFlock := shtest.Tools(t, "flock", "sleep")
+	if out := look(withFlock); out != "" {
+		t.Fatalf("no lock file: %q", out)
+	}
+	lock := filepath.Join(locks, "stop.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := look(withFlock); out != "" {
+		t.Fatalf("a lock no one holds: %q", out)
+	}
+	holder := exec.Command("flock", lock, "sleep", "30")
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Process.Kill(); _ = holder.Wait() }()
+	// flock takes it at once in the holder; wait until it is held.
+	held := false
+	for range 50 {
+		if exec.Command("flock", "-n", lock, "true").Run() != nil {
+			held = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !held {
+		t.Fatal("the holder never held the lock")
+	}
+	if out := look(withFlock); out != "spawner|stopping\n" {
+		t.Fatalf("a held lock: %q", out)
+	}
+	// Without flock, wsl-spawner keeps a folder with its stop's pid: at
+	// work while that process runs.
+	noFlock := shtest.Tools(t)
+	dir := filepath.Join(locks, "stop")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pid"), []byte(fmt.Sprintf("%d\n", holder.Process.Pid)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := look(noFlock); out != "spawner|stopping\n" {
+		t.Fatalf("a running stop's folder: %q", out)
+	}
+	_ = holder.Process.Kill()
+	_ = holder.Wait()
+	if out := look(noFlock); out != "" {
+		t.Fatalf("a stop that ended: %q", out)
+	}
+	// It needs no tool that picks text apart.
+	if tool := shtest.TextTool(spawnerLockScript("")); tool != "" {
+		t.Fatalf("needs %s", tool)
+	}
+}
+
+func TestAStopAtWorkIsSeenOnlyWhereWslSpawnerIs(t *testing.T) {
+	w := newWorld(t)
+	inner := w.fake.Script
+	w.fake.Script = func(d, u, s string) (string, error) {
+		if strings.Contains(s, "/run/wsl-spawner") {
+			return "spawner|stopping\n", nil
+		}
+		return inner(d, u, s)
+	}
+	// Not installed: nothing is looked at.
+	if busy, err := SpawnerStopping(context.Background(), w.env, "Dev"); busy || err != nil {
+		t.Fatalf("%v %v", busy, err)
+	}
+	withSpawner(w, &fakeSpawner{})
+	if busy, err := SpawnerStopping(context.Background(), w.env, "Dev"); !busy || err != nil {
+		t.Fatalf("%v %v", busy, err)
+	}
+	// A distribution that does not run has no stop at work in it.
+	w.fake.List[0].Running = false
+	if busy, err := SpawnerStopping(context.Background(), w.env, "Dev"); busy || err != nil {
+		t.Fatalf("%v %v", busy, err)
 	}
 }

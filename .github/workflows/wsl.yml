@@ -173,6 +173,14 @@ jobs:
           "its steps: $($phases -join ', ')"
           if ($phases -notcontains 'docker' -or $phases -notcontains 'terminate') { 'its steps did not show'; exit 1 }
           if (-not $r.compacted -or $r.left -ne 'running' -or $r.containers_started -ne 2 -or $r.containers_not_started) { "compacted $($r.compacted), left $($r.left), started $($r.containers_started)"; exit 1 }
+          # What Docker says, not the run's count: one wrongly taken for
+          # running already would be counted all the same. The two that ran
+          # run, the one stopped by hand is still stopped.
+          $ps = wsl.exe -d wss-ci -u root -- docker ps -a --format '{{.Names}} {{.State}}'
+          $ps
+          foreach ($line in 'keep running', 'keep-policy running', 'was-stopped exited') {
+            if ($ps -notcontains $line) { "no '$line' in docker ps -a"; exit 1 }
+          }
           # wsl-spawner keeps the stop in its history, as it does a sign-out's.
           # By its .exe name: the zip holds its Linux launcher beside it.
           $h = (wsl-spawner.exe history --json | ConvertFrom-Json).entries | Where-Object what -eq 'stop' | Select-Object -Last 1

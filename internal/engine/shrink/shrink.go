@@ -104,6 +104,10 @@ type Event struct {
 	Spawner string `json:"spawner,omitempty"`
 	// HooksFailed counts the person's pre-stop scripts that failed.
 	HooksFailed int `json:"hooks_failed,omitempty"`
+	// SpawnerSaid is what wsl-spawner said, in its own words, on a stop step
+	// it stopped nothing of (why), or that went wrong past its steps (WSL
+	// did not end it, say): the screen shows it after its own words.
+	SpawnerSaid string `json:"spawner_said,omitempty"`
 }
 
 // BySpawner is Event.By for a distribution wsl-spawner stopped.
@@ -122,6 +126,22 @@ const (
 	CodeWSL = "wsl"
 	// CodeBusy: another run is not finished (the app's journal).
 	CodeBusy = "busy"
+)
+
+// Codes of a failed stop step through wsl-spawner, for the screen's words.
+const (
+	// CodeOtherStop: another wsl-spawner stop of the distribution is
+	// running, which ends it.
+	CodeOtherStop = "otherstop"
+	// CodeStillRuns: wsl-spawner's stop did not end the distribution, which
+	// still ran: the run ended it, to start it afresh.
+	CodeStillRuns = "stillruns"
+	// CodeNoState: after wsl-spawner's stop, WSL did not say whether the
+	// distribution still runs: the run ended it, to start it afresh.
+	CodeNoState = "nostate"
+	// CodeBackground: wsl-spawner's stop went on in the background and did
+	// not end the distribution: the run ended it, to start it afresh.
+	CodeBackground = "background"
 )
 
 // blockError is a check refused for a Block: its code goes on the event.
@@ -152,12 +172,13 @@ type eventJSON struct {
 	Phase         string    `json:"phase,omitempty"`
 	Spawner       string    `json:"spawner,omitempty"`
 	HooksFailed   int       `json:"hooks_failed,omitempty"`
+	SpawnerSaid   string    `json:"spawner_said,omitempty"`
 }
 
 // MarshalJSON writes the event with took_seconds.
 func (e Event) MarshalJSON() ([]byte, error) {
 	return json.Marshal(eventJSON{e.Step, e.Status, e.Detail, e.Bytes, e.Count, e.Hooks, e.Took.Seconds(), e.SecondStart, e.NotRestarted, e.DistroStarted, e.At, e.Containers, e.Code,
-		e.By, e.Phase, e.Spawner, e.HooksFailed})
+		e.By, e.Phase, e.Spawner, e.HooksFailed, e.SpawnerSaid})
 }
 
 // UnmarshalJSON reads what MarshalJSON writes.
@@ -167,7 +188,7 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*e = Event{j.Step, j.Status, j.Detail, j.Bytes, j.Count, j.Hooks, seconds(j.TookSeconds), j.SecondStart, j.NotRestarted, j.DistroStarted, j.At, j.Containers, j.Code,
-		j.By, j.Phase, j.Spawner, j.HooksFailed}
+		j.By, j.Phase, j.Spawner, j.HooksFailed, j.SpawnerSaid}
 	return nil
 }
 
@@ -196,6 +217,10 @@ const (
 	LeftSuspect Left = "suspect"
 	// LeftDown: a distribution that ran did not start again.
 	LeftDown Left = "down"
+	// LeftOtherStop: another wsl-spawner stop of the distribution was
+	// running (the sign-out's, or one asked by hand): that stop ends it,
+	// and the run neither stopped it nor starts it again.
+	LeftOtherStop Left = "other-stop"
 )
 
 // Env is everything the steps use. CompactFile and Stat reach Windows;
@@ -540,6 +565,9 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		// stoppedAlone is set when the run failed because the distribution
 		// stopped on its own, before the run stopped anything.
 		stoppedAlone bool
+		// otherStop is set when another wsl-spawner stop of the distribution
+		// was running: that stop ends it, and settle leaves it to that stop.
+		otherStop bool
 		// cleaned is what the clean step removed, which the verify step
 		// allows for: nothing when it was skipped.
 		cleaned int64
@@ -574,6 +602,10 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 			res.Left = LeftFile
 		case !ran:
 			res.Left = LeftStopped
+		case otherStop:
+			// Another wsl-spawner stop ends it: not started again under it,
+			// and not said to run as it was, which it does not for long.
+			res.Left = LeftOtherStop
 		case !touched && stoppedAlone:
 			// It stopped by itself, as during the clean step: nothing here
 			// stopped it, and it is not started again.
@@ -606,7 +638,12 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 	fail := func(s Step, err error, suspect bool) Result {
 		e := Event{Step: s, Status: Failed, Detail: oneLine(err.Error())}
 		var be blockError
+		var se stepError
 		switch {
+		case errors.As(err, &se):
+			// A failure with words of the screen's own, and what wsl-spawner
+			// said of it.
+			e.Code, e.SpawnerSaid = se.code, se.said
 		case s != StepCheck:
 		case errors.As(err, &be):
 			e.Code = string(be.block)
@@ -734,7 +771,7 @@ func Run(ctx context.Context, env Env, d disks.Disk, opt Options, emit func(Even
 		if errors.Is(err, errOtherStop) {
 			// Another wsl-spawner stop of it runs: that stop ends it, and the
 			// run stopped none of it, so it is not started again.
-			touched = false
+			otherStop = true
 		}
 		if err != nil {
 			// A distribution that still runs (only the compaction, or

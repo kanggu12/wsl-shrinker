@@ -458,6 +458,9 @@ func leftWords(r shrink.Result) string {
 		return fmt.Sprintf("%s; %s did not start again: wsl -d %s starts it", changed, r.Disk, ui.ShellArg(r.Disk))
 	case shrink.LeftSuspect:
 		return fmt.Sprintf("%s, but it does not read as before; %s stays stopped until you know why (see Troubleshooting)", changed, r.Disk)
+	case shrink.LeftOtherStop:
+		// Another wsl-spawner stop ends it: what to do is to wait for it.
+		return fmt.Sprintf("%s; another wsl-spawner stop is ending %s: shrink it once that stop is done", changed, r.Disk)
 	}
 	if r.FailedAt == shrink.StepCheck {
 		return ""

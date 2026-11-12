@@ -84,16 +84,19 @@ listed, since `find` is what empties it. A test fails if any command
 there could remove a volume, a container or anything else. Ids given on the command line are looked up in a fresh look
 inside, so only commands built this way run.
 
-**Stop** goes through [wsl-spawner](https://github.com/kanggu12/wsl-spawner) when it is installed (on the PATH, or in
-`%LOCALAPPDATA%\Programs\wsl-spawner`). Your pre-stop scripts run first, then `wsl-spawner stop <distro> --yes --json
---events`: its own hooks and units, then Docker and Podman, each container with its own timeout, within its
-`stop_limit`. WSL then ends the distribution, and wsl-spawner records the stop, so its next start counts the one before
-as stopped in time, not cut off. The screen shows each of its steps as it begins. A step that ran out of time or failed
-marks the stop step for a look (`wsl-spawner history` has the steps); the run goes on, as the distribution is down. When
-wsl-spawner stops nothing (its settings leave the distribution to WSL, or it does not start), wsl-shrinker stops the
-containers itself and says why. When another wsl-spawner stop of the distribution is running, say the sign-out's, the
-run stops there and leaves the distribution to that stop. A stop that did not run to its end fails the step if the
-distribution still runs, and the run starts its containers again.
+**Stop** goes through [wsl-spawner](https://github.com/kanggu12/wsl-spawner) when it is installed (on the PATH, in
+`%LOCALAPPDATA%\Programs\wsl-spawner`, or an administrator's install in `%ProgramFiles%\wsl-spawner`). Your pre-stop
+scripts run first, then `wsl-spawner stop <distro> --yes --json --events`: its own hooks and units, then Docker and
+Podman, each container with its own timeout, within its `stop_limit`. WSL then ends the distribution, and wsl-spawner
+records the stop, so its next start counts the one before as stopped in time, not cut off. The screen shows each of its
+steps as it begins. A step that ran out of time or failed marks the stop step for a look (`wsl-spawner history` has the
+steps); the run goes on, as the distribution is down. When wsl-spawner stops nothing (its settings leave the
+distribution to WSL, or it does not start), wsl-shrinker stops the containers itself and says why. When another
+wsl-spawner stop of the distribution is running, say the sign-out's, the run stops there and leaves the distribution to
+that stop. When its stop did not run to its end, or WSL did not end the distribution after it, a distribution that is
+down goes on to the compaction, the step marked for a look with what wsl-spawner said. One that still runs, or whose
+state WSL does not say, fails the step: the run ends it, so that it starts afresh, with Docker, its units and
+wsl-spawner's own start, then starts it again with its containers.
 
 **Verify** reads the file once Windows lets go of it. It compares the file with the disk as read right before the
 compaction, once the stop settled it, so a file deleted after the disks were listed is not taken for data gone. The
@@ -125,7 +128,8 @@ containers the run stopped are started again before it reports. Only a disk that
 compaction is left stopped, and the run says so (see [Troubleshooting](troubleshooting.md)). A failed check changes
 nothing and is not recorded in the history. All this is decided in one place at the end of a run, also when the
 program's own code fails (a panic). The result says how the distribution was left (`left` in the JSON: `running`,
-`stopped`, `file`, `suspect` or `down`), and the screen, the command line and the history repeat it.
+`stopped`, `file`, `suspect`, `down`, or `other-stop` when another wsl-spawner stop ends it), and the screen, the
+command line and the history repeat it.
 
 What can be shrunk is one rule too, which the check applies and the screen, `doctor` and `shrink` show before a run: a
 protected disk, a file that could not be read, an encrypted file, recorded filesystem errors, a fixed-size disk, a file

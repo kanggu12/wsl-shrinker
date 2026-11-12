@@ -1,0 +1,10 @@
+{"event":"line","distro":"Ubuntu-24.04","kind":"plan","step":"docker","count":2}
+{"event":"line","distro":"Ubuntu-24.04","kind":"start","step":"docker","count":2}
+{"event":"line","distro":"Ubuntu-24.04","kind":"done","step":"docker","code":0,"took_seconds":21}
+{"event":"line","distro":"Ubuntu-24.04","kind":"start","step":"sync"}
+{"event":"line","distro":"Ubuntu-24.04","kind":"done","step":"sync","code":0,"took_seconds":0}
+{"event":"line","distro":"Ubuntu-24.04","kind":"end","result":"clean"}
+{"event":"terminate","distro":"Ubuntu-24.04"}
+{"event":"terminate","distro":"Ubuntu-24.04","done":true,"error":"wsl --terminate Ubuntu-24.04: exit status 1: The operation timed out because a response was not received from the virtual machine or container."}
+{"event":"finished","distro":"Ubuntu-24.04","took_seconds":0.000426082,"result":"clean","error":"WSL did not end Ubuntu-24.04: wsl --terminate Ubuntu-24.04: exit status 1: The operation timed out because a response was not received from the virtual machine or container."}
+{"schema":1,"results":[{"name":"Ubuntu-24.04","result":"clean","clean":false,"took_seconds":0.000426082,"steps":[{"step":"docker","count":2,"code":0,"took_seconds":21},{"step":"sync","code":0,"took_seconds":0}],"error":"WSL did not end Ubuntu-24.04: wsl --terminate Ubuntu-24.04: exit status 1: The operation timed out because a response was not received from the virtual machine or container."}],"shutdown":false,"error":"","detached_from":""}

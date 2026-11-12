@@ -23,6 +23,21 @@ import (
 // that stop ends it, so this run neither stops it nor starts it again.
 var errOtherStop = errors.New("another wsl-spawner stop is running")
 
+// stepError is a failed stop step's error with a code the screen has words
+// for (CodeOtherStop, CodeStillRuns, CodeNoState, CodeBackground), and what
+// wsl-spawner said of it, which the screen shows after its own words.
+type stepError struct {
+	code, said string
+	err        error
+}
+
+// Error is the step's failure in English, for the command line and the
+// history.
+func (e stepError) Error() string { return e.err.Error() }
+
+// Unwrap gives the error itself, for errors.Is.
+func (e stepError) Unwrap() error { return e.err }
+
 // spawnerLimit is how long wsl-spawner's stop may take: up to its own
 // stop_limit, which can be an hour, then WSL ending the distribution. Its
 // stop keeps to that limit itself; this one is for a call that never ends.
@@ -37,13 +52,12 @@ func stopItself(ctx context.Context, sys wsl.System, distro string, ids []string
 	if err != nil {
 		return Event{}, err
 	}
-	return stoppedItself(ids, hooks, failed, ""), nil
+	return stoppedItself(ids, hooks, failed), nil
 }
 
 // stoppedItself is the last event of a stop this program made: the
-// containers, the hooks, and those that failed. why is, when wsl-spawner is
-// installed and stopped nothing, what it said; "" otherwise.
-func stoppedItself(ids []string, hooks, failed int, why string) Event {
+// containers, the hooks, and those that failed.
+func stoppedItself(ids []string, hooks, failed int) Event {
 	detail := fmt.Sprintf("%d containers", len(ids))
 	if hooks > 0 {
 		detail += fmt.Sprintf(", %d hooks", hooks)
@@ -53,13 +67,25 @@ func stoppedItself(ids []string, hooks, failed int, why string) Event {
 		e.Status = Warned
 		detail += fmt.Sprintf(", %d failed", failed)
 	}
-	if why != "" {
-		// The person set wsl-spawner up to stop distributions: what kept it
-		// from this one is said, as its own words give it.
-		e.Spawner = SpawnerNotStopped
-		detail += "; wsl-spawner stopped nothing (" + why + "), so wsl-shrinker did"
-	}
 	e.Detail = detail
+	return e
+}
+
+// noReason stands in for what wsl-spawner said when it said nothing: the
+// step still says it stopped nothing, so it never reads as a run without
+// wsl-spawner.
+const noReason = "it gave no reason"
+
+// stoppedItselfInstead is the last event of a stop this program made
+// because wsl-spawner, installed, stopped nothing: what kept it from this
+// distribution is said, as its own words give it, or noReason.
+func stoppedItselfInstead(ids []string, hooks, failed int, why string) Event {
+	if why == "" {
+		why = noReason
+	}
+	e := stoppedItself(ids, hooks, failed)
+	e.Spawner, e.SpawnerSaid = SpawnerNotStopped, why
+	e.Detail += "; wsl-spawner stopped nothing (" + why + "), so wsl-shrinker did"
 	return e
 }
 
@@ -91,11 +117,11 @@ func stopBySpawner(ctx context.Context, env Env, distro string, ids []string, sa
 		if _, err := sys.Run(within(ctx, stopLimit), distro, "root", containersStopScript(ids, true)); err != nil {
 			return Event{}, err
 		}
-		return stoppedItself(ids, hooks, failed, why), nil
+		return stoppedItselfInstead(ids, hooks, failed, why), nil
 	case err != nil:
 		// It began and said no result (it was killed at the limit, or broke
 		// off): what counts is whether the distribution still runs.
-		return endedWithout(ctx, sys, distro, ids, hooks, failed, spawner.EndError, err.Error())
+		return afterPartialStop(ctx, sys, distro, ids, hooks, failed, spawner.EndError, err.Error())
 	case st.Detached:
 		// It went on in the background: the compaction waits for its end.
 		return stoppedInBackground(ctx, env, distro, ids, hooks, failed)
@@ -104,15 +130,21 @@ func stopBySpawner(ctx context.Context, env Env, distro string, ids []string, sa
 		// containers finds it stopped.
 		return Event{}, fmt.Errorf("%s is %w", distro, wsl.ErrNotRunning)
 	case st.End == spawner.EndBusy:
-		return Event{}, fmt.Errorf("%w for %s, which ends it: wsl-shrinker left it to that stop", errOtherStop, distro)
-	case st.End == spawner.EndClean, st.End == spawner.EndLimit, st.End == spawner.EndFailed:
+		return Event{}, stepError{code: CodeOtherStop, err: fmt.Errorf("%w for %s, which ends it: wsl-shrinker left it to that stop", errOtherStop, distro)}
+	case st.Err == "" && (st.End == spawner.EndClean || st.End == spawner.EndLimit || st.End == spawner.EndFailed):
 		// Its stop ended, every step in its time or not, and WSL ended the
-		// distribution after it.
+		// distribution after it: it said nothing went wrong past its steps.
 		return stoppedBySpawner(ids, hooks, failed, st.End, ""), nil
 	}
-	// error, or a word this program does not know: its stop did not run to
-	// its end. WSL ends the distribution after it all the same.
-	return endedWithout(ctx, sys, distro, ids, hooks, failed, spawner.EndError, st.Err)
+	// It said something went wrong: its stop did not run to its end
+	// (error, or a word this program does not know), or WSL did not end the
+	// distribution after it (an error with any end). Whether it still runs
+	// decides.
+	end := st.End
+	if end != spawner.EndClean && end != spawner.EndLimit && end != spawner.EndFailed {
+		end = spawner.EndError
+	}
+	return afterPartialStop(ctx, sys, distro, ids, hooks, failed, end, st.Err)
 }
 
 // stoppedBySpawner is the last event of a stop wsl-spawner made: end is its
@@ -122,7 +154,7 @@ func stoppedBySpawner(ids []string, hooks, failed int, end, why string) Event {
 	if hooks > 0 {
 		detail += fmt.Sprintf(", %d hooks", hooks)
 	}
-	e := Event{Step: StepStop, Status: Done, Count: len(ids), Hooks: hooks, HooksFailed: failed, Containers: ids, By: BySpawner, Spawner: end}
+	e := Event{Step: StepStop, Status: Done, Count: len(ids), Hooks: hooks, HooksFailed: failed, Containers: ids, By: BySpawner, Spawner: end, SpawnerSaid: why}
 	if failed > 0 {
 		detail += fmt.Sprintf(", %d failed", failed)
 	}
@@ -137,25 +169,88 @@ func stoppedBySpawner(ids []string, hooks, failed int, end, why string) Event {
 			detail += " (" + why + ")"
 		}
 	}
-	// Anything but a clean stop, and a hook of the person's own that
-	// failed, is worth a look; the run goes on, the distribution is down.
-	if end != spawner.EndClean || failed > 0 {
-		e.Status = Warned
+	if why != "" && end != spawner.EndError {
+		// Its steps went as end says, then something else went wrong (WSL
+		// did not end it, say): said in its own words.
+		detail += ": " + why
+	}
+	if end == spawner.EndLimit || end == spawner.EndFailed || end == spawner.EndError {
+		// A step of its own did not go in its time: its history has them.
+		// Not for a script of the person's own, which its history does not
+		// hold.
 		detail += "; wsl-spawner history has the steps"
+	}
+	// Anything but a clean stop, an error wsl-spawner said, and a hook of
+	// the person's own that failed, is worth a look; the run goes on, the
+	// distribution is down.
+	if end != spawner.EndClean || why != "" || failed > 0 {
+		e.Status = Warned
 	}
 	e.Detail = detail
 	return e
 }
 
-// endedWithout settles a wsl-spawner stop that did not run to its end: a
-// distribution it left running fails the step, and settle starts its
-// containers again; one that is down goes on to the compaction, with the
-// step marked for a look.
-func endedWithout(ctx context.Context, sys wsl.System, distro string, ids []string, hooks, failed int, end, why string) (Event, error) {
-	if runningNow(ctx, sys, distro) {
-		return Event{}, fmt.Errorf("wsl-spawner's stop of %s did not run to its end, and it still runs: %s", distro, why)
+// afterPartialStop settles a wsl-spawner stop that said something went
+// wrong: its stop inside did not run to its end, WSL did not end the
+// distribution after it, or it said no result. One that is down goes on to
+// the compaction, the step marked for a look. One that still runs, or whose
+// state WSL does not say, fails the step, and is ended here first:
+// wsl-spawner may have stopped Docker's daemon through systemd, its units
+// and Podman, which only a fresh start of the distribution brings back,
+// with wsl-spawner's own start where it is set up; the start settle makes
+// only starts containers.
+func afterPartialStop(ctx context.Context, sys wsl.System, distro string, ids []string, hooks, failed int, end, why string) (Event, error) {
+	state, serr := stateOf(ctx, sys, distro)
+	if state == stateStopped {
+		return stoppedBySpawner(ids, hooks, failed, end, why), nil
 	}
-	return stoppedBySpawner(ids, hooks, failed, end, why), nil
+	// Ended as wsl-spawner's stop would have ended it. A failure to end it
+	// is said with the rest: settle's start then finds it running.
+	ended := "wsl-shrinker ended it so that it starts afresh"
+	if terr := sys.Terminate(within(ctx, callLimit), distro); terr != nil {
+		ended = "wsl-shrinker could not end it either (" + oneLine(terr.Error()) + ")"
+	}
+	if state == stateUnknown {
+		return Event{}, stepError{code: CodeNoState, said: why, err: fmt.Errorf("after wsl-spawner's stop (%s), WSL did not say whether %s still runs (%v); %s", whyOr(why), distro, serr, ended)}
+	}
+	return Event{}, stepError{code: CodeStillRuns, said: why, err: fmt.Errorf("wsl-spawner's stop of %s did not end it (%s), and it still ran; %s", distro, whyOr(why), ended)}
+}
+
+// whyOr is what wsl-spawner said, or that it said nothing.
+func whyOr(why string) string {
+	if why == "" {
+		return noReason
+	}
+	return why
+}
+
+// distroState is whether a distribution runs, as WSL lists it.
+type distroState int
+
+const (
+	// stateUnknown: WSL did not answer, or no longer lists the
+	// distribution. Never taken for stopped: a run would compact a disk on
+	// a guess.
+	stateUnknown distroState = iota
+	stateRunning
+	stateStopped
+)
+
+// stateOf asks WSL whether distro runs, with why it could not say.
+func stateOf(ctx context.Context, sys wsl.System, distro string) (distroState, error) {
+	ds, err := sys.Distros(within(ctx, callLimit))
+	if err != nil {
+		return stateUnknown, err
+	}
+	for _, d := range ds {
+		if strings.EqualFold(d.Name, distro) {
+			if d.Running {
+				return stateRunning, nil
+			}
+			return stateStopped, nil
+		}
+	}
+	return stateUnknown, fmt.Errorf("%w: %s", wsl.ErrNoDistro, distro)
 }
 
 // backgroundPoll is how often a run looks whether wsl-spawner's stop that
@@ -169,9 +264,9 @@ func stoppedInBackground(ctx context.Context, env Env, distro string, ids []stri
 	sys := env.Disks.WSL
 	wait := sleep(env)
 	// Counted in looks, not by the clock: a test's waits take no time, and
-	// the loop still ends.
+	// the loop still ends. A look WSL does not answer is looked at again.
 	for range int(spawnerLimit / backgroundPoll) {
-		if !runningNow(ctx, sys, distro) {
+		if state, _ := stateOf(ctx, sys, distro); state == stateStopped {
 			e := stoppedBySpawner(ids, hooks, failed, spawner.EndClean, "")
 			// How it went is in wsl-spawner's history, not known here.
 			e.Spawner, e.Detail = "", strings.Replace(e.Detail, "by wsl-spawner", "by wsl-spawner in the background", 1)
@@ -179,5 +274,65 @@ func stoppedInBackground(ctx context.Context, env Env, distro string, ids []stri
 		}
 		wait(backgroundPoll)
 	}
-	return Event{}, fmt.Errorf("wsl-spawner went on stopping %s in the background, and it still runs", distro)
+	// Still not down after as long as such a stop may take: ended here, as
+	// that stop would have ended it, so it starts afresh.
+	ended := "wsl-shrinker ended it so that it starts afresh"
+	if terr := sys.Terminate(within(ctx, callLimit), distro); terr != nil {
+		ended = "wsl-shrinker could not end it either (" + oneLine(terr.Error()) + ")"
+	}
+	return Event{}, stepError{code: CodeBackground, err: fmt.Errorf("wsl-spawner went on stopping %s in the background, and it still ran; %s", distro, ended)}
+}
+
+// spawnerLockScript looks at wsl-spawner's stop lock in a distribution, as
+// wsl-spawner's own stop takes it, under root ("" for the distribution
+// itself; a test's folder otherwise, never quoted, so without a quote). It
+// prints "spawner|stopping" while a stop of wsl-spawner's is at work. With
+// flock, the stop holds /run/wsl-spawner/stop.lock for as long as it runs:
+// a lock this look cannot take is held. It takes it as wsl-spawner does, on
+// a descriptor of the shell's (no program to run but flock), and lets go
+// at once: a stop that began in that instant would find it busy. Without
+// flock, the stop keeps a folder there with its pid: at work while that
+// process runs. No lock file, or no folder, is no stop. It ends with
+// success whatever it found (a stop's folder left with its process gone
+// would otherwise end it with kill's failure, which wsl.exe passes on as
+// an error). Only the shell's own words and flock.
+func spawnerLockScript(root string) string {
+	return `l='` + root + `/run/wsl-spawner'
+if command -v flock >/dev/null 2>&1; then
+  if { command exec 9<"$l/stop.lock"; } 2>/dev/null; then
+    flock -n 9 || echo "spawner|stopping"
+    exec 9<&-
+  fi
+elif [ -d "$l/stop" ]; then
+  pid=""
+  { read -r pid <"$l/stop/pid"; } 2>/dev/null
+  case "$pid" in '' | *[!0-9]*) ;; *) kill -0 "$pid" 2>/dev/null && echo "spawner|stopping" ;; esac
+fi
+:
+`
+}
+
+// SpawnerStopping reports whether a wsl-spawner stop of distro is at work
+// in it now: one a run asked for goes on when the run's window closes, and
+// what the run had stopped is not started again under it. Without
+// wsl-spawner (env.Spawner nil) there is none; a distribution that does not
+// run has none either, its stop having ended it.
+func SpawnerStopping(ctx context.Context, env Env, distro string) (bool, error) {
+	if env.Spawner == nil {
+		return false, nil
+	}
+	out, err := env.Disks.WSL.Run(within(ctx, callLimit), distro, "root", spawnerLockScript(""))
+	switch {
+	case errors.Is(err, wsl.ErrNotRunning):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	// The look's own line, among any wsl.exe put before it.
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.TrimSpace(line) == "spawner|stopping" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

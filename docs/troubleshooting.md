@@ -111,8 +111,9 @@ distribution is started again, and `r` on the screen rereads the disk once the p
 Closing the window, or the terminal it runs in, ends wsl-shrinker but not what WSL is doing: a compaction that had
 started finishes on its own. What wsl-shrinker would have done next waits in its journal. On its next start, the screen
 says "The run of … was cut off", and `R` (or `wsl-shrinker recover`) starts the distribution again with the containers
-it stopped. If WSL is still compacting, it says so; try again when it is done. `wsl-shrinker doctor` reports such a run
-too. `wsl-shrinker history` has no line for it.
+it stopped. If WSL is still compacting, it says so; try again when it is done. So does a stop wsl-spawner was making for
+the run, which goes on without the window: `R` waits for it to end the distribution. `wsl-shrinker doctor` reports such
+a run too. `wsl-shrinker history` has no line for it.
 
 If the distribution does not start again, or its disk stays held, the message says why, and the run stays cut off:
 `R` tries again, and `F` (or `wsl-shrinker recover --forget`) closes the run as it is, starting nothing. Both say first

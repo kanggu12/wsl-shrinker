@@ -174,6 +174,10 @@ func LocalAppData() string { return knownFolder("LOCALAPPDATA", windows.FOLDERID
 // AppData is the per-user folder for its settings.
 func AppData() string { return knownFolder("APPDATA", windows.FOLDERID_RoamingAppData) }
 
+// ProgramFiles is the folder of programs an administrator installs for
+// every user ("C:\Program Files" for this 64-bit program).
+func ProgramFiles() string { return knownFolder("ProgramFiles", windows.FOLDERID_ProgramFiles) }
+
 // knownFolder is the folder the environment variable names or, when it is
 // empty, the one Windows keeps for it: an empty variable would put the
 // program's files under whatever folder it was started in. A test gets ""

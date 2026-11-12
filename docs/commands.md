@@ -113,8 +113,10 @@ A failed stop step leaves the distribution running, with no note. `recover` adds
 `distro_started` marks a distribution started again, `containers_started` and `containers_not_started` count containers,
 and false or 0 values are left out. A stop step's events say `by` (`wsl-spawner` when it stopped the distribution),
 `phase` (its step under way: `hook`, `units`, `docker`, `podman`, `sync`, `terminate`), `spawner` (how its stop went:
-`clean`, `limit`, `failed`, `error`; or `not-stopped` when it is installed but stopped nothing) and `hooks_failed`,
-each left out when it has nothing to say.
+`clean`, `limit`, `failed`, `error`; or `not-stopped` when it is installed but stopped nothing), `spawner_said` (what
+wsl-spawner said, in its words: why it stopped nothing, or what went wrong past its steps) and `hooks_failed`, each
+left out when it has nothing to say. A failed stop step's `code` says why for the screen: `otherstop`, `stillruns`,
+`nostate` or `background`.
 
 Run from a terminal inside a distribution it shrinks, the run moves to the screen in a new window, since stopping the
 distribution closes that terminal. The command exits with 0 once that window starts, or says it did not and exits with
@@ -125,7 +127,8 @@ printed. Once the stop step starts, the run finishes: Ctrl+C does not leave a di
 
 A run cut off (the window closed, a crash, the power) leaves its journal, and no other run starts until it is finished.
 `recover` starts again what the run had stopped: the distribution, writable, and its containers. If WSL is still
-compacting the disk, it says so; try again when it is done.
+compacting the disk, it says so; try again when it is done. The same when wsl-spawner is still stopping the
+distribution: a stop the run asked of it goes on when the window closes, and nothing is started again under it.
 
 If the distribution does not start, the run stays cut off and the message names both ways on: `wsl-shrinker recover`
 tries again, and `wsl-shrinker recover --forget` closes the run as it is. Forgetting starts nothing. It says what the

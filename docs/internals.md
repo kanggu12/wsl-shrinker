@@ -76,7 +76,8 @@ A few rules keep that list short, each held in one place:
 - **One rule for "can it be shrunk".** `shrink.Preflight` decides; the run's check, the screen, `doctor` and `shrink`
   all ask it. The run itself refuses a protected disk, whatever asked for it.
 - **One answer for "how was it left".** The end of `shrink.Run` decides it (`running`, `stopped`, `file`, `suspect`,
-  `down`), even after a panic in the run's own code. The screen, the command line and the history report that answer.
+  `down`, `other-stop`), even after a panic in the run's own code. The screen, the command line and the history report
+  that answer.
 - **One run at a time.** `run.json` is created whole, with a hard link, before anything changes. A second run finds it
   and stops. A run cut off leaves it behind, for `recover` to read.
 

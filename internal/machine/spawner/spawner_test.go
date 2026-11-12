@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -117,6 +118,9 @@ func TestEachEndIsReadAsWslSpawnerPrintsIt(t *testing.T) {
 		{name: "busy", end: EndBusy, errHas: "another stop of Ubuntu-24.04 is running"},
 		// The stop inside did not run to its end (exit 3); WSL ended it.
 		{name: "error", end: EndError, steps: []string{StepTerminate}, errHas: "did not run to its end"},
+		// Every step in its time, then WSL did not end it (exit 3): the end
+		// is clean, and the error says what went wrong.
+		{name: "terminatefailed", end: EndClean, steps: []string{"docker", "sync", StepTerminate}, errHas: "WSL did not end Ubuntu-24.04"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			x, _ := fake(t, c.name)
@@ -279,5 +283,65 @@ func TestFindNeverFindsTheRealOneInATest(t *testing.T) {
 	// would stop a real distribution of a made-up one's name.
 	if x, ok := Find(); ok {
 		t.Fatalf("found %s", x.Path)
+	}
+}
+
+func TestFindLooksOnThePathThenInEachInstallFolder(t *testing.T) {
+	// The per-user folder and an administrator's under Program Files, as
+	// wsl-spawner's installer and its setup for a standard user put it.
+	user, admin := t.TempDir(), t.TempDir()
+	folders := installFolders(user, admin)
+	want := []string{filepath.Join(user, "Programs", "wsl-spawner"), filepath.Join(admin, "wsl-spawner")}
+	if !slices.Equal(folders, want) {
+		t.Fatalf("folders %q, want %q", folders, want)
+	}
+	none := func(string) (string, error) { return "", errors.New("not on the PATH") }
+	put := func(dir string) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, "wsl-spawner.exe")
+		if err := os.WriteFile(p, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// Only the administrator's install: found there.
+	inAdmin := put(want[1])
+	if x, ok := findIn(none, isFile, folders...); !ok || x.Path != inAdmin {
+		t.Fatalf("%v %q", ok, x.Path)
+	}
+	// The per-user one comes first, and the PATH before both.
+	inUser := put(want[0])
+	if x, ok := findIn(none, isFile, folders...); !ok || x.Path != inUser {
+		t.Fatalf("%v %q", ok, x.Path)
+	}
+	onPath := filepath.Join(t.TempDir(), "wsl-spawner.exe")
+	if x, ok := findIn(func(string) (string, error) { return onPath, nil }, isFile, folders...); !ok || x.Path != onPath {
+		t.Fatalf("%v %q", ok, x.Path)
+	}
+	// A folder from an empty variable is not a full path: passed over,
+	// never looked for under the folder this program runs in.
+	if x, ok := findIn(none, func(string) bool { return true }, installFolders("", "")...); ok {
+		t.Fatalf("found %q", x.Path)
+	}
+}
+
+func TestAStopThatSaysNothingStillSaysWhyItStoppedNothing(t *testing.T) {
+	// Nothing printed, exit 1: it stopped nothing, and the reason is not
+	// empty, so the run does not read as one without wsl-spawner.
+	x, _ := fake(t, "silent")
+	_, _, err := stop(t, x)
+	why := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(err), ErrNotStopped.Error()+":"))
+	if !errors.Is(err, ErrNotStopped) || why == "" || !strings.Contains(why, "exited 1") {
+		t.Fatalf("%v (why %q)", err, why)
+	}
+	// Nothing printed and exit 0 says so too.
+	r := &reader{distro: "Ubuntu-24.04"}
+	_, err = r.outcome(context.Background(), nil, "")
+	why = strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(err), ErrNotStopped.Error()+":"))
+	if !errors.Is(err, ErrNotStopped) || !strings.Contains(why, "exited 0") {
+		t.Fatalf("%v (why %q)", err, why)
 	}
 }

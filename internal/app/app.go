@@ -270,7 +270,17 @@ func (a *App) Recover(ctx context.Context) (string, error) {
 		if !e.Stopped {
 			break
 		}
-		ev, err := shrink.StartAgain(ctx, a.shrinkEnv(ctx), e.Distro, e.Containers)
+		env := a.shrinkEnv(ctx)
+		// A wsl-spawner stop the run asked for goes on when its window
+		// closes: nothing is started again under it. The run stays cut off,
+		// for another try once that stop has ended the distribution.
+		if busy, err := shrink.SpawnerStopping(ctx, env, e.Distro); err != nil || busy {
+			if err == nil {
+				err = fmt.Errorf("wsl-spawner is still stopping %s; try again once it is done", e.Distro)
+			}
+			return "", StillCutOff{err}
+		}
+		ev, err := shrink.StartAgain(ctx, env, e.Distro, e.Containers)
 		if err != nil {
 			// The journal stays, for another try.
 			return "", StillCutOff{err}

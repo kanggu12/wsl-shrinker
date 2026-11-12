@@ -8,14 +8,17 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ### Added
 
-- Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed, the stop step stops a running
-  distribution through it: your pre-stop scripts, then `wsl-spawner stop`, with its hooks and units, Docker and Podman,
-  each container with its own timeout. It records the stop, so its next start no longer takes a shrink for a
-  distribution cut off, and `wsl-spawner check` no longer marks it. The screen shows each of its steps as it begins.
-  When it stops nothing (its settings leave the distribution to WSL), the run stops the containers itself and says
-  why; when another wsl-spawner stop of the distribution is running, the run leaves the distribution to it.
+- Where [wsl-spawner](https://github.com/kanggu12/wsl-spawner) is installed, the stop step stops a running distribution
+  through it: your pre-stop scripts, then `wsl-spawner stop`, with its hooks and units, Docker and Podman, each
+  container with its own timeout. It records the stop, so its next start no longer takes a shrink for a distribution cut
+  off, and `wsl-spawner check` no longer marks it. The screen shows each of its steps as it begins. When it stops
+  nothing (its settings leave the distribution to WSL), the run stops the containers itself and says why; when another
+  wsl-spawner stop of the distribution is running, the run leaves the distribution to it, and says so (`left` is
+  `other-stop`). When its stop does not run to its end and the distribution still runs, or WSL does not say, the run
+  ends it so that it starts afresh, with Docker and its units, and fails the step; it never compacts a disk on a guess.
+  A run cut off while wsl-spawner stopped its distribution is finished once that stop is done: `recover` waits for it.
 - A stop step's events in `--json` say who stopped the distribution (`by`), wsl-spawner's step under way (`phase`),
-  how its stop went (`spawner`) and how many pre-stop scripts failed (`hooks_failed`).
+  how its stop went (`spawner`), what it said (`spawner_said`) and how many pre-stop scripts failed (`hooks_failed`).
 
 ### Changed
 

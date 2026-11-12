@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -77,5 +78,40 @@ func TestAnAppOfATestFindsNoWslSpawner(t *testing.T) {
 	// And the program's own finder finds none in a test either.
 	if s, ok := findSpawner(); ok {
 		t.Fatalf("found %v", s)
+	}
+}
+
+func TestRecoverWaitsWhileWslSpawnersStopIsAtWork(t *testing.T) {
+	// The window closed while wsl-spawner stopped the distribution, which
+	// goes on without it: recover does not start containers under that
+	// stop. The run stays cut off, for another try once it is done.
+	a, fake := testApp(t, func(int, string) bool { return false })
+	stub := &stubSpawner{fake: fake, read: func() journal.Entry { return journal.Entry{} }}
+	a.FindSpawner = func() (spawner.Stopper, bool) { return stub, true }
+	inner := fake.Script
+	var scripts []string
+	fake.Script = func(x, y, s string) (string, error) {
+		scripts = append(scripts, s)
+		if strings.Contains(s, "/run/wsl-spawner") {
+			return "spawner|stopping\n", nil
+		}
+		return inner(x, y, s)
+	}
+	cut := journal.Entry{PID: 1, Exe: "wsl-shrinker.exe", Disk: "Dev", Distro: "Dev", Step: "stop", Stopped: true, Containers: []string{"0123456789ab"}}
+	if err := a.Journal.Begin(cut); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.Recover(context.Background())
+	var still StillCutOff
+	if !errors.As(err, &still) || !strings.Contains(err.Error(), "wsl-spawner is still stopping Dev") {
+		t.Fatalf("%v", err)
+	}
+	for _, s := range scripts {
+		if strings.Contains(s, "docker start") {
+			t.Fatal("started containers under wsl-spawner's stop")
+		}
+	}
+	if _, st, _ := a.Journal.Read(); st == journal.None {
+		t.Fatal("the run is no longer cut off")
 	}
 }

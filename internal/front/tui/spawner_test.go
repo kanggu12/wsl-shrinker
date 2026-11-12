@@ -21,6 +21,9 @@ type spawnerStub struct {
 	w   *engineWorld
 	res spawner.Result
 	err error
+	// keepRunning leaves the distribution running, as a stop left half
+	// done may.
+	keepRunning bool
 }
 
 func (s spawnerStub) Stop(ctx context.Context, distro string, on func(spawner.Step)) (spawner.Result, error) {
@@ -28,7 +31,9 @@ func (s spawnerStub) Stop(ctx context.Context, distro string, on func(spawner.St
 		return s.res, s.err
 	}
 	on(spawner.Step{Name: "docker", Count: 2})
-	_ = s.w.fake.Terminate(ctx, distro)
+	if !s.keepRunning && s.res.End != spawner.EndBusy {
+		_ = s.w.fake.Terminate(ctx, distro)
+	}
 	return s.res, nil
 }
 
@@ -158,5 +163,71 @@ func TestAStepThatSaysMoreKeepsItsTime(t *testing.T) {
 	next, _ := m.Update(eventMsg(shrink.Event{Step: shrink.StepCompact, Status: shrink.Running, At: t0.Add(9 * time.Second)}))
 	if m = next.(model); !m.run.stepStart.Equal(t0.Add(9 * time.Second)) {
 		t.Fatalf("compaction starts at %v", m.run.stepStart)
+	}
+}
+
+func TestARunLeftToAnotherStopSaysSo(t *testing.T) {
+	// Another wsl-spawner stop ends the distribution: the outcome says so
+	// in both languages, never that it runs as it was.
+	defer i18n.Set(i18n.English)
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		w := newEngineWorld(t)
+		w.env.Spawner = spawnerStub{w: w, res: spawner.Result{End: spawner.EndBusy, Err: "another stop of Dev is running"}}
+		b := &engineBackend{Demo: demo(), w: w}
+		out := joined(screen(b, 120, 34, "s", "enter"))
+		if !strings.Contains(out, said("run.state.stop.otherstop")) || strings.Contains(out, said("run.state.stop.running")) {
+			t.Errorf("%s:\n%s", lang, out)
+		}
+	}
+}
+
+func TestTheStopRowSaysWhatWslSpawnerSaid(t *testing.T) {
+	// Its own words, after the screen's: why it stopped nothing, and what
+	// went wrong after its steps.
+	for _, c := range []struct {
+		name  string
+		stub  spawnerStub
+		words string
+	}{
+		{name: "not stopped", stub: spawnerStub{err: fmt.Errorf("%w: Dev is left to WSL in the settings", spawner.ErrNotStopped)}, words: "Dev is left to WSL in the settings"},
+		{name: "not ended", stub: spawnerStub{res: spawner.Result{End: spawner.EndClean, Err: "WSL did not end Dev: timed out"}}, words: "WSL did not end Dev: timed out"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newEngineWorld(t)
+			c.stub.w = w
+			w.env.Spawner = c.stub
+			lines := screen(&engineBackend{Demo: demo(), w: w}, 180, 34, "s", "enter")
+			if row := stepRow(lines, shrink.StepStop); !strings.Contains(row, c.words) {
+				t.Errorf("stop row %q, want %q", row, c.words)
+			}
+		})
+	}
+}
+
+func TestAStopThatFailedThroughWslSpawnerSaysWhyInTheScreensLanguage(t *testing.T) {
+	// The failed stop row says why in Korean too, not in the engine's
+	// English.
+	defer i18n.Set(i18n.English)
+	i18n.Set(i18n.Korean)
+	for _, c := range []struct {
+		name string
+		stub spawnerStub
+		key  string
+	}{
+		{name: "busy", stub: spawnerStub{res: spawner.Result{End: spawner.EndBusy, Err: "another stop of Dev is running"}}, key: "stop.fail.otherstop"},
+		{name: "still runs", stub: spawnerStub{res: spawner.Result{End: spawner.EndError, Err: "the stop inside Dev did not run to its end"}, keepRunning: true}, key: "stop.fail.stillruns"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newEngineWorld(t)
+			c.stub.w = w
+			w.env.Spawner = c.stub
+			lines := screen(&engineBackend{Demo: demo(), w: w}, 180, 34, "s", "enter")
+			out := strings.Join(strings.Fields(strings.Join(lines, " ")), " ")
+			want := strings.Join(strings.Fields(i18n.T(c.key, "Dev")), " ")
+			if !strings.Contains(out, want) || strings.Contains(out, "wsl-shrinker left it to that stop") || strings.Contains(out, "and it still ran") {
+				t.Errorf("want %q:\n%s", want, strings.Join(lines, "\n"))
+			}
+		})
 	}
 }

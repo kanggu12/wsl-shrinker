@@ -443,6 +443,11 @@ var en = map[string]string{
 	"run.spawner.terminate":     "WSL ends the rest",
 	"run.spawner.other":         "%s",
 	"run.about.stop.spawner":    "The pre-stop scripts ran; wsl-spawner stops the distribution: its hooks and units, then Docker and Podman, each container with its own timeout. WSL then ends the rest.",
+	"run.state.stop.otherstop":  "The disk was not changed: another wsl-spawner stop is ending %s, the sign-out's or one asked by hand. Shrink it once that stop is done.",
+	"stop.fail.otherstop":       "Another wsl-spawner stop is ending %s, the sign-out's or one asked by hand; wsl-shrinker left it to that stop.",
+	"stop.fail.stillruns":       "wsl-spawner's stop did not end %s, which still ran; wsl-shrinker ends it, so that it starts afresh.",
+	"stop.fail.nostate":         "After wsl-spawner's stop, WSL did not say whether %s still runs; wsl-shrinker ends it, so that it starts afresh.",
+	"stop.fail.background":      "wsl-spawner went on stopping %s in the background and did not end it; wsl-shrinker ends it, so that it starts afresh.",
 }
 
 // ko is the Korean catalog.
@@ -857,4 +862,9 @@ var ko = map[string]string{
 	"run.spawner.terminate":     "WSL이 나머지를 끝냄",
 	"run.spawner.other":         "%s",
 	"run.about.stop.spawner":    "종료 전 스크립트를 실행했고, wsl-spawner가 배포판을 멈춥니다. 그 훅과 유닛, Docker와 Podman 순서이고 컨테이너마다 각자의 종료 대기 시간을 줍니다. 그다음 WSL이 나머지를 끝냅니다.",
+	"run.state.stop.otherstop":  "디스크는 그대로입니다. 로그아웃 때나 직접 시작한 다른 wsl-spawner 정지가 %s 배포판을 끝내는 중입니다. 그 정지가 끝난 뒤 다시 줄이세요.",
+	"stop.fail.otherstop":       "로그아웃 때나 직접 시작한 다른 wsl-spawner 정지가 %s 배포판을 끝내는 중이라, wsl-shrinker는 그 정지에 맡겼습니다.",
+	"stop.fail.stillruns":       "wsl-spawner의 정지가 %s 배포판을 끝내지 못해 아직 실행 중이었습니다. wsl-shrinker가 끝내고 새로 켭니다.",
+	"stop.fail.nostate":         "wsl-spawner의 정지 뒤 WSL이 %s 배포판이 아직 실행 중인지 알려 주지 않았습니다. wsl-shrinker가 끝내고 새로 켭니다.",
+	"stop.fail.background":      "wsl-spawner가 %s 배포판을 뒤에서 계속 멈추다가 끝내지 못했습니다. wsl-shrinker가 끝내고 새로 켭니다.",
 }

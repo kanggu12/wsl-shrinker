@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -86,6 +87,45 @@ type Stopper interface {
 type Exe struct {
 	// Path is the program's full path.
 	Path string
+}
+
+// findIn finds wsl-spawner: first on the PATH, as lookPath (exec.LookPath)
+// finds it, then in each of folders, in order, as wsl-spawner.exe that is
+// a file. A folder that is not a full path (made from a variable that was
+// empty) is passed over: it would be looked for under whatever folder this
+// program runs in. lookPath refuses a program found only in the current
+// folder (exec.ErrDot), which is not an installed wsl-spawner.
+func findIn(lookPath func(string) (string, error), isFile func(string) bool, folders ...string) (Exe, bool) {
+	if p, err := lookPath("wsl-spawner"); err == nil {
+		if abs, err := filepath.Abs(p); err == nil {
+			return Exe{Path: abs}, true
+		}
+	}
+	for _, f := range folders {
+		if !filepath.IsAbs(f) {
+			continue
+		}
+		if p := filepath.Join(f, "wsl-spawner.exe"); isFile(p) {
+			return Exe{Path: p}, true
+		}
+	}
+	return Exe{}, false
+}
+
+// installFolders are the folders wsl-spawner's installer puts it in, in the
+// order Find looks after the PATH: its own per-user folder under
+// %LOCALAPPDATA%\Programs, for a PATH this program started with before an
+// install changed it; then an administrator's install under Program Files,
+// which wsl-spawner's setup for a standard user makes, and whose folder a
+// standard user's PATH may not hold.
+func installFolders(localAppData, programFiles string) []string {
+	return []string{filepath.Join(localAppData, "Programs", "wsl-spawner"), filepath.Join(programFiles, "wsl-spawner")}
+}
+
+// isFile reports whether path is a regular file.
+func isFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
 }
 
 // Args is the command line of a stop of distro: no question, its result
@@ -323,8 +363,17 @@ func (r *reader) outcome(ctx context.Context, runErr error, errOut string) (Resu
 		return Result{End: r.finished.Result, Err: r.finished.Err, Took: seconds(r.finished.Took)}, nil
 	}
 	said := firstWords(errOut)
-	if said == "" && runErr != nil {
-		said = runErr.Error()
+	if said == "" {
+		// It said nothing on stderr: what is known of its end is said
+		// instead, so the reason is never empty (a broken install, say).
+		switch {
+		case exited != nil:
+			said = fmt.Sprintf("it printed nothing and exited %d", exited.ExitCode())
+		case runErr != nil:
+			said = runErr.Error()
+		default:
+			said = "it printed nothing and exited 0"
+		}
 	}
 	if r.began {
 		return Result{}, fmt.Errorf("%w: %s", ErrNoResult, said)

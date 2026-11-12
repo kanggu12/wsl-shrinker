@@ -222,8 +222,27 @@ func (m model) failWords(e shrink.Event, d disks.Disk) string {
 	case shrink.CodeWSL:
 		// WSL's own message says what went wrong: it follows.
 		return i18n.T("check.fail.wsl") + " (" + e.Detail + ")"
+	// A stop through wsl-spawner that failed: the screen's words, then
+	// what wsl-spawner said, in its own.
+	case shrink.CodeOtherStop:
+		return withSaid(i18n.T("stop.fail.otherstop", d.Distro), e.SpawnerSaid)
+	case shrink.CodeStillRuns:
+		return withSaid(i18n.T("stop.fail.stillruns", d.Distro), e.SpawnerSaid)
+	case shrink.CodeNoState:
+		return withSaid(i18n.T("stop.fail.nostate", d.Distro), e.SpawnerSaid)
+	case shrink.CodeBackground:
+		return withSaid(i18n.T("stop.fail.background", d.Distro), e.SpawnerSaid)
 	}
 	return e.Detail
+}
+
+// withSaid is words, then what wsl-spawner said in parentheses, when it
+// said anything.
+func withSaid(words, said string) string {
+	if said == "" {
+		return words
+	}
+	return words + " (" + said + ")"
 }
 
 // phaseWords names wsl-spawner's step under way, in the language in use;
@@ -281,7 +300,9 @@ func stepDetail(e shrink.Event) string {
 		case e.Spawner == shrink.SpawnerNotStopped:
 			s += ", " + i18n.T("detail.spawner.notstopped")
 		}
-		return s
+		// Why it stopped nothing, or what went wrong past its steps, in its
+		// own words.
+		return withSaid(s, e.SpawnerSaid)
 	case shrink.StepCompact:
 		return elapsed(e.Took)
 	case shrink.StepVerify:
@@ -405,6 +426,8 @@ var stateEnds = map[shrink.Left]string{
 	// Not running before, or a file with nothing to run: both stay so.
 	shrink.LeftStopped: ".stopped",
 	shrink.LeftFile:    ".stopped",
+	// Another wsl-spawner stop ends it.
+	shrink.LeftOtherStop: ".otherstop",
 }
 
 // stateWarned is the ending of a distribution running again with some of

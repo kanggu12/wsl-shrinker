@@ -293,11 +293,23 @@ func exists(path string) bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
-// demoSetup is the setup screen on the made-up PC, for its pictures.
+// demoSetup is the setup screen on the made-up PC, for its pictures: the PC
+// the screen's demo shows, so both count and protect the same disks.
 func demoSetup() tui.SetupStart {
-	ds, _ := tui.NewDemo().Disks(context.Background())
-	// A first start: no settings file yet, so the defaults, with no disk
-	// protected; esc keeps exactly what the first page lists.
-	return tui.SetupStart{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: 1, Disks: ds,
-		AutoLanguage: i18n.Current(), Path: `C:\Users\ann\AppData\Roaming\wsl-shrinker\config.toml`, First: true}
+	d := tui.NewDemo()
+	// A picture waits for nothing.
+	d.Fast = true
+	ds, _ := d.Disks(context.Background())
+	// Its settings are the screen's demo's: the disks it protects, and what
+	// it takes to be worth shrinking.
+	var protect []string
+	for _, x := range ds {
+		if d.Protected(x.Name) {
+			protect = append(protect, x.Name)
+		}
+	}
+	// Setup opened again: a PC with settings is past its first start, and
+	// esc leaves them as the first page lists them.
+	return tui.SetupStart{Language: "auto", Theme: "auto", Mode: "tui", MinGainGB: float64(d.MinGain()) / (1 << 30), Protect: protect, Disks: ds,
+		AutoLanguage: i18n.Current(), Path: `C:\Users\ann\AppData\Roaming\wsl-shrinker\config.toml`}
 }

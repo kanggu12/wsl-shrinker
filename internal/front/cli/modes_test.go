@@ -315,6 +315,33 @@ func TestTheOverviewSaysWhatEachCommandDoesIn80Columns(t *testing.T) {
 	i18n.Set(i18n.English)
 }
 
+func TestSetupsPicturesAreOfTheScreensMadeUpPC(t *testing.T) {
+	// One made-up PC: setup opened again on it counts what its screen counts
+	// and protects what it protects, and both name the same WSL.
+	var o, e bytes.Buffer
+	frame := func(args ...string) string {
+		t.Helper()
+		o.Reset()
+		if code := run(args, &o, &e); code != exitOK {
+			t.Fatalf("%v: exit %d: %s", args, code, e.String())
+		}
+		return ansi.Strip(o.String())
+	}
+	setup := frame("setup", "--snapshot", "100x30", "--lang", "en")
+	main := frame("--snapshot", "120x30", "--lang", "en")
+	back := regexp.MustCompile(`(\S+ \S+) can be given back now`)
+	s, m := back.FindStringSubmatch(setup), back.FindStringSubmatch(main)
+	if s == nil || m == nil || s[1] != m[1] {
+		t.Errorf("setup counts %q, the screen %q:\n%s\n%s", s, m, setup, main)
+	}
+	if !strings.Contains(setup, "Change the settings") || !regexp.MustCompile(`Protected disks\s+Work\b`).MatchString(setup) {
+		t.Errorf("not setup opened again on the PC that protects Work:\n%s", setup)
+	}
+	if !strings.Contains(main, "WSL 3.0.5.0") {
+		t.Errorf("WSL's version:\n%s", main)
+	}
+}
+
 func TestCtrlCOnTheFirstSetupStopsEverything(t *testing.T) {
 	// Ctrl+C is out: no settings written, nothing opened after it, and the
 	// next start asks again.

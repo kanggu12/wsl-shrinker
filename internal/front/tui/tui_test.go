@@ -76,10 +76,10 @@ func TestEveryScreenFitsEveryWidth(t *testing.T) {
 func TestMainScreenSaysWhatMatters(t *testing.T) {
 	out := ansi.Strip(Snapshot(demo(), 132, 34, true, nil, ""))
 	for _, want := range []string{
-		"wsl-shrinker", "WSL 3.0.3.0", "87.0 GB can be given back now", "+36.0 GB when not in use", // header: the disks worth shrinking; protected Work is not counted, the docker disk in use apart
+		"wsl-shrinker", "WSL 3.0.5.0", "87.0 GB can be given back now", "+36.0 GB when not in use", // header: the disks worth shrinking; protected Work is not counted, the docker disk in use apart
 		"Ubuntu-24.04", "Docker Desktop data", "in use", // the docker disk and its state
 		"Gives back about 64.0 GB.", "after 248 GB", // the selected disk's verdict and bar
-		"WSL 3.0.3.0 can compact", "read while running", // its checks
+		"WSL 3.0.5.0 can compact", "read while running", // its checks
 		"Docker build cache", "c: choose what to remove first", // what fills it
 		"5 disks · 2 worth shrinking", // the status line: the docker disk in use is not counted
 	} {

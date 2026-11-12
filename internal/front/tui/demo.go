@@ -58,8 +58,8 @@ func NewDemo() *Demo {
 	return d
 }
 
-// Info is a recent WSL.
-func (d *Demo) Info(context.Context) wsl.Info { return wsl.Info{Version: "3.0.3.0", CanCompact: true} }
+// Info is a recent WSL, the one wsl-spawner's made-up PC has too.
+func (d *Demo) Info(context.Context) wsl.Info { return wsl.Info{Version: "3.0.5.0", CanCompact: true} }
 
 // Disks returns the made-up disks.
 func (d *Demo) Disks(context.Context) ([]disks.Disk, error) {

@@ -10,6 +10,8 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 - In a stop step's `--json` events, `spawner_said` holds wsl-spawner's own words only. Why a call to it that gave no
   result said nothing is in `spawner_quiet`: `timeout`, `silent` (with its exit code in `spawner_exit`) or `system`.
+- The made-up PC of `--demo` has WSL 3.0.5.0, as wsl-spawner's has. Setup's pictures are of the same PC: setup opened
+  again, with Work protected, so it counts 87.0 GB as the screen does, not 100 GB.
 
 ### Fixed
 

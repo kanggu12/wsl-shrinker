@@ -58,7 +58,7 @@ The first start opens a short wizard, one choice per page with a preview. `wsl-s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/setup-dark.png">
-  <img alt="The setup wizard at step 3 of 6. A rail on the left lists the steps, Language and Colors checked, Mode the step now. The page asks what wsl-shrinker should open, TUI chosen over CLI, with a small preview of the screen it opens: two disks and what each gives back. Below, a note that every command works either way. The keys: esc keeps the defaults, left goes back, up and down choose, enter goes on." src="docs/assets/setup-light.png">
+  <img alt="The setup wizard at step 3 of 6. A rail on the left lists the steps, Language and Colors checked, Mode the step now. The page asks what wsl-shrinker should open, TUI chosen over CLI, with a small preview of the screen it opens: two disks and what each gives back. Below, a note that every command works either way. The keys: esc quits, left goes back, up and down choose, enter goes on." src="docs/assets/setup-light.png">
 </picture>
 
 ## Why wsl-shrinker

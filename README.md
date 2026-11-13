@@ -22,7 +22,6 @@
   <a href="#quick-start">Quick start</a> |
   <a href="#what-it-does">What it does</a> |
   <a href="#how-it-works">How it works</a> |
-  <a href="#for-contributors">For contributors</a> |
   <a href="#documentation">Documentation</a>
 </p>
 
@@ -95,31 +94,6 @@ asking first, and `wsl-shrinker inside NAME` lists what can be removed in it. No
 `wsl-shrinker.exe` does the work: the disks are Windows' to read and to compact. Inside WSL, `wsl-shrinker` is the
 Linux build of the same program, which draws the screen in your terminal and asks the `.exe` for every answer.
 [How it works](docs/how-it-works.md) has the estimate and every check of a shrink.
-
-## For contributors
-
-wsl-shrinker is MIT licensed and developed in the open. No change needs your own disks: the tests build the VHDX files
-and ext4 filesystems they read and shrink on a made-up WSL. [CONTRIBUTING.md](.github/CONTRIBUTING.md) says what a
-change needs, and [Internals](docs/internals.md) how the parts fit together.
-
-| Path | What it is |
-|:---|:---|
-| `cmd/wsl-shrinker` | the program; inside WSL, the launcher that draws the screen there or hands the command to `wsl-shrinker.exe` |
-| `internal/front` | the commands, the screen and setup, the words in English and Korean |
-| `internal/engine` | finding the disks, the estimate, what fills a distribution, a run's steps, the journal, the history |
-| `internal/machine` | `wsl.exe`, wsl-spawner, Windows' calls, the VHDX and ext4 readers |
-| `internal/app`, `settings`, `core` | the pieces put together, `config.toml`, sizes and the version |
-
-```sh
-git clone https://github.com/kanggu12/wsl-shrinker && cd wsl-shrinker
-make check          # gofmt, go vet, staticcheck, shellcheck, the unit tests
-make test-windows   # from WSL: every package again as a Windows program
-make demo           # the screen on a made-up PC, in a container
-```
-
-Report a disk it got wrong in [Issues](https://github.com/kanggu12/wsl-shrinker/issues/new/choose), with the output of
-`wsl-shrinker doctor` and `wsl-shrinker list --json`, and for a run `wsl-shrinker history --json`. See what changed in
-[CHANGELOG.md](CHANGELOG.md); report security problems as [SECURITY.md](.github/SECURITY.md) says.
 
 ## What it runs on
 

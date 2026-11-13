@@ -22,7 +22,8 @@
   <a href="#quick-start">Quick start</a> |
   <a href="#what-it-does">What it does</a> |
   <a href="#how-it-works">How it works</a> |
-  <a href="#documentation">Documentation</a>
+  <a href="#documentation">Documentation</a> |
+  <a href="#contributing">Contributing</a>
 </p>
 
 <picture>
@@ -119,6 +120,13 @@ It runs as you, only while you use it: no administrator rights, no service, no n
 | [Troubleshooting](docs/troubleshooting.md) | a disk that gives back less than expected, a step that fails, an install that stops |
 | [Questions](docs/questions.md) | your files, a closed window, WSL 1, what it touches, removing it |
 | [Internals](docs/internals.md) | the layers, what runs where, what it reads and changes, the decisions, the tests and CI |
+
+## Contributing
+
+[CONTRIBUTING.md](.github/CONTRIBUTING.md) has how the pieces fit, how to build and test, and what a change needs.
+Report a problem in [Issues](https://github.com/kanggu12/wsl-shrinker/issues/new/choose), which asks for the output that helps;
+see what changed in [CHANGELOG.md](CHANGELOG.md), and report security problems as [SECURITY.md](.github/SECURITY.md)
+says.
 
 ## License
 

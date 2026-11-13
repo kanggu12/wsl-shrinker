@@ -96,37 +96,17 @@ asking first, and `wsl-shrinker inside NAME` lists what can be removed in it. No
 Linux build of the same program, which draws the screen in your terminal and asks the `.exe` for every answer.
 [How it works](docs/how-it-works.md) has the estimate and every check of a shrink.
 
-## What it runs on
-
-| | Needs |
-|:---|:---|
-| **Windows** | Windows 10 version 2004 or later, Windows 11, or Windows Server 2022 or 2025, on x64 or ARM64 |
-| **WSL** | WSL 2 distributions; shrinking one needs WSL 3.0.1 or later, from `wsl --update` |
-| **Distributions** | `sh` and the core utilities, BusyBox's included |
-| **Screen** | a VT terminal of 40 by 12 cells: Windows Terminal, the Windows console, VS Code's, or a terminal inside WSL |
-| **Install script** | Windows PowerShell 5.1, which every Windows has, or PowerShell 7 |
-
-It runs as you, only while you use it: no administrator rights, no service, no network.
-[Setup](docs/setup.md#requirements) has what differs between versions.
-
 ## Documentation
 
-| Guide | What it covers |
-|:---|:---|
-| [Setup](docs/setup.md) | requirements, every way to install, checking a download, upgrading and removing, the sandbox |
-| [How it works](docs/how-it-works.md) | why, finding the disks, the estimate, each step of a shrink and its checks, how it compares |
-| [Commands](docs/commands.md) | the screen and setup, every command, flag, key and exit code |
-| [Settings](docs/settings.md) | `config.toml` with the mode, the pre-stop scripts, the files wsl-shrinker writes |
-| [Troubleshooting](docs/troubleshooting.md) | a disk that gives back less than expected, a step that fails, an install that stops |
-| [Questions](docs/questions.md) | your files, a closed window, WSL 1, what it touches, removing it |
-| [Internals](docs/internals.md) | the layers, what runs where, what it reads and changes, the decisions, the tests and CI |
+[Setup](docs/setup.md) · [How it works](docs/how-it-works.md) · [Commands](docs/commands.md) ·
+[Settings](docs/settings.md) · [Troubleshooting](docs/troubleshooting.md) · [Questions](docs/questions.md) ·
+[Internals](docs/internals.md). [The guides' index](docs/README.md) says what each covers.
 
 ## Contributing
 
 [CONTRIBUTING.md](.github/CONTRIBUTING.md) has how the pieces fit, how to build and test, and what a change needs.
-Report a problem in [Issues](https://github.com/kanggu12/wsl-shrinker/issues/new/choose), which asks for the output that helps;
-see what changed in [CHANGELOG.md](CHANGELOG.md), and report security problems as [SECURITY.md](.github/SECURITY.md)
-says.
+Problems go to [Issues](https://github.com/kanggu12/wsl-shrinker/issues/new/choose), security problems as
+[SECURITY.md](.github/SECURITY.md) says; [CHANGELOG.md](CHANGELOG.md) lists what changed.
 
 ## License
 

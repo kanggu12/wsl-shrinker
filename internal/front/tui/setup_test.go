@@ -17,6 +17,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/engine/estimate"
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/machine/winapi"
+	buildversion "github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // setupStart is the wizard on two disks, at the defaults, Work protected
@@ -496,5 +497,23 @@ func TestAPathBreaksOnlyAfterAFolder(t *testing.T) {
 	// A name wider than a line alone is broken where it must be.
 	if lines := pathLines(`C:\a-very-long-folder-name\x`, 10); strings.Join(lines, "") != `C:\a-very-long-folder-name\x` || ansi.StringWidth(lines[1]) > 10 {
 		t.Fatalf("%q", lines)
+	}
+}
+
+func TestTheWizardsHeaderNamesTheVersion(t *testing.T) {
+	// As the main screen: the name with this build's version beside it,
+	// then "setup", and how far along on the right.
+	v := buildversion.Short()
+	wide := strings.Split(frame(setupStart(false), 120, 30, "enter", "enter"), "\n")[0]
+	if !strings.Contains(wide, "wsl-shrinker "+v+"  ·  setup") || !strings.Contains(wide, "step 2 of 6") {
+		t.Errorf("120 columns: %q", wide)
+	}
+	// Short of room, the count goes first, then "setup"; the name and the
+	// version stay whole, nothing cut with an ellipsis.
+	for _, w := range []int{40, 46, 60} {
+		head := strings.Split(frame(setupStart(false), w, 20, "enter", "enter"), "\n")[0]
+		if !strings.Contains(head, "wsl-shrinker "+v) || strings.Contains(head, "…") {
+			t.Errorf("%d columns: %q", w, head)
+		}
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/i18n"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
+	buildversion "github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // SetupStart is what the setup wizard starts from: the settings now, the
@@ -299,12 +300,22 @@ func (m setupModel) render() string {
 	cardW := min(cardMax, w-2-railW)
 	frameW := railW + cardW
 	left := strings.Repeat(" ", (w-frameW)/2)
-	// The header: the name on the left, how far along on the right, both
-	// on the frame's edges.
-	title := t.Chip("wsl-shrinker") + "  " + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.title"))
+	// The header: the name with this build's version beside it, as the
+	// main screen has them, then "setup" on the left; how far along on the
+	// right, both on the frame's edges.
+	name := t.Chip("wsl-shrinker") + " " + ui.Fg(t.Ink).Render(buildversion.Short())
+	title := name + ui.Fg(t.Muted).Render("  ·  ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.title"))
 	count := ""
 	if m.step > stepWelcome {
 		count = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps)))
+	}
+	// Short of room, the count goes first, the progress bar under it says
+	// as much; then "setup". The name and its version always stay.
+	if lipgloss.Width(title)+1+lipgloss.Width(count) > frameW {
+		count = ""
+	}
+	if lipgloss.Width(title) > frameW {
+		title = name
 	}
 	header := left + title + strings.Repeat(" ", max(1, frameW-lipgloss.Width(title)-lipgloss.Width(count))) + count
 	lines := []string{header, left + m.progress(frameW)}

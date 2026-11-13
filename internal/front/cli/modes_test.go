@@ -22,6 +22,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
+	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // inTerminal makes the test's command line look started in a terminal, with
@@ -290,6 +291,22 @@ func TestTheOverviewOfTheMadeUpPC(t *testing.T) {
 		}
 	}
 	i18n.Set(i18n.English)
+}
+
+func TestTheOverviewNamesTheVersionBesideTheName(t *testing.T) {
+	// As the screen's header and setup's: the name, this build's version
+	// beside it, then whether WSL can compact; under it when narrow.
+	var o, e bytes.Buffer
+	for _, w := range []int{100, 40} {
+		o.Reset()
+		if code := run([]string{"--snapshot", fmt.Sprintf("%dx24", w), "--cli", "--lang", "en"}, &o, &e); code != exitOK {
+			t.Fatalf("exit %d: %s", code, e.String())
+		}
+		first := strings.SplitN(ansi.Strip(o.String()), "\n", 2)[0]
+		if !strings.HasPrefix(first, "wsl-shrinker "+version.Short()) {
+			t.Errorf("%d columns: %q", w, first)
+		}
+	}
 }
 
 func TestTheOverviewSaysWhatEachCommandDoesIn80Columns(t *testing.T) {

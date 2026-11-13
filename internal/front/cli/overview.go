@@ -24,6 +24,7 @@ import (
 	"github.com/kanggu12/wsl-shrinker/internal/front/tui"
 	"github.com/kanggu12/wsl-shrinker/internal/front/ui"
 	"github.com/kanggu12/wsl-shrinker/internal/settings/config"
+	"github.com/kanggu12/wsl-shrinker/internal/version"
 )
 
 // themes are the values --theme takes; "" is the settings' own.
@@ -75,16 +76,18 @@ func screen(ctx context.Context, a *app.App, theme string, opt tui.Options, reop
 // line wider than width is cut.
 func overview(ctx context.Context, b tui.Backend, w io.Writer, l look, width int) error {
 	info := b.Info(ctx)
-	// The headline, as the screen's: whether this WSL can compact at all,
-	// beside the name, or under it in a narrow terminal.
+	// The headline, as the screen's: the name with this build's version
+	// beside it, then whether this WSL can compact at all, or under it in a
+	// narrow terminal.
 	can := l.gain("✓") + " " + i18n.T("check.compact", info.Version)
 	if !info.CanCompact {
 		can = l.bad("✗") + " " + i18n.T("check.nocompact")
 	}
-	if head := l.bold("wsl-shrinker") + l.muted(" · ") + can; ansi.StringWidth(head) <= width-1 {
+	name := l.bold("wsl-shrinker") + " " + version.Short()
+	if head := name + l.muted(" · ") + can; ansi.StringWidth(head) <= width-1 {
 		fmt.Fprintln(w, head)
 	} else {
-		fmt.Fprintln(w, l.bold("wsl-shrinker"))
+		fmt.Fprintln(w, name)
 		fmt.Fprintln(w, can)
 	}
 	// A run that has not ended comes before everything: it says what to do.

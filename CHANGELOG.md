@@ -6,15 +6,24 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-13
+
+The version beside the name in setup and CLI mode, and documents that read as wsl-shrinker's own.
+
+### Fixed
+
+- Setup's header and CLI mode's first line named wsl-shrinker without its version, which the screen's header shows.
+  Both show it beside the name now; short of room, setup's header gives up the step count first, then "setup".
+
 ### Changed
 
+- The README leads with a quick start in three steps: install, see every disk without changing anything, open the
+  screen. Why wsl-shrinker exists and how it compares moved to [How it works](docs/how-it-works.md), the pictures of
+  the screen and CLI mode to [Commands](docs/commands.md), the sandbox to [Setup](docs/setup.md), and the questions to
+  a new [Questions](docs/questions.md) page.
 - The documentation's figures share one look, wsl-shrinker's own: glass panels, its block glyph on its own parts, each
   disk drawn as blocks as the screen draws it, and flows that turn at right angles. The figure of where to read in
   [Troubleshooting](docs/troubleshooting.md) quotes `doctor` as it speaks: "cannot compact", "the run of … was cut off".
-- The README is short: what wsl-shrinker does, how to install it, a shrink step by step and what runs where. Why it
-  exists and how it compares moved to [How it works](docs/how-it-works.md), the pictures of the screen, CLI mode and
-  setup to [Commands](docs/commands.md), the sandbox to [Setup](docs/setup.md), and the questions to a new
-  [Questions](docs/questions.md) page.
 
 ## [0.8.1] - 2026-11-13
 
@@ -336,7 +345,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.0
 [0.7.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.7.0

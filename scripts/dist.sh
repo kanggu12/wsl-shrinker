@@ -69,8 +69,10 @@ done
 (cd dist && sha256sum ./*.zip | sed 's# \./# #' >"$sums")
 # The install script of this release installs this release: its version is
 # set in it, where the repository's copy leaves it empty and finds the latest.
-sed "s/^\( *\)\$pinned = ''\$/\1\$pinned = 'v$version'/" scripts/install.ps1 >"dist/$base-install.ps1"
-grep -q "^ *\$pinned = 'v$version'\$" "dist/$base-install.ps1" || { echo "scripts/dist.sh: install.ps1 has no \$pinned line to set" >&2; exit 1; }
+# The script is checked out with Windows line ends (.gitattributes): the
+# line may end in a carriage return, which stays.
+sed "s/^\( *\)\$pinned = ''\(\r\{0,1\}\)\$/\1\$pinned = 'v$version'\2/" scripts/install.ps1 >"dist/$base-install.ps1"
+grep -q "^ *\$pinned = 'v$version'" "dist/$base-install.ps1" || { echo "scripts/dist.sh: install.ps1 has no \$pinned line to set" >&2; exit 1; }
 # The Scoop manifest, with this release's zips and their checksums. Its own
 # checkver and autoupdate let `scoop update` find later releases.
 zip_hash() { awk -v f="$base-windows-$1.zip" '$2 == f { print $1 }' "dist/$sums"; }

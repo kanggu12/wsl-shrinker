@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      # Build provenance: GitHub signs which workflow built the zips.
+      # Build provenance: GitHub signs which workflow built each file.
       id-token: write
       attestations: write
     steps:
@@ -68,11 +68,18 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y zip
       - name: the zips, checksums and Scoop manifest
         run: scripts/dist.sh "${GITHUB_REF_NAME#v}"
-      # Anyone can check a zip came from this workflow, on this tag:
-      # gh attestation verify <zip> -R kanggu12/wsl-shrinker
+      # Anyone can check that a file of the release came from this workflow,
+      # on this tag: gh attestation verify <file> -R kanggu12/wsl-shrinker.
+      # Every file is attested, as wsl-spawner's are: the installer is what
+      # `irm | iex` runs, the checksums and the Scoop manifest are what it
+      # and Scoop trust.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/*.zip
+          subject-path: |
+            dist/*.zip
+            dist/*-checksums.txt
+            dist/*-windows-installer.ps1
+            dist/wsl-shrinker.json
       - name: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

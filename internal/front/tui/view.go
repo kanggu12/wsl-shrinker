@@ -203,13 +203,16 @@ func (m model) header() string {
 			return line
 		}
 	}
-	// The total beside the name alone, on the main screen: closer when it
-	// must be, as two cells still part a name from a colored square, and
-	// on the narrowest in fewer words. WSL's version went before it, so it
-	// does not come back where the total has no room.
+	// The total beside the name alone, on the main screen: whole with the
+	// sides' gap, else in fewer words, which all the room left parts from
+	// the name, two cells at least on the narrowest. WSL's version went
+	// before it, so it does not come back where the total has no room.
 	if where == "" && len(right) > 0 {
-		for _, total := range []string{right[0], short} {
-			if line, ok := fit(chip+spin, []string{total}, 2); ok {
+		for _, try := range []struct {
+			total string
+			least int
+		}{{right[0], headerGap}, {short, 2}} {
+			if line, ok := fit(chip+spin, []string{try.total}, try.least); ok {
 				return line
 			}
 		}
@@ -1015,34 +1018,24 @@ func (m model) overlay(screen, box string) string {
 	if bh <= m.height-2 {
 		y = max(1, y)
 	}
-	// A cell of space around the box, so nothing behind it touches its
-	// border; where a few cells are all that is left beside it, those go
-	// too, rather than show pieces of words. The keys at the bottom stay.
-	cx, cw := max(0, x-1), bw+2
-	if x <= 6 {
-		cx, cw = 0, m.width
-	}
+	// A row of space above and below the box, so nothing behind it touches
+	// its border, and the rows it stands on cleared from edge to edge, as
+	// wsl-spawner's are, so no cut word of the screen is left beside it.
+	// The keys at the bottom stay.
+	cx, cw := 0, m.width
 	cy := max(0, y-1)
 	if y >= 1 {
 		cy = max(1, cy)
 	}
-	switch {
-	// The rule under the header, where the space above the box takes it,
-	// goes from edge to edge: a rule cut in two reads as broken.
-	case cy <= 1 && len(rows) > 1:
-		rows[1] = strings.Repeat(" ", m.width)
-	// Where the space takes the row under the rule, the rule's ┬ there
-	// joins nothing, and the rule runs on.
-	case cy == 2 && len(rows) > 1:
-		plain := []rune(ansi.Strip(rows[1]))
-		for i, c := range plain {
-			if c == '┬' && i >= cx && i < cx+cw {
-				plain[i] = '─'
-			}
-		}
-		rows[1] = ui.Fg(m.th.Rule).Render(string(plain))
+	// Where the space starts right under the header's rule, the rule's ┬
+	// joins nothing there, and the rule runs on; a rule the space takes
+	// goes whole, as the rows do.
+	if cy == 2 && len(rows) > 1 {
+		rows[1] = ui.Fg(m.th.Rule).Render(strings.ReplaceAll(ansi.Strip(rows[1]), "┬", "─"))
 	}
-	end := max(y+bh, min(y+bh+1, m.height-2))
+	// The row of space under the box reaches the status row when it must,
+	// as wsl-spawner's does, never the keys'.
+	end := max(y+bh, min(y+bh+1, m.height-1))
 	space := strings.TrimSuffix(strings.Repeat(strings.Repeat(" ", min(cw, m.width-cx))+"\n", end-cy), "\n")
 	out := lipgloss.NewCompositor(lipgloss.NewLayer(strings.Join(rows, "\n")),
 		lipgloss.NewLayer(space).X(cx).Y(cy).Z(1), lipgloss.NewLayer(box).X(x).Y(y).Z(2)).Render()

@@ -447,12 +447,12 @@ func TestTheQuestionStaysPutFromPageToPage(t *testing.T) {
 func TestTheRailShowsOnlyWhereThereIsRoom(t *testing.T) {
 	t.Cleanup(func() { i18n.Set(i18n.English) })
 	// 80 columns hold the rail beside the card; 60 do not, and the
-	// progress and the count say how far along.
+	// progress and the count say how far along, the welcome as step 1.
 	if f := frame(setupStart(true), 80, 24, enters(stepTheme)...); !strings.Contains(f, "Protected disks") {
 		t.Fatalf("\n%s", f)
 	}
 	f := frame(setupStart(true), 60, 16, enters(stepTheme)...)
-	if strings.Contains(f, "Protected disks") || !strings.Contains(f, "step 2 of 6") {
+	if strings.Contains(f, "Protected disks") || !strings.Contains(f, "step 3 of 7") {
 		t.Fatalf("\n%s", f)
 	}
 	// Smaller than the wizard draws in, it says so, in words not cut.
@@ -505,7 +505,7 @@ func TestTheWizardsHeaderNamesTheVersion(t *testing.T) {
 	// then "setup", and how far along on the right.
 	v := buildversion.Short()
 	wide := strings.Split(frame(setupStart(false), 120, 30, "enter", "enter"), "\n")[0]
-	if !strings.Contains(wide, "wsl-shrinker "+v+"  ·  setup") || !strings.Contains(wide, "step 2 of 6") {
+	if !strings.Contains(wide, "wsl-shrinker "+v+"  ·  setup") || !strings.Contains(wide, "step 3 of 7") {
 		t.Errorf("120 columns: %q", wide)
 	}
 	// Short of room, the count goes first, then "setup"; the name and the

@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -178,8 +180,15 @@ func TestTheHeaderKeepsItsTwoSidesApart(t *testing.T) {
 				i += n
 				left := strings.TrimRight(head[:i], " ")
 				gap := ansi.StringWidth(head[:i]) - ansi.StringWidth(left)
+				// Two cells only for the total in fewer words beside the bare
+				// name, on the narrowest; the whole total keeps the gap.
 				least := 2
-				if strings.Contains(left, "·") || strings.Contains(head[i:], "·") {
+				if strings.Contains(left, "·") || strings.Contains(head[i:], "·") || strings.Contains(head[i:], "can be given back now") || strings.Contains(head[i:], "돌려받을 수 있음") {
+					least = 6
+				}
+				// Where the total fits in fewer words with the sides' gap, it
+				// takes that before standing closer.
+				if keys == nil && w >= 1+ansi.StringWidth("▪▪▪ wsl-shrinker "+buildversion.Short())+headerGap+ansi.StringWidth(short)+1 {
 					least = 6
 				}
 				if gap < least {
@@ -201,11 +210,15 @@ func TestTheTotalOutlastsWSLsVersionInEnglishToo(t *testing.T) {
 }
 
 // TestTheSetupHeaderNamesTheStep: the setup's header says the step's number
-// and its name, as the rail has it and wsl-spawner's header does, and the
-// bar of the steps is right under it.
+// and its name, as the rail has it and wsl-spawner's header does, the
+// welcome as step 1, and the bar of the steps is right under it.
 func TestTheSetupHeaderNamesTheStep(t *testing.T) {
-	r := strings.Split(frame(setupStart(true), 100, 21, enters(3)...), "\n")
-	if !strings.Contains(r[0], "step 3 of 6 · Mode") {
+	r := strings.Split(frame(setupStart(true), 100, 21), "\n")
+	if !strings.Contains(r[0], "step 1 of 7 · Welcome") || !strings.Contains(r[1], "▪") {
+		t.Errorf("the welcome is not the setup's step 1: %q / %q", r[0], r[1])
+	}
+	r = strings.Split(frame(setupStart(true), 100, 21, enters(3)...), "\n")
+	if !strings.Contains(r[0], "step 4 of 7 · Mode") {
 		t.Errorf("the setup's header does not name the step: %q", r[0])
 	}
 	if strings.TrimSpace(r[1]) == "" {
@@ -214,7 +227,7 @@ func TestTheSetupHeaderNamesTheStep(t *testing.T) {
 	// Short of room the name goes first, then the number; "setup" stays.
 	longVersion(t)
 	r = strings.Split(frame(setupStart(true), 56, 21, enters(3)...), "\n")
-	if !strings.Contains(r[0], "step 3 of 6") || strings.Contains(r[0], "Mode") {
+	if !strings.Contains(r[0], "step 4 of 7") || strings.Contains(r[0], "Mode") {
 		t.Errorf("56 columns: the setup's header does not keep the number alone: %q", r[0])
 	}
 	r = strings.Split(frame(setupStart(true), 44, 21, enters(3)...), "\n")
@@ -232,4 +245,237 @@ func TestTheRuleIsASCIIWhereTheMarksAre(t *testing.T) {
 	if strings.Trim(r[1], " -+") != "" || !strings.Contains(r[1], "+") || len(r[1]) != 132 {
 		t.Errorf("the ASCII rule is not dashes and a plus: %q", r[1])
 	}
+}
+
+// TestAQuestionsBoxStandsOnRowsOfItsOwn: the rows a question's box stands on,
+// and the row of space above and under it, hold nothing of the screen
+// behind it, from edge to edge, as wsl-spawner's box does: no word is left
+// cut beside the box.
+func TestAQuestionsBoxStandsOnRowsOfItsOwn(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.English, i18n.Korean} {
+		i18n.Set(lang)
+		for _, keys := range [][]string{keySets["confirm"], keySets["marked"]} {
+			for _, s := range [][2]int{{200, 40}, {132, 30}, {100, 24}, {100, 16}, {94, 14}, {60, 20}} {
+				r := screen(demo(), s[0], s[1], keys...)
+				top, bottom := -1, -1
+				for i, l := range r {
+					if strings.Contains(l, "╭") && top < 0 {
+						top = i
+					}
+					if strings.Contains(l, "╰") {
+						bottom = i
+					}
+				}
+				if top < 0 || bottom < 0 {
+					t.Errorf("%s %q %dx%d: no box", lang, keys, s[0], s[1])
+					continue
+				}
+				// The row of space above and under the box, where there is one
+				// between the header and the keys, holds nothing either.
+				if top-1 >= 1 && strings.TrimSpace(r[top-1]) != "" {
+					t.Errorf("%s %q %dx%d: the row above the box holds %q", lang, keys, s[0], s[1], r[top-1])
+				}
+				if bottom+1 <= s[1]-2 && strings.TrimSpace(r[bottom+1]) != "" {
+					t.Errorf("%s %q %dx%d: the row under the box holds %q", lang, keys, s[0], s[1], r[bottom+1])
+				}
+				for i := top; i <= bottom; i++ {
+					c := cells(r[i])
+					left, right := -1, -1
+					for j, x := range c {
+						if x == "╭" || x == "│" || x == "╰" {
+							if left < 0 {
+								left = j
+							}
+						}
+						if x == "╮" || x == "│" || x == "╯" {
+							right = j
+						}
+					}
+					outside := strings.Join(c[:max(0, left)], "") + strings.Join(c[min(len(c), right+1):], "")
+					if strings.TrimSpace(outside) != "" {
+						t.Errorf("%s %q %dx%d: row %d holds the screen beside the box: %q", lang, keys, s[0], s[1], i, r[i])
+					}
+				}
+			}
+		}
+	}
+	i18n.Set(i18n.English)
+}
+
+// TestTheDotBetweenWordsIsABarInASCII: where the marks are ASCII the dot
+// between words becomes a bar, as in wsl-spawner, not a full stop that
+// reads as a sentence's end; a step not reached yet stays a dot.
+func TestTheDotBetweenWordsIsABarInASCII(t *testing.T) {
+	ui.SetMarks(ui.MarksASCII)
+	defer ui.SetMarks(ui.MarksUnicode)
+	head := screen(demo(), 132, 30)[0]
+	if !strings.Contains(head, "  |  WSL") || strings.Contains(head, "  .  ") {
+		t.Errorf("the header's separator is not a bar: %q", head)
+	}
+	if ui.Waiting() != "." {
+		t.Errorf("a step waiting is %q in ASCII, not a dot", ui.Waiting())
+	}
+}
+
+// bgCells is a row of a frame as whether each cell stands on a background
+// color, a wide character's two cells alike.
+func bgCells(row string) []bool {
+	var out []bool
+	on := false
+	for i := 0; i < len(row); {
+		if row[i] == 0x1b && i+1 < len(row) && row[i+1] == '[' {
+			j := i + 2
+			for j < len(row) && row[j] != 'm' {
+				j++
+			}
+			parts := strings.Split(row[i+2:j], ";")
+			if row[i+2:j] == "" {
+				on = false
+			}
+			for k := 0; k < len(parts); k++ {
+				switch parts[k] {
+				case "0":
+					on = false
+				case "49":
+					on = false
+				case "48", "38":
+					// A color's own numbers follow: 2;r;g;b or 5;n.
+					if parts[k] == "48" {
+						on = true
+					}
+					if k+1 < len(parts) && parts[k+1] == "2" {
+						k += 4
+					} else if k+1 < len(parts) && parts[k+1] == "5" {
+						k += 2
+					}
+				}
+			}
+			i = j + 1
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(row[i:])
+		for range max(1, ansi.StringWidth(string(r))) {
+			out = append(out, on)
+		}
+		i += size
+	}
+	return out
+}
+
+// cellOf is the cell a word starts in, in a row as cells, or -1.
+func cellOf(row []string, word string) int {
+	w := cells(word)
+	for i := 0; i+len(w) <= len(row); i++ {
+		if strings.Join(row[i:i+len(w)], "") == word {
+			return i
+		}
+	}
+	return -1
+}
+
+// segmentCodes are the colors of the bar's segments under the header, in
+// order: each run of blocks with the escape that colors it.
+func segmentCodes(row string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile("\x1b\\[([0-9;]*)m(▪+)").FindAllStringSubmatch(row, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// TestTheSetupsBarLightsTheStepNow: the bar under the setup's header lights
+// the step now in a color of its own, the steps done in another, those to
+// come on the track: the welcome lit from the first page.
+func TestTheSetupsBarLightsTheStepNow(t *testing.T) {
+	for n, now := range map[int]int{0: 0, 3: 3} {
+		codes := segmentCodes(strings.Split(SetupSnapshot(setupStart(true), 100, 21, true, enters(n)), "\n")[1])
+		if len(codes) != 7 {
+			t.Fatalf("step %d: %d segments, not 7: %q", now, len(codes), codes)
+		}
+		for i, c := range codes {
+			switch {
+			case i < now && c != codes[0]:
+				t.Errorf("step %d: segment %d, done, is not as the others done", now, i)
+			case i == now && (c == codes[6] || now > 0 && c == codes[0]):
+				t.Errorf("step %d: segment %d, the step now, is not lit apart: %q", now, i, codes)
+			case i > now && c != codes[6]:
+				t.Errorf("step %d: segment %d, to come, is not on the track", now, i)
+			}
+		}
+	}
+}
+
+// TestTheRailMarksTheStepsDoneAndTheOneNow: on the Mode page the welcome,
+// the language and the colors are done, Mode is the step now, the rest to
+// come; and the step now, the welcome on the first page, is a tab of the
+// card, its row raised from the rail's to the card.
+func TestTheRailMarksTheStepsDoneAndTheOneNow(t *testing.T) {
+	f := strings.Split(frame(setupStart(true), 100, 21, enters(stepMode)...), "\n")
+	for label, done := range map[string]bool{"Welcome": true, "Language": true, "Colors": true, "Mode": false, "Worth shrinking": false} {
+		// The rail's rows: the header names the step too.
+		for _, l := range f[2:] {
+			if strings.Contains(l, " "+label+" ") || strings.HasSuffix(strings.TrimRight(l, " "), " "+label) {
+				if strings.Contains(l[:strings.Index(l, label)], "✓") != done {
+					t.Errorf("%s: done %v on the rail: %q", label, !done, l)
+				}
+			}
+		}
+	}
+	raw := strings.Split(SetupSnapshot(setupStart(true), 100, 21, true, nil), "\n")
+	plain := strings.Split(ansi.Strip(strings.Join(raw, "\n")), "\n")
+	wi, li := -1, -1
+	for i, l := range plain {
+		// The rail's rows: the header names the welcome too.
+		if i < 2 {
+			continue
+		}
+		if wi < 0 && strings.Contains(l, "Welcome") {
+			wi = i
+		}
+		if li < 0 && strings.Contains(l, "Language") {
+			li = i
+		}
+	}
+	if wi < 0 || li < 0 {
+		t.Fatalf("no rail on the welcome page:\n%s", strings.Join(plain, "\n"))
+	}
+	from := cellOf(cells(plain[li]), "Language")
+	under := bgCells(raw[li])
+	card := -1
+	for i := from + len("Language"); i < len(under); i++ {
+		if under[i] {
+			card = i
+			break
+		}
+	}
+	tab := bgCells(raw[wi])
+	for i := cellOf(cells(plain[wi]), "Welcome"); i < card; i++ {
+		if !tab[i] {
+			t.Errorf("the welcome's row is not raised to the card at column %d: %q", i, plain[wi])
+			break
+		}
+	}
+	for i := from; i < card; i++ {
+		if under[i] {
+			t.Errorf("a step to come is raised at column %d: %q", i, plain[li])
+			break
+		}
+	}
+}
+
+// TestAStepNotReachedIsADotInASCII: on the run screen in ASCII marks, a step
+// not reached yet is a dot, apart from the bars between words.
+func TestAStepNotReachedIsADotInASCII(t *testing.T) {
+	ui.SetMarks(ui.MarksASCII)
+	defer ui.SetMarks(ui.MarksUnicode)
+	keys := []string{"c", "space", "down", "space", "enter", "enter"}
+	for _, l := range strings.Split(ansi.Strip(Snapshot(demo(), 120, 30, true, keys, "compact")), "\n") {
+		if strings.Contains(l, "Verify") {
+			if !strings.HasPrefix(strings.TrimSpace(l), ".") {
+				t.Errorf("a step not reached is not a dot: %q", l)
+			}
+			return
+		}
+	}
+	t.Error("no Verify step on the run screen")
 }

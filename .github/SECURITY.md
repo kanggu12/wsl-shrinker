@@ -27,7 +27,9 @@ It makes no network connection and needs no administrator rights.
 
 ## Checking a download
 
-`wsl-shrinker-0.8.6-checksums.txt` lists the SHA-256 of each release zip, and `wsl-shrinker-0.8.6-windows-installer.ps1`
+`wsl-shrinker-0.8.7-checksums.txt` lists the SHA-256 of each release zip, and `wsl-shrinker-0.8.7-windows-installer.ps1`
 checks it before installing. Each file is named with its release's version from 0.8.3 on, the installer `-install.ps1`
-until 0.8.5 (`checksums.txt` and `install.ps1` before 0.8.3). GitHub signs the zips' build provenance: `gh attestation
-verify <zip> -R kanggu12/wsl-shrinker` shows this repository's release workflow built them from the tagged commit.
+until 0.8.5 (`checksums.txt` and `install.ps1` before 0.8.3). GitHub signs the build provenance of every file of a
+release (the zips, the checksums, the installer and the Scoop manifest, from 0.8.7 on; the zips alone before):
+`gh attestation verify <file> -R kanggu12/wsl-shrinker` shows this repository's release workflow built it from the
+tagged commit.

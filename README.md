@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.8.6" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.8.7" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <a href="https://github.com/kanggu12/wsl-shrinker/pkgs/container/wsl-shrinker-demo"><img alt="Demo image" src="docs/assets/badges/demo.svg"></a>
   <img alt="Runs on Windows 10 and 11, x64 and ARM64, with WSL 2" src="docs/assets/badges/runs-on.svg">
@@ -41,7 +41,7 @@ Windows 10 or 11 with WSL 2 ([requirements](docs/setup.md#requirements)), in Pow
 
 ```powershell
 # 1. Install for this user. It opens setup to choose how it works.
-irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.6/wsl-shrinker-0.8.6-windows-installer.ps1 | iex
+irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.7/wsl-shrinker-0.8.7-windows-installer.ps1 | iex
 
 # 2. In a new terminal, see every WSL disk and what a shrink would give back. It changes nothing.
 wsl-shrinker list
@@ -57,7 +57,7 @@ Setup is five quick choices, and your disks stay as they are:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/setup-dark.png">
-  <img alt="The setup wizard at step 3 of 6. A rail lists the steps: Language and Colors done, Mode the one now. The page asks what wsl-shrinker should open, TUI or CLI, with a preview of the screen TUI opens: two disks and what each gives back. The keys: esc quits, left goes back, up and down choose, enter goes on." src="docs/assets/setup-light.png">
+  <img alt="The setup wizard at step 4 of 7. A rail lists the steps: Welcome, Language and Colors done, Mode the one now. The page asks what wsl-shrinker should open, TUI or CLI, with a preview of the screen TUI opens: two disks and what each gives back. The keys: esc quits, left goes back, up and down choose, enter goes on." src="docs/assets/setup-light.png">
 </picture>
 
 `wsl-shrinker setup` opens it again. From any terminal, `wsl-shrinker shrink NAME` shrinks a disk step by step after

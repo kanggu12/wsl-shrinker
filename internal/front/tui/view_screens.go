@@ -74,7 +74,7 @@ func (m model) runView() string {
 	// One row per step: its mark, its name, what it found or did.
 	for _, s := range shrink.Steps {
 		e, seen := r.steps[s]
-		mark, color := "·", t.Muted
+		mark, color := ui.Waiting(), t.Muted
 		detail := ""
 		switch {
 		case !seen:

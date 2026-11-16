@@ -32,6 +32,15 @@ func SetMarks(m MarkSet) { set = m }
 // Plain reports whether marks are swapped at all.
 func Plain() bool { return set != MarksUnicode }
 
+// Waiting is the mark of a step not reached yet: a dot, or a full stop where
+// the marks are ASCII, as every other dot there is a bar between words.
+func Waiting() string {
+	if set == MarksASCII {
+		return "."
+	}
+	return "·"
+}
+
 // Each stand-in is ASCII, which every font has, one cell wide like the mark
 // it replaces, so a screen measured with the marks still fits it. ⏎ alone
 // becomes a word, put in before anything is measured (Words); in a screen
@@ -42,9 +51,11 @@ var (
 	lacking = []string{"✓", "+", "✗", "x", "↻", "~",
 		"⠋", "|", "⠙", "/", "⠹", "-", "⠸", "\\", "⠼", "|", "⠴", "/", "⠦", "-", "⠧", "\\", "⠇", "|", "⠏", "/"}
 	// wide are the characters an East Asian console draws two cells wide:
-	// marks, arrows and the lines of a box, whose corners become +. A step
-	// waiting is ., apart from - for one skipped.
-	wide = []string{"▪", "#", "█", "#", "·", ".", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
+	// marks, arrows and the lines of a box, whose corners become +. The dot
+	// between words becomes a bar, as wsl-spawner's does, since a full stop
+	// there would read as the end of a sentence; a step waiting is drawn as
+	// . already (Waiting).
+	wide = []string{"▪", "#", "█", "#", "·", "|", "…", "~", "→", ">", "←", "<", "↑", "^", "↓", "v", "–", "-", "—", "-",
 		"│", "|", "─", "-", "╭", "+", "╮", "+", "╰", "+", "╯", "+", "┌", "+", "┐", "+", "└", "+", "┘", "+",
 		"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+", "═", "=", "║", "|", "●", "*", "•", "*", "›", ">"}
 	// arrows are the arrows in words not measured yet, two cells each, so

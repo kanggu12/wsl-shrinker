@@ -36,12 +36,12 @@ The screen on a made-up PC with five disks, in any terminal with Docker; nothing
 ### PowerShell, one line
 
 ```powershell
-irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.6/wsl-shrinker-0.8.6-windows-installer.ps1 | iex
+irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.7/wsl-shrinker-0.8.7-windows-installer.ps1 | iex
 ```
 
 Each release has its own install script, named with its version, which installs that release; the README always has
 the newest one's. The script picks the zip for the machine's processor, checks it against the release's
-`wsl-shrinker-0.8.6-checksums.txt`, and puts
+`wsl-shrinker-0.8.7-checksums.txt`, and puts
 `wsl-shrinker.exe` and the launcher in `%LOCALAPPDATA%\Programs\wsl-shrinker`. It adds that folder to your user PATH
 once, so new terminals find `wsl-shrinker`, in Windows and inside WSL. A first install opens setup in the console. A
 running wsl-shrinker stops the install before anything is replaced.
@@ -68,7 +68,7 @@ folder goes on your PATH, not a shim: inside WSL, `wsl-shrinker` is a Linux prog
 
 ### By hand
 
-Download `wsl-shrinker-0.8.6-windows-x64.zip`, or `wsl-shrinker-0.8.6-windows-arm64.zip` for an ARM64 PC, from the
+Download `wsl-shrinker-0.8.7-windows-x64.zip`, or `wsl-shrinker-0.8.7-windows-arm64.zip` for an ARM64 PC, from the
 [releases](https://github.com/kanggu12/wsl-shrinker/releases), [check it](#check-a-download), and unpack both programs
 into one folder on your PATH. A zip from a browser carries Windows' mark of a download, and SmartScreen asks before the
 first run: once the zip checks out, clear the mark with `Unblock-File` before unpacking.
@@ -86,28 +86,29 @@ Put both files from `dist/` in one folder on your PATH. A build from a commit sa
 
 ## Check a download
 
-The release's `wsl-shrinker-0.8.6-checksums.txt` lists every zip's SHA-256:
+The release's `wsl-shrinker-0.8.7-checksums.txt` lists every zip's SHA-256:
 
 ```powershell
-(Get-FileHash .\wsl-shrinker-0.8.6-windows-x64.zip -Algorithm SHA256).Hash
+(Get-FileHash .\wsl-shrinker-0.8.7-windows-x64.zip -Algorithm SHA256).Hash
 ```
 
-GitHub signs the zips' build provenance. With the [GitHub CLI](https://cli.github.com),
+GitHub signs the build provenance of every file of a release: the zips, the checksums, the installer and the Scoop
+manifest. With the [GitHub CLI](https://cli.github.com),
 
 ```sh
-gh attestation verify wsl-shrinker-0.8.6-windows-x64.zip -R kanggu12/wsl-shrinker
+gh attestation verify wsl-shrinker-0.8.7-windows-x64.zip -R kanggu12/wsl-shrinker
 ```
 
 shows that this repository's release workflow built the zip from the tagged commit.
 
 ## Without internet access
 
-On a machine with access, download the zip for the PC's processor and `wsl-shrinker-0.8.6-checksums.txt`. Carry them
-over with `wsl-shrinker-0.8.6-windows-installer.ps1`, check the zip, then install from it:
+On a machine with access, download the zip for the PC's processor and `wsl-shrinker-0.8.7-checksums.txt`. Carry them
+over with `wsl-shrinker-0.8.7-windows-installer.ps1`, check the zip, then install from it:
 
 ```powershell
-$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker-0.8.6-windows-x64.zip'
-& ([scriptblock]::Create((Get-Content D:\wsl-shrinker-0.8.6-windows-installer.ps1 -Raw)))
+$env:WSL_SHRINKER_ZIP = 'D:\wsl-shrinker-0.8.7-windows-x64.zip'
+& ([scriptblock]::Create((Get-Content D:\wsl-shrinker-0.8.7-windows-installer.ps1 -Raw)))
 Remove-Item Env:WSL_SHRINKER_ZIP
 ```
 
@@ -134,7 +135,7 @@ Installed with Scoop, `wsl-shrinker uninstall --purge` removes the settings and 
 The install script can also remove it without running it, for an install that no longer starts:
 
 ```powershell
-$env:WSL_SHRINKER_UNINSTALL = '1'; irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.6/wsl-shrinker-0.8.6-windows-installer.ps1 | iex
+$env:WSL_SHRINKER_UNINSTALL = '1'; irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.7/wsl-shrinker-0.8.7-windows-installer.ps1 | iex
 ```
 
 It removes the two programs, and their folder and PATH entry if nothing else is in it. A folder with other files, such
@@ -188,8 +189,8 @@ Docker Desktop's disk and the files from the settings are compacted with Windows
 The one-line install runs the same in Windows PowerShell 5.1 and PowerShell 7; CI runs it in both on every change.
 
 - **Execution policy** does not apply to `irm ... | iex`, which runs no script file. Where scripts are restricted, a
-  saved `wsl-shrinker-0.8.6-windows-installer.ps1` run as a file needs `powershell -ExecutionPolicy Bypass -File
-  wsl-shrinker-0.8.6-windows-installer.ps1`.
+  saved `wsl-shrinker-0.8.7-windows-installer.ps1` run as a file needs `powershell -ExecutionPolicy Bypass -File
+  wsl-shrinker-0.8.7-windows-installer.ps1`.
 - **ConstrainedLanguage mode**, which AppLocker and Windows Defender Application Control turn on, refuses the script's
   .NET calls from its first line: install [by hand](#by-hand) there.
 - **A 32-bit or emulated PowerShell** still installs the build for the machine's processor: the script reads it from the

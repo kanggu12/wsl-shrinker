@@ -58,9 +58,14 @@ var (
 	setupGains     = []float64{1, 2, 5, 10, 20, 50}
 )
 
-// setupSteps are the wizard's steps after its welcome, as the rail lists and
-// counts them.
+// setupSteps are the wizard's steps after its welcome: the choices it asks
+// for and the page that saves them.
 var setupSteps = []string{"language", "theme", "mode", "gain", "protect", "ready"}
+
+// railSteps are the steps as the rail lists them and the header counts
+// them: the welcome first, so "step 1 of 7" from the first page on, as in
+// wsl-spawner's setup. A step's number is its index here.
+var railSteps = append([]string{"welcome"}, setupSteps...)
 
 // The steps by number: 0 is the welcome, then setupSteps in order.
 const (
@@ -306,12 +311,10 @@ func (m setupModel) render() string {
 	name := t.Chip("wsl-shrinker") + " " + ui.Fg(t.Ink).Render(buildversion.Short())
 	title := name + ui.Fg(t.Faint).Render("  ·  ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.title"))
 	// How far along: the step's number and, in bold, its name, as the rail
-	// has it, so the header says the page as wsl-spawner's does.
-	count, short := "", ""
-	if m.step > stepWelcome {
-		short = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps)))
-		count = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps))+" · ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.row."+setupSteps[m.step-1]))
-	}
+	// has it, so the header says the page as wsl-spawner's does, the
+	// welcome as its first step.
+	short := ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step+1, len(railSteps)))
+	count := ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step+1, len(railSteps))+" · ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.row."+railSteps[m.step]))
 	// Short of room, the step's name goes first, then its number, the
 	// progress bar under them says as much; then "setup". The name and its
 	// version always stay.
@@ -351,7 +354,7 @@ func (m setupModel) render() string {
 			if i < len(rail) {
 				r = rail[i]
 			}
-			if i == m.step && m.step > stepWelcome && i < len(card) {
+			if i == m.step && i < len(card) {
 				gap = ui.Highlight("", m.panel(), railGap)
 			}
 			row = r + gap
@@ -375,12 +378,12 @@ func (m setupModel) render() string {
 // the bar ends on the frame's edge.
 func (m setupModel) progress(w int) string {
 	t := m.th
-	n := len(setupSteps)
+	n := len(railSteps)
 	per, extra := max(1, (w-(n-1))/n), max(0, (w-(n-1))%n)
 	parts := make([]string, n)
-	for i := range setupSteps {
+	for i := range railSteps {
 		c := t.Track
-		switch step := i + 1; {
+		switch step := i; {
 		case step < m.step:
 			c = t.Mark
 		case step == m.step:
@@ -395,20 +398,20 @@ func (m setupModel) progress(w int) string {
 	return strings.Join(parts, " ")
 }
 
-// rail lists the steps, a line each under a blank one, so a step sits
-// level with the card's question: those done with a check, the one now
-// raised like the card and marked, the rest waiting. Every line is as wide
-// as the longest.
+// rail lists the steps, a line each from the card's top, the welcome first,
+// so the step now sits on the row its number says: those done with a
+// check, the one now raised like the card and marked, the rest waiting.
+// Every line is as wide as the longest.
 func (m setupModel) rail() []string {
 	t := m.th
 	wide := 0
-	for _, s := range setupSteps {
+	for _, s := range railSteps {
 		wide = max(wide, lipgloss.Width(i18n.T("setup.row."+s)))
 	}
-	out := []string{strings.Repeat(" ", wide+4)}
-	for i, s := range setupSteps {
+	var out []string
+	for i, s := range railSteps {
 		label := ui.Fit(i18n.T("setup.row."+s), wide)
-		switch step := i + 1; {
+		switch step := i; {
 		case step < m.step:
 			out = append(out, " "+ui.Fg(t.Mark).Render("✓")+" "+ui.Fg(t.Muted).Render(label)+" ")
 		case step == m.step:

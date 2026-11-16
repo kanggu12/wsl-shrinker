@@ -6,6 +6,24 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-17
+
+The setup counts its welcome, and a question's box stands on rows of its own.
+
+### Changed
+
+- The setup counts its welcome as the first step, as wsl-spawner's does: "step 1 of 7 · Welcome", first on the rail
+  and in the bar, where the welcome page showed no step and an empty bar.
+- A question's box clears the rows it stands on from edge to edge, as wsl-spawner's does: no word of the screen behind
+  it is left cut beside it. The row of space under it reaches the status row where the box comes that far down, so the
+  status no longer touches its border.
+- Where the console's marks are ASCII, the dot between words is a bar, as in wsl-spawner, where it was a full stop
+  that read as the end of a sentence; a step not reached yet stays a dot.
+- On a narrow main screen what can come back stands beside the name in fewer words, "87.0 GB now", before it would
+  come closer to it than the header's two sides stand; two cells apart only on the narrowest.
+- Every file of a release has its build provenance signed, the installer, the checksums and the Scoop manifest too,
+  as wsl-spawner's have: `gh attestation verify <file> -R kanggu12/wsl-shrinker`.
+
 ## [0.8.6] - 2026-11-17
 
 Release files that say what they are.
@@ -419,7 +437,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.7
 [0.8.6]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.6
 [0.8.5]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.5
 [0.8.4]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.4

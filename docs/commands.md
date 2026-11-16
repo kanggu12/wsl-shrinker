@@ -80,7 +80,7 @@ Without flags it opens a wizard: a page per choice, then one to check them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/setup-dark.png">
-  <img alt="The setup wizard at step 3 of 6. A rail lists the steps: Language and Colors done, Mode the one now. The page asks what wsl-shrinker should open, TUI or CLI, with a preview of the screen TUI opens: two disks and what each gives back. The keys: esc quits, left goes back, up and down choose, enter goes on." src="assets/setup-light.png">
+  <img alt="The setup wizard at step 4 of 7. A rail lists the steps: Welcome, Language and Colors done, Mode the one now. The page asks what wsl-shrinker should open, TUI or CLI, with a preview of the screen TUI opens: two disks and what each gives back. The keys: esc quits, left goes back, up and down choose, enter goes on." src="assets/setup-light.png">
 </picture>
 
 `↑` `↓` choose, and the page shows the result at once, the language and colors on the wizard itself. `⏎` or `→` goes

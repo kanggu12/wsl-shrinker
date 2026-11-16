@@ -6,6 +6,35 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-17
+
+A header that stands apart from the screen and says where one is.
+
+### Changed
+
+- The header stands on a quiet rule from margin to margin, which meets the rule between the main screen's panes, so
+  they hang from it.
+- A screen opened from the main one names itself in the header after the version, in the words of the key that opens
+  it: history, help, clean inside or shrink. The main screen shows WSL's version there, as before.
+- The header's two sides stay at least six cells apart, more than the room between two of its pieces, so they read as
+  two: at 120 columns the drive's free space goes where the sides nearly met. The dot between pieces has the same room
+  on both sides. On a narrow main screen what can come back stays beside the name, as "87.0 GB now" on the narrowest,
+  and WSL's version, gone before it, does not come back in its place.
+- The setup's header names the step in bold after its number, "step 3 of 6 · Mode"; short of room the name goes first,
+  then the number.
+
+### Fixed
+
+- A question's box fits between the header and the keys, its least needed lines going first, as wsl-spawner's boxes
+  do: on a short terminal it covered the header, the name and its version with it. Where the row of space above the
+  box takes the header's rule, the rule goes from edge to edge rather than show cut in two.
+
+### Added
+
+- [Troubleshooting](docs/troubleshooting.md#the-install-stops): Microsoft Defender may stop the one-line install as
+  Trojan:Win32/Commando.B!ml when another program hands it to PowerShell on the command line, as
+  `powershell.exe -Command "irm ... | iex"` from cmd or a WSL shell; pasted into a PowerShell window it runs.
+
 ## [0.8.4] - 2026-11-17
 
 The one-line install works in Windows PowerShell that inherited PowerShell 7's module path.
@@ -373,7 +402,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.5
 [0.8.4]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.4
 [0.8.3]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.2

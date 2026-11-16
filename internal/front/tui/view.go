@@ -67,10 +67,15 @@ func (m model) frame(lines []string) string {
 	return strings.Join(out, "\n")
 }
 
-// page lays out a screen: the header, a blank row, the body, then the
-// status line and the keys at the bottom.
+// page lays out a screen: the header and the rule under it, the body, then
+// the status line and the keys at the bottom.
 func (m model) page(body []string, status, keys string) string {
-	lines := append([]string{m.header(), ""}, body...)
+	// The body's first row tells the rule where a pane rule meets it.
+	first := ""
+	if len(body) > 0 {
+		first = body[0]
+	}
+	lines := append([]string{m.header(), m.headerRule(first)}, body...)
 	for len(lines) < m.height-2 {
 		lines = append(lines, "")
 	}
@@ -81,19 +86,77 @@ func (m model) page(body []string, status, keys string) string {
 // bodyHeight is the rows between the header and the status line.
 func (m model) bodyHeight() int { return m.height - 4 }
 
-// header is the top bar: the name and WSL's version on the left, what all
-// disks could give back on the right.
+// paneRule is the rule between two panes, quieter than any text. Every pane
+// draws it from here, so the header's rule finds it as it is drawn.
+func (m model) paneRule() string { return ui.Fg(m.th.Rule).Render("│") }
+
+// headerRule is the row under the header: a rule from margin to margin, as
+// quiet as the rule between two panes, that sets the header apart from the
+// screen under it. Where a pane rule starts in the row under it, first, the
+// two meet in a ┬, so the panes hang from the header.
+func (m model) headerRule(first string) string {
+	// The rule spans the screen but for the page's margin on each side.
+	w := m.width - 2
+	if w < 1 {
+		return ""
+	}
+	cells := []rune(strings.Repeat("─", w))
+	// The pane rule's column, counted from the rule's own first cell, which
+	// is the screen's second.
+	if i := strings.Index(first, m.paneRule()); i >= 0 {
+		if col := lipgloss.Width(first[:i]) - 1; col >= 0 && col < w {
+			cells[col] = '┬'
+		}
+	}
+	return " " + ui.Fg(m.th.Rule).Render(string(cells))
+}
+
+// headerGap is the least room between the header's two sides: more than the
+// five cells between two of its pieces, so the sides read as two.
+const headerGap = 6
+
+// where names the open screen in the header, in the words of the key that
+// opens it, as the setup names itself there: the main screen, and the
+// questions over it, are the tool's own and name nothing.
+func (m model) where() string {
+	switch m.mode {
+	case modeHistory:
+		return i18n.T("key.history")
+	case modeHelp:
+		return i18n.T("key.help")
+	case modeClean:
+		return i18n.T("key.clean")
+	case modeRun:
+		return i18n.T("key.shrink")
+	}
+	return ""
+}
+
+// header is the top bar: on the left the chip, the name and this build's
+// version, then the open screen's name, or WSL's version on the main
+// screen; on the right what all disks could give back.
 func (m model) header() string {
 	t := m.th
-	// The name with this build's version beside it, then WSL's, apart.
-	chip, version, spin := t.Chip("wsl-shrinker")+" "+ui.Fg(t.Ink).Render(buildversion.Short()), "", ""
-	if m.info.Version != "" {
-		version = ui.Fg(t.Muted).Render("  ·  WSL " + m.info.Version)
+	// The dot between pieces is quieter than the words it separates.
+	sep := ui.Fg(t.Faint).Render("  ·  ")
+	// The name with this build's version beside it.
+	chip, spin := t.Chip("wsl-shrinker")+" "+ui.Fg(t.Ink).Render(buildversion.Short()), ""
+	// ctx is where the screen is: the open screen's name, in bold as a
+	// title, or on the main screen WSL's version, quieter.
+	ctx, where := "", m.where()
+	switch {
+	case where != "":
+		ctx = sep + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(where)
+	case m.info.Version != "":
+		ctx = sep + ui.Fg(t.Muted).Render("WSL "+m.info.Version)
 	}
 	if m.loading {
 		spin = ui.Fg(t.Muted).Render(" ↻")
 	}
 	var right []string
+	// short is the total in fewer words, for a screen too narrow for it
+	// whole beside the name.
+	short := ""
 	if m.loaded && m.err == nil && len(m.list) > 0 {
 		// What can come back now, and apart from it what a program holds
 		// (Docker Desktop's disk, until it is closed). A disk that cannot be
@@ -110,6 +173,7 @@ func (m model) header() string {
 			}
 		}
 		right = append(right, ui.Fg(t.Cat[ui.CatGain]).Render(ui.Block+" "+i18n.T("header.total.now", units.Bytes(now))))
+		short = ui.Fg(t.Cat[ui.CatGain]).Render(ui.Block + " " + i18n.T("header.total.short", units.Bytes(now)))
 		if held > 0 {
 			right = append(right, ui.Fg(t.Cat[ui.CatLive]).Render(i18n.T("header.held", units.Bytes(held))))
 		}
@@ -117,28 +181,44 @@ func (m model) header() string {
 			right = append(right, ui.Fg(t.Muted).Render(free))
 		}
 	}
-	// fit lays out a left side and right pieces, if they fit with a gap.
-	fit := func(left string, right []string) (string, bool) {
-		r := strings.Join(right, ui.Fg(t.Faint).Render(" · "))
+	// fit lays out a left side and right pieces, if they fit with least
+	// cells between them; with no pieces, if the left side fits alone.
+	fit := func(left string, right []string, least int) (string, bool) {
+		r := strings.Join(right, sep)
 		gap := m.width - lipgloss.Width(left) - lipgloss.Width(r) - 2
-		if gap < 2 {
+		switch {
+		case len(right) == 0 && gap >= 0:
+			return " " + left, true
+		case len(right) == 0 || gap < least:
 			return "", false
 		}
 		return " " + left + strings.Repeat(" ", gap) + r + " ", true
 	}
 	// When it does not all fit, pieces go in this order: the drive's free
-	// space, what is in use, then WSL's version; the total stays longest.
+	// space, what is in use; then on the main screen WSL's version before
+	// the total, and on another the total before the screen's name, which
+	// says where one is. The name and its version always stay.
 	for n := len(right); n > 0; n-- {
-		if line, ok := fit(chip+version+spin, right[:n]); ok {
+		if line, ok := fit(chip+ctx+spin, right[:n], headerGap); ok {
 			return line
 		}
 	}
-	if len(right) > 0 {
-		if line, ok := fit(chip+spin, right[:1]); ok {
-			return line
+	// The total beside the name alone, on the main screen: closer when it
+	// must be, as two cells still part a name from a colored square, and
+	// on the narrowest in fewer words. WSL's version went before it, so it
+	// does not come back where the total has no room.
+	if where == "" && len(right) > 0 {
+		for _, total := range []string{right[0], short} {
+			if line, ok := fit(chip+spin, []string{total}, 2); ok {
+				return line
+			}
 		}
+		return " " + chip + spin
 	}
-	return " " + chip + version + spin
+	if line, ok := fit(chip+ctx+spin, nil, 0); ok {
+		return line
+	}
+	return " " + chip + spin
 }
 
 // driveFree names the free space of the drive the default disk is on.
@@ -230,7 +310,7 @@ func (m model) mainView() string {
 			if i < len(right) {
 				r = right[i]
 			}
-			body = append(body, ui.Fit(l, lw)+" "+ui.Fg(t.Rule).Render("│")+" "+r)
+			body = append(body, ui.Fit(l, lw)+" "+m.paneRule()+" "+r)
 		}
 	default:
 		// Narrow: the table, then as much of the details as fits, one cell
@@ -929,6 +1009,12 @@ func (m model) overlay(screen, box string) string {
 	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
 	x := max(0, (m.width-bw)/2)
 	y := max(0, (m.height-bh)/2)
+	// Never over the header, the name and its version, where the box fits
+	// between it and the keys: the header stays, dimmed, where the box
+	// needs its row of space.
+	if bh <= m.height-2 {
+		y = max(1, y)
+	}
 	// A cell of space around the box, so nothing behind it touches its
 	// border; where a few cells are all that is left beside it, those go
 	// too, rather than show pieces of words. The keys at the bottom stay.
@@ -937,6 +1023,25 @@ func (m model) overlay(screen, box string) string {
 		cx, cw = 0, m.width
 	}
 	cy := max(0, y-1)
+	if y >= 1 {
+		cy = max(1, cy)
+	}
+	switch {
+	// The rule under the header, where the space above the box takes it,
+	// goes from edge to edge: a rule cut in two reads as broken.
+	case cy <= 1 && len(rows) > 1:
+		rows[1] = strings.Repeat(" ", m.width)
+	// Where the space takes the row under the rule, the rule's ┬ there
+	// joins nothing, and the rule runs on.
+	case cy == 2 && len(rows) > 1:
+		plain := []rune(ansi.Strip(rows[1]))
+		for i, c := range plain {
+			if c == '┬' && i >= cx && i < cx+cw {
+				plain[i] = '─'
+			}
+		}
+		rows[1] = ui.Fg(m.th.Rule).Render(string(plain))
+	}
 	end := max(y+bh, min(y+bh+1, m.height-2))
 	space := strings.TrimSuffix(strings.Repeat(strings.Repeat(" ", min(cw, m.width-cx))+"\n", end-cy), "\n")
 	out := lipgloss.NewCompositor(lipgloss.NewLayer(strings.Join(rows, "\n")),
@@ -966,8 +1071,10 @@ type boxLine struct {
 	drop int
 }
 
-// fitBox draws a dialog no taller than the screen: while it is taller, the
-// line with the highest drop goes, the last of them first.
+// fitBox draws a dialog no taller than the rows between the header and
+// the keys, as wsl-spawner's dialogs are, so the name and its version stay
+// above it: while it is taller, the line with the highest drop goes, the
+// last of them first.
 func (m model) fitBox(border ui.Category, lines []boxLine) string {
 	for {
 		texts := make([]string, len(lines))
@@ -979,7 +1086,7 @@ func (m model) fitBox(border ui.Category, lines []boxLine) string {
 			}
 		}
 		box := m.box(border, texts...)
-		if lipgloss.Height(box) <= m.height || at < 0 {
+		if lipgloss.Height(box) <= m.height-2 || at < 0 {
 			return box
 		}
 		lines = append(lines[:at:at], lines[at+1:]...)

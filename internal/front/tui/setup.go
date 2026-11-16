@@ -304,14 +304,21 @@ func (m setupModel) render() string {
 	// main screen has them, then "setup" on the left; how far along on the
 	// right, both on the frame's edges.
 	name := t.Chip("wsl-shrinker") + " " + ui.Fg(t.Ink).Render(buildversion.Short())
-	title := name + ui.Fg(t.Muted).Render("  ·  ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.title"))
-	count := ""
+	title := name + ui.Fg(t.Faint).Render("  ·  ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.title"))
+	// How far along: the step's number and, in bold, its name, as the rail
+	// has it, so the header says the page as wsl-spawner's does.
+	count, short := "", ""
 	if m.step > stepWelcome {
-		count = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps)))
+		short = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps)))
+		count = ui.Fg(t.Muted).Render(i18n.T("setup.count", m.step, len(setupSteps))+" · ") + lipgloss.NewStyle().Bold(true).Foreground(t.Ink).Render(i18n.T("setup.row."+setupSteps[m.step-1]))
 	}
-	// Short of room, the count goes first, the progress bar under it says
-	// as much; then "setup". The name and its version always stay.
-	if lipgloss.Width(title)+1+lipgloss.Width(count) > frameW {
+	// Short of room, the step's name goes first, then its number, the
+	// progress bar under them says as much; then "setup". The name and its
+	// version always stay.
+	if lipgloss.Width(title)+headerGap+lipgloss.Width(count) > frameW {
+		count = short
+	}
+	if lipgloss.Width(title)+headerGap+lipgloss.Width(count) > frameW {
 		count = ""
 	}
 	if lipgloss.Width(title) > frameW {

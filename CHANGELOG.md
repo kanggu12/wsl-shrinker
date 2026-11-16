@@ -6,6 +6,18 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-17
+
+The one-line install works in Windows PowerShell that inherited PowerShell 7's module path.
+
+### Fixed
+
+- The install script stopped while unpacking, with `Cannot find an overload for "ExtractToDirectory" and the argument
+  count: "3"`, in Windows PowerShell started from WSL or cmd in a PowerShell 7 window. That Windows PowerShell inherits
+  PowerShell 7's module path, and its `Expand-Archive` was PowerShell 7's, which calls a method .NET Framework does not
+  have. The script unpacks the zip with .NET's own zip support, which both PowerShells have, and CI runs it in Windows
+  PowerShell with PowerShell 7's modules first.
+
 ## [0.8.3] - 2026-11-17
 
 Every file of a release named with its version.
@@ -361,7 +373,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.4
 [0.8.3]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.1

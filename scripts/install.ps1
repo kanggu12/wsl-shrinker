@@ -133,7 +133,11 @@
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
       if ($env:WSL_SHRINKER_ZIP) {
-        $zip = $env:WSL_SHRINKER_ZIP
+        # Read as PowerShell reads a path, from its current folder: .NET,
+        # which unpacks the zip below, would read a relative one from the
+        # folder the process started in.
+        $zip = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:WSL_SHRINKER_ZIP)
+        if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) { throw "wsl-shrinker install: WSL_SHRINKER_ZIP names no file: $zip" }
       } else {
         # The latest release is where github.com/<repo>/releases/latest redirects.
         $version = $env:WSL_SHRINKER_VERSION
@@ -187,7 +191,13 @@
         if ($got -ne $want) { throw "wsl-shrinker install: checksum mismatch for ${name}: the download was damaged or changed; run the install again, and report it if it repeats" }
       }
 
-      Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'x') -Force
+      # Unpacked by .NET's own zip support, which both PowerShells have.
+      # Expand-Archive is whichever Archive module comes first on
+      # PSModulePath: Windows PowerShell started from WSL or cmd in a
+      # PowerShell 7 window inherits 7's path, and 7's Expand-Archive calls
+      # an ExtractToDirectory that .NET Framework does not have.
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      [IO.Compression.ZipFile]::ExtractToDirectory($zip, (Join-Path $tmp 'x'))
       New-Item -ItemType Directory -Path $binDir -Force | Out-Null
       # The Windows program, and the launcher WSL finds by name on the PATH it
       # takes from Windows ($files above).

@@ -204,6 +204,12 @@ jobs:
       - name: install, run, remove
         shell: powershell
         run: |
+          # As Windows PowerShell is when started from WSL or cmd in a
+          # PowerShell 7 window: 7's modules come first on its path, its
+          # Archive module among them, and the script must not need theirs.
+          $env:PSModulePath = (Join-Path $env:ProgramFiles 'PowerShell\7\Modules') + ';' + $env:PSModulePath
+          $archive = (Get-Command Expand-Archive).Module.ModuleBase
+          if ($archive -notlike (Join-Path $env:ProgramFiles 'PowerShell\7\*')) { "PowerShell 7's Archive module is not first: $archive"; exit 1 }
           $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker-0.0.0-ci-windows-x64.zip).Path
           & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'

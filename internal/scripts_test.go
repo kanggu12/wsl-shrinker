@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,5 +25,29 @@ func TestTheInstallScriptIsASCII(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestTheInstallScriptUnpacksWithDotNet(t *testing.T) {
+	// Expand-Archive is whichever Archive module comes first on
+	// PSModulePath. Windows PowerShell started from WSL or cmd in a
+	// PowerShell 7 window inherits 7's path, and 7's Expand-Archive calls an
+	// ExtractToDirectory that .NET Framework does not have: the install
+	// stopped there. The script unpacks with .NET's own zip support.
+	root, _ := moduleRoot(t)
+	b, err := os.ReadFile(filepath.Join(root, "scripts", "install.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range strings.Split(string(b), "\n") {
+		// Only the code: a comment may name the cmdlet, as the script's own
+		// does to say why it is not used.
+		code, _, _ := strings.Cut(line, "#")
+		if strings.Contains(code, "Expand-Archive") {
+			t.Errorf("scripts/install.ps1:%d unpacks with Expand-Archive: %s", i+1, strings.TrimSpace(line))
+		}
+	}
+	if !strings.Contains(string(b), "[IO.Compression.ZipFile]::ExtractToDirectory(") {
+		t.Error("scripts/install.ps1 does not unpack with [IO.Compression.ZipFile]::ExtractToDirectory")
 	}
 }

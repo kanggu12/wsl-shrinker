@@ -141,15 +141,15 @@ shrink from PowerShell, where it stays in the terminal.
 
 ## The install stops
 
-- **"could not download"**: the PC cannot reach github.com. Download the zip for your processor, `wsl-shrinker-0.8.3-checksums.txt` and
-  `wsl-shrinker-0.8.3-install.ps1` elsewhere, then install from them with the saved script
+- **"could not download"**: the PC cannot reach github.com. Download the zip for your processor, `wsl-shrinker-0.8.4-checksums.txt` and
+  `wsl-shrinker-0.8.4-install.ps1` elsewhere, then install from them with the saved script
   ([Setup](setup.md#without-internet-access)).
 - **"Method invocation is supported only on core types in this language mode"**: PowerShell runs in ConstrainedLanguage
   mode, as on company PCs under AppLocker or Windows Defender Application Control, and refuses the script's .NET calls
   from its first line on. Install from the zip by hand ([Setup](setup.md#by-hand)).
-- **"running scripts is disabled on this system"**: a saved `wsl-shrinker-0.8.3-install.ps1` was run as a file. The one-line
+- **"running scripts is disabled on this system"**: a saved `wsl-shrinker-0.8.4-install.ps1` was run as a file. The one-line
   install (`irm ... | iex`) runs no file and is not stopped by the execution policy; or run the file with
-  `powershell -ExecutionPolicy Bypass -File wsl-shrinker-0.8.3-install.ps1`.
+  `powershell -ExecutionPolicy Bypass -File wsl-shrinker-0.8.4-install.ps1`.
 - **"is in use; close wsl-shrinker"**: a wsl-shrinker still runs, in another terminal or a window a run moved to. Close
   it, then run the install again. Nothing was replaced.
 
@@ -172,7 +172,7 @@ again. wsl-shrinker needs that: the disks are Windows' to read and to compact.
 
 SmartScreen says this the first time a program downloaded with a browser runs, unless a publisher it knows signed it.
 The one-line install and Scoop download without the browser's mark, so it does not appear there. For a zip downloaded
-by hand, check it first (`wsl-shrinker-0.8.3-checksums.txt`, or `gh attestation verify <zip> -R kanggu12/wsl-shrinker`). Then choose More
+by hand, check it first (`wsl-shrinker-0.8.4-checksums.txt`, or `gh attestation verify <zip> -R kanggu12/wsl-shrinker`). Then choose More
 info, then Run anyway, or clear the mark before extracting: `Unblock-File <zip>`.
 
 ## Boxes where marks should be

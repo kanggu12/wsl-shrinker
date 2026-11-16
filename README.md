@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/wsl-shrinker/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.8.2" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/wsl-shrinker/releases"><img alt="Release v0.8.3" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <a href="https://github.com/kanggu12/wsl-shrinker/pkgs/container/wsl-shrinker-demo"><img alt="Demo image" src="docs/assets/badges/demo.svg"></a>
   <img alt="Runs on Windows 10 and 11, x64 and ARM64, with WSL 2" src="docs/assets/badges/runs-on.svg">
@@ -41,7 +41,7 @@ Windows 10 or 11 with WSL 2 ([requirements](docs/setup.md#requirements)), in Pow
 
 ```powershell
 # 1. Install for this user. It opens setup to choose how it works.
-irm https://github.com/kanggu12/wsl-shrinker/releases/latest/download/install.ps1 | iex
+irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.3/wsl-shrinker-0.8.3-install.ps1 | iex
 
 # 2. In a new terminal, see every WSL disk and what a shrink would give back. It changes nothing.
 wsl-shrinker list

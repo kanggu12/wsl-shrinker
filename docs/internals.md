@@ -150,7 +150,9 @@ distribution on a real WSL 2 (`.github/workflows/wsl.yml`), and installs, runs a
 up there before people meet it. A failure there blocks nothing.
 
 **A release** is a `vX.Y.Z` tag on a commit whose `CHANGELOG.md` has a `## [X.Y.Z]` section, with the README's badge
-naming it. `.github/workflows/release.yml` runs all of CI on that commit. Then `scripts/dist.sh` builds the zips,
-`checksums.txt` and the Scoop manifest, the zips get build provenance (`gh attestation verify`), and the release goes
+naming it, as the install lines do (`make badges` sets both). `.github/workflows/release.yml` runs all of CI on that
+commit. Then `scripts/dist.sh` builds the files of the release, each named with the version but the Scoop manifest
+(Scoop names the app after it): the zips, `wsl-shrinker-0.8.3-checksums.txt`, `wsl-shrinker-0.8.3-install.ps1`, which installs that release, and
+`wsl-shrinker.json`. The zips get build provenance (`gh attestation verify`), and the release goes
 out with the changelog's section as its notes. The demo image goes to `ghcr.io/kanggu12/wsl-shrinker-demo` for amd64
 and arm64. Last, the installers run against the published release, as people do.

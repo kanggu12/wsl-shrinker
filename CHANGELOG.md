@@ -6,6 +6,22 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-17
+
+Every file of a release named with its version.
+
+### Changed
+
+- Every file of a release is named with its version, the architecture as Windows names it:
+  `wsl-shrinker-0.8.3-windows-x64.zip`, `wsl-shrinker-0.8.3-windows-arm64.zip`, `wsl-shrinker-0.8.3-checksums.txt` and
+  `wsl-shrinker-0.8.3-install.ps1`, where they were `wsl-shrinker_0.8.2_windows_amd64.zip`, `checksums.txt` and
+  `install.ps1`. The Scoop manifest stays `wsl-shrinker.json`: Scoop names the app after its file.
+- A release's install script installs that release, and the README's install line runs the newest one's. With
+  `WSL_SHRINKER_VERSION` it installs another, an older release under its older names too; `scripts/install.ps1` in the
+  repository still installs the latest.
+- The README is a quick start, what wsl-shrinker does, a shrink step by step and what runs where, with the guides in
+  one table and a short pointer to [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
 ## [0.8.2] - 2026-11-13
 
 The version beside the name in setup and CLI mode, and documents that read as wsl-shrinker's own.
@@ -345,7 +361,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.0

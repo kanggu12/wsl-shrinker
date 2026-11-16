@@ -152,10 +152,14 @@ jobs:
           # wsl-spawner's release, held against its checksums, on the PATH
           # as its installer and Scoop put it there.
           $dir = (New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'spawner')).FullName
-          gh release download $env:SPAWNER -R kanggu12/wsl-spawner -p 'wsl-spawner_*_windows_amd64.zip' -p checksums.txt -D $dir
+          # Its files are named wsl-spawner_0.2.2_windows_amd64.zip and
+          # checksums.txt up to 0.2.2, wsl-spawner-0.2.3-windows-x64.zip and
+          # wsl-spawner-0.2.3-checksums.txt from then on: either is taken.
+          gh release download $env:SPAWNER -R kanggu12/wsl-spawner -p 'wsl-spawner*windows*.zip' -p '*checksums.txt' -D $dir
           if ($LASTEXITCODE -ne 0) { "downloading wsl-spawner $env:SPAWNER exited $LASTEXITCODE"; exit 1 }
-          $zip = Get-ChildItem $dir -Filter '*_windows_amd64.zip' | Select-Object -First 1
-          $sum = (Get-Content (Join-Path $dir 'checksums.txt') | Where-Object { $_ -match [regex]::Escape($zip.Name) } | Select-Object -First 1) -split '\s+' | Select-Object -First 1
+          $zip = Get-ChildItem $dir -Filter '*.zip' | Where-Object { $_.Name -match 'windows[-_](x64|amd64)\.zip$' } | Select-Object -First 1
+          $sums = Get-ChildItem $dir -Filter '*checksums.txt' | Select-Object -First 1
+          $sum = (Get-Content $sums.FullName | Where-Object { $_ -match [regex]::Escape($zip.Name) } | Select-Object -First 1) -split '\s+' | Select-Object -First 1
           if (-not $sum -or (Get-FileHash $zip.FullName -Algorithm SHA256).Hash -ne $sum) { "$($zip.Name) does not match its checksum"; exit 1 }
           Expand-Archive $zip.FullName -DestinationPath $dir
           $env:PATH = "$dir;$env:PATH"

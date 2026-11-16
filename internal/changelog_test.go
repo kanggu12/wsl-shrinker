@@ -180,6 +180,38 @@ func TestTheReleaseBadgeNamesTheNewestRelease(t *testing.T) {
 	if !strings.Contains(string(readme), `alt="Release v`+newest+`"`) {
 		t.Errorf("README.md's release badge does not say v%s: run make badges", newest)
 	}
+	// Every page names the newest release's files, and the install line, in
+	// the README and in Setup, runs its own install script.
+	file := regexp.MustCompile(`wsl-shrinker-([0-9][0-9.]*)-(windows|checksums|install)`)
+	addr := regexp.MustCompile(`releases/download/v([0-9][0-9.]*)/wsl-shrinker-`)
+	pages := []string{"README.md"}
+	for _, glob := range []string{"docs/*.md", ".github/*.md"} {
+		m, _ := filepath.Glob(filepath.Join(root, glob))
+		for _, f := range m {
+			rel, _ := filepath.Rel(root, f)
+			pages = append(pages, rel)
+		}
+	}
+	for _, page := range pages {
+		b, err := os.ReadFile(filepath.Join(root, page))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, re := range []*regexp.Regexp{file, addr} {
+			for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+				if m[1] != newest {
+					t.Errorf("%s names %s, not v%s's: run make badges", page, m[0], newest)
+				}
+			}
+		}
+	}
+	install := "releases/download/v" + newest + "/wsl-shrinker-" + newest + "-install.ps1"
+	for _, page := range []string{"README.md", filepath.Join("docs", "setup.md")} {
+		b, _ := os.ReadFile(filepath.Join(root, page))
+		if !strings.Contains(string(b), install) {
+			t.Errorf("%s has no install line running %s", page, install)
+		}
+	}
 }
 
 func TestTheChangelogCheckCatchesWhatItIsFor(t *testing.T) {

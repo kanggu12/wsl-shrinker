@@ -35,4 +35,11 @@ badge runs-on "runs%20on-Windows%2010%20%7C%2011%2C%20x64%20%7C%20ARM64%2C%20WSL
 
 # The README's alt text says the same, for a reader without images.
 sed -i -e "s/alt=\"Release v[0-9][0-9.]*\"/alt=\"Release v$version\"/" README.md
-echo "wrote $dir: release v$version"
+# Every page that names a file of a release, or the address of its install
+# script, names this release: the README, the guides, CONTRIBUTING and
+# SECURITY. The changelog keeps each release's own.
+pages="README.md $(ls docs/*.md) $(ls .github/*.md)"
+# shellcheck disable=SC2086
+sed -i -e "s#releases/download/v[0-9][0-9.]*/wsl-shrinker-#releases/download/v$version/wsl-shrinker-#g" \
+  -e "s#wsl-shrinker-[0-9][0-9.]*-\(windows-\|checksums\|install\)#wsl-shrinker-$version-\1#g" $pages
+echo "wrote $dir: release v$version, and the pages' file names"

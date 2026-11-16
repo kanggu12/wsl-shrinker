@@ -1,9 +1,12 @@
-# Install wsl-shrinker from a GitHub release, for the current user.
+# Install wsl-shrinker from a GitHub release, for the current user. Each
+# release has its own copy, which installs that release:
 #
-#   irm https://github.com/kanggu12/wsl-shrinker/releases/latest/download/install.ps1 | iex
+#   irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.3/wsl-shrinker-0.8.3-install.ps1 | iex
 #
 # Settings, all optional, as environment variables:
-#   WSL_SHRINKER_VERSION   release to install, like v0.5.1 (default: the latest)
+#   WSL_SHRINKER_VERSION   release to install, like v0.5.1 (default: the
+#                          release this copy came with; this file in the
+#                          repository, with none, finds the latest)
 #   WSL_SHRINKER_BIN_DIR   where it goes (default: %LOCALAPPDATA%\Programs\wsl-shrinker)
 #   WSL_SHRINKER_BASE_URL  where releases are downloaded from (mirrors, tests)
 #   WSL_SHRINKER_ZIP       a zip already downloaded, installed as it is (tests)
@@ -30,6 +33,9 @@
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
     $repo = 'kanggu12/wsl-shrinker'
+    # The release this copy came with: scripts/dist.sh sets it in the copy
+    # it puts on a release; empty here, the latest is installed.
+    $pinned = ''
     $base = if ($env:WSL_SHRINKER_BASE_URL) { $env:WSL_SHRINKER_BASE_URL } else { "https://github.com/$repo/releases/download" }
     $binDir = if ($env:WSL_SHRINKER_BIN_DIR) { $env:WSL_SHRINKER_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker' }
     # The program's two files, in the folder and in each zip.
@@ -131,6 +137,7 @@
       } else {
         # The latest release is where github.com/<repo>/releases/latest redirects.
         $version = $env:WSL_SHRINKER_VERSION
+        if (-not $version) { $version = $pinned }
         if (-not $version) {
           try {
             $req = [Net.WebRequest]::Create("https://github.com/$repo/releases/latest")
@@ -145,20 +152,34 @@
           $version = $Matches[1]
         }
         if (-not $version.StartsWith('v')) { $version = "v$version" }
-        $name = "wsl-shrinker_$($version.Substring(1))_windows_$arch.zip"
+        # Each file is named with its version from 0.8.3 on, an
+        # architecture as Windows names it (x64); a release before that had
+        # wsl-shrinker_0.8.2_windows_amd64.zip and checksums.txt.
+        $number = $version.Substring(1)
+        $core = ($number -split '-')[0]
+        $older = $false
+        try { $older = [version]$core -lt [version]'0.8.3' } catch { }
+        if ($older) {
+          $name = "wsl-shrinker_${number}_windows_$arch.zip"
+          $sums = 'checksums.txt'
+        } else {
+          $label = if ($arch -eq 'amd64') { 'x64' } else { $arch }
+          $name = "wsl-shrinker-$number-windows-$label.zip"
+          $sums = "wsl-shrinker-$number-checksums.txt"
+        }
         $zip = Join-Path $tmp $name
         Write-Host "downloading wsl-shrinker $version for windows/$arch"
         $wc = New-Object Net.WebClient
         try {
           $wc.DownloadFile("$base/$version/$name", $zip)
-          $wc.DownloadFile("$base/$version/checksums.txt", (Join-Path $tmp 'checksums.txt'))
+          $wc.DownloadFile("$base/$version/$sums", (Join-Path $tmp $sums))
         } catch {
           throw "wsl-shrinker install: could not download $name from $base/${version}: $($_.Exception.Message); check WSL_SHRINKER_VERSION and the connection"
         }
         # The release's checksum. Get-FileHash is missing from some PowerShell
         # setups, so the hash is computed directly.
-        $line = Get-Content (Join-Path $tmp 'checksums.txt') | Where-Object { $_ -match (' ' + [regex]::Escape($name) + '$') } | Select-Object -First 1
-        if (-not $line) { throw "wsl-shrinker install: $name is not in checksums.txt" }
+        $line = Get-Content (Join-Path $tmp $sums) | Where-Object { $_ -match (' ' + [regex]::Escape($name) + '$') } | Select-Object -First 1
+        if (-not $line) { throw "wsl-shrinker install: $name is not in $sums" }
         $want = ($line -split ' ')[0]
         $sha = [Security.Cryptography.SHA256]::Create()
         $stream = [IO.File]::OpenRead($zip)

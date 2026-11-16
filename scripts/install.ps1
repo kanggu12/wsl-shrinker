@@ -1,7 +1,7 @@
 # Install wsl-shrinker from a GitHub release, for the current user. Each
 # release has its own copy, which installs that release:
 #
-#   irm https://github.com/kanggu12/wsl-shrinker/releases/download/v0.8.3/wsl-shrinker-0.8.3-install.ps1 | iex
+#   irm https://github.com/kanggu12/wsl-shrinker/releases/download/vX.Y.Z/wsl-shrinker-X.Y.Z-windows-installer.ps1 | iex
 #
 # Settings, all optional, as environment variables:
 #   WSL_SHRINKER_VERSION   release to install, like v0.5.1 (default: the

@@ -58,7 +58,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*-checksums.txt
-            dist/*-install.ps1
+            dist/*-windows-installer.ps1
             dist/wsl-shrinker.json
           retention-days: 7
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -169,7 +169,7 @@ jobs:
         shell: pwsh
         run: |
           $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker-0.0.0-ci-windows-x64.zip).Path
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
           $exe = Join-Path $dir 'wsl-shrinker.exe'
           $v = & $exe version
@@ -178,12 +178,12 @@ jobs:
           if (-not (Test-Path (Join-Path $dir 'wsl-shrinker'))) { 'no launcher for WSL'; exit 1 }
           if (-not (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'not on PATH'; exit 1 }
           $env:WSL_SHRINKER_UNINSTALL = '1'
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           if (Test-Path $dir) { 'the folder is still there'; exit 1 }
           if ((([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'still on PATH'; exit 1 }
           # Installed again, the program removes itself: its folder goes a
           # moment after it exits, and with it the PATH entry.
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           & $exe uninstall --yes
           if ($LASTEXITCODE -ne 0) { 'wsl-shrinker uninstall failed'; exit 1 }
           for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep -Milliseconds 500 }
@@ -211,7 +211,7 @@ jobs:
           $archive = (Get-Command Expand-Archive).Module.ModuleBase
           if ($archive -notlike (Join-Path $env:ProgramFiles 'PowerShell\7\*')) { "PowerShell 7's Archive module is not first: $archive"; exit 1 }
           $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker-0.0.0-ci-windows-x64.zip).Path
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
           $exe = Join-Path $dir 'wsl-shrinker.exe'
           $v = & $exe version
@@ -219,11 +219,11 @@ jobs:
           if ($v -notmatch '^wsl-shrinker v0\.0\.0-ci ') { 'not the build just installed'; exit 1 }
           if (-not (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir)) { 'not on PATH'; exit 1 }
           $env:WSL_SHRINKER_UNINSTALL = '1'
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           if (Test-Path $dir) { 'the folder is still there'; exit 1 }
           # Installed again, with settings, the program removes itself and,
           # with --purge, the settings.
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           & $exe config init
           $settings = Join-Path $env:APPDATA 'wsl-shrinker'
           if (-not (Test-Path (Join-Path $settings 'config.toml'))) { 'no settings to remove'; exit 1 }
@@ -252,12 +252,12 @@ jobs:
         shell: powershell
         run: |
           $env:WSL_SHRINKER_ZIP = (Resolve-Path dist/wsl-shrinker-0.0.0-ci-windows-arm64.zip).Path
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker\wsl-shrinker.exe'
           $v = & $exe version
           $v
           if ($v -notmatch '^wsl-shrinker v0\.0\.0-ci ') { 'the arm64 build did not run'; exit 1 }
           $env:WSL_SHRINKER_UNINSTALL = '1'
-          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-install.ps1 -Raw)))
+          & ([scriptblock]::Create((Get-Content dist/wsl-shrinker-0.0.0-ci-windows-installer.ps1 -Raw)))
           if (Test-Path (Split-Path $exe)) { 'the folder is still there'; exit 1 }
           exit 0

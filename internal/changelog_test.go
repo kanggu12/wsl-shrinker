@@ -205,7 +205,7 @@ func TestTheReleaseBadgeNamesTheNewestRelease(t *testing.T) {
 			}
 		}
 	}
-	install := "releases/download/v" + newest + "/wsl-shrinker-" + newest + "-install.ps1"
+	install := "releases/download/v" + newest + "/wsl-shrinker-" + newest + "-windows-installer.ps1"
 	for _, page := range []string{"README.md", filepath.Join("docs", "setup.md")} {
 		b, _ := os.ReadFile(filepath.Join(root, page))
 		if !strings.Contains(string(b), install) {

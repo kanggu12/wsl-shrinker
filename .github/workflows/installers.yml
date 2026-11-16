@@ -37,7 +37,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
-          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WANT/wsl-shrinker-$($env:WANT.Substring(1))-install.ps1"
+          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WANT/wsl-shrinker-$($env:WANT.Substring(1))-windows-installer.ps1"
           $env:WSL_SHRINKER_VERSION_WANTED = $env:WANT
           irm $env:SCRIPT | iex
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
@@ -65,7 +65,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # The release's own install script, named with its version.
-          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WSL_SHRINKER_VERSION/wsl-shrinker-$($env:WSL_SHRINKER_VERSION.Substring(1))-install.ps1"
+          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WSL_SHRINKER_VERSION/wsl-shrinker-$($env:WSL_SHRINKER_VERSION.Substring(1))-windows-installer.ps1"
           irm $env:SCRIPT | iex
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker'
           $v = & (Join-Path $dir 'wsl-shrinker.exe') version
@@ -88,7 +88,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # The release's own install script, named with its version.
-          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WSL_SHRINKER_VERSION/wsl-shrinker-$($env:WSL_SHRINKER_VERSION.Substring(1))-install.ps1"
+          $env:SCRIPT = "https://github.com/$env:REPO/releases/download/$env:WSL_SHRINKER_VERSION/wsl-shrinker-$($env:WSL_SHRINKER_VERSION.Substring(1))-windows-installer.ps1"
           irm $env:SCRIPT | iex
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\wsl-shrinker\wsl-shrinker.exe'
           & $exe version

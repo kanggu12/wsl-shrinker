@@ -108,15 +108,17 @@ the person running wsl-shrinker. `CHANGELOG.md` gets a line under `[Unreleased]`
 A release is a `## [X.Y.Z] - date` section in `CHANGELOG.md` with its link at the bottom, `make badges`, a commit, and
 an annotated `vX.Y.Z` tag on it once CI is green. Versions follow [semantic versioning](https://semver.org/): additions
 raise the minor number (0.2.0), fixes alone raise the patch number (0.1.1). Before 1.0 a minor release may also change
-how something works; its notes say what. The section becomes the release notes: `.github/workflows/release.yml`
-refuses a tag without one, and `internal/changelog_test.go` checks the file's shape and that the README's badge names
-the newest release, as the install lines do (`make badges` sets both). A tag with a hyphen (`v0.2.0-rc.1`) goes out as a pre-release, with a section of its own.
+how something works; its notes say what. The section becomes the release notes, with a table under it of what each file
+of the release is for: `.github/workflows/release.yml` refuses a tag without one, and `internal/changelog_test.go`
+checks the file's shape and that the README's badge names the newest release, as the install lines do (`make badges`
+sets both). A tag with a hyphen (`v0.2.0-rc.1`) goes out as a pre-release, with a section of its own.
 
-The workflow runs all of CI. Then `scripts/dist.sh` builds the files of the release, each named with the version but
-the Scoop manifest (Scoop names the app after it): `wsl-shrinker-0.8.5-windows-x64.zip` and `-windows-arm64.zip`, `wsl-shrinker-0.8.5-checksums.txt`,
-`wsl-shrinker-0.8.5-install.ps1`, which installs that release, and `wsl-shrinker.json`. The zips get build provenance, and the demo image goes to `ghcr.io`. Last, `.github/workflows/installers.yml` installs the
-published release as people do. `scripts/dist.sh` builds only from a work tree that matches its commit, since the zips
-carry that commit's name.
+The workflow runs all of CI. Then `scripts/dist.sh` builds the files of the release, each named with the version but the
+Scoop manifest (Scoop names the app after it): `wsl-shrinker-0.8.6-windows-x64.zip` and `-windows-arm64.zip`,
+`wsl-shrinker-0.8.6-checksums.txt`, `wsl-shrinker-0.8.6-windows-installer.ps1`, which installs that release, and
+`wsl-shrinker.json`. The zips get build provenance, and the demo image goes to `ghcr.io`. Last,
+`.github/workflows/installers.yml` installs the published release as people do. `scripts/dist.sh` builds only from a
+work tree that matches its commit, since the zips carry that commit's name.
 
 ### A WSL release
 

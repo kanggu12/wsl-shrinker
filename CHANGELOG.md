@@ -6,6 +6,23 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-17
+
+Release files that say what they are.
+
+### Changed
+
+- The installer is `wsl-shrinker-0.8.6-windows-installer.ps1`, where it was `wsl-shrinker-0.8.5-install.ps1`: every
+  file for Windows says so in its name, the installer beside the zips for x64 and arm64.
+- The release page lists the files under the changes, each with what it is for: the installer, the zip for each
+  processor, the checksums and the Scoop manifest.
+
+### Fixed
+
+- The `wsl-shrinker` command in WSL, finding no `wsl-shrinker.exe`, told to run
+  `releases/latest/download/install.ps1`, a file no release has had since 0.8.3. It names its own release's Windows
+  installer now.
+
 ## [0.8.5] - 2026-11-17
 
 A header that stands apart from the screen and says where one is.
@@ -402,7 +419,8 @@ The first public release.
   also has a Scoop manifest and build provenance for its zips, and `docker run --rm -it ghcr.io/kanggu12/wsl-shrinker-demo`
   tries the screen on a made-up PC.
 
-[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/kanggu12/wsl-shrinker/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.6
 [0.8.5]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.5
 [0.8.4]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.4
 [0.8.3]: https://github.com/kanggu12/wsl-shrinker/releases/tag/v0.8.3

@@ -31,7 +31,7 @@ date=$(git log -1 --date=format-local:%Y-%m-%d --format=%cd)
 ldflags="-s -w -X $pkg.Version=v$version -X $pkg.Commit=$commit -X $pkg.Date=$date"
 mkdir -p dist
 # Only what an earlier run made goes away, under the names of before too.
-rm -f dist/*.zip dist/*checksums.txt dist/*install.ps1 dist/wsl-shrinker.json
+rm -f dist/*.zip dist/*checksums.txt dist/*.ps1 dist/wsl-shrinker.json
 # Each file's name, the version in it. An architecture is named as Windows
 # names it: x64 (Go's amd64) and arm64.
 base="wsl-shrinker-$version"
@@ -56,7 +56,7 @@ wsl-shrinker      the launcher for WSL: run inside a distribution, it hands
 
 Run wsl-shrinker in a terminal for the screen, or wsl-shrinker --help for the
 commands. Put this folder on your PATH to run it from anywhere, in Windows and
-in WSL, or install with the release's $base-install.ps1, which does that
+in WSL, or install with the release's $base-windows-installer.ps1, which does that
 itself.
 Documentation: https://github.com/kanggu12/wsl-shrinker
 EOF
@@ -71,8 +71,8 @@ done
 # set in it, where the repository's copy leaves it empty and finds the latest.
 # The script is checked out with Windows line ends (.gitattributes): the
 # line may end in a carriage return, which stays.
-sed "s/^\( *\)\$pinned = ''\(\r\{0,1\}\)\$/\1\$pinned = 'v$version'\2/" scripts/install.ps1 >"dist/$base-install.ps1"
-grep -q "^ *\$pinned = 'v$version'" "dist/$base-install.ps1" || { echo "scripts/dist.sh: install.ps1 has no \$pinned line to set" >&2; exit 1; }
+sed "s/^\( *\)\$pinned = ''\(\r\{0,1\}\)\$/\1\$pinned = 'v$version'\2/" scripts/install.ps1 >"dist/$base-windows-installer.ps1"
+grep -q "^ *\$pinned = 'v$version'" "dist/$base-windows-installer.ps1" || { echo "scripts/dist.sh: install.ps1 has no \$pinned line to set" >&2; exit 1; }
 # The Scoop manifest, with this release's zips and their checksums. Its own
 # checkver and autoupdate let `scoop update` find later releases.
 zip_hash() { awk -v f="$base-windows-$1.zip" '$2 == f { print $1 }' "dist/$sums"; }

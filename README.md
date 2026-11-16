@@ -98,9 +98,15 @@ Linux build of the same program, which draws the screen in your terminal and ask
 
 ## Documentation
 
-[Setup](docs/setup.md) · [How it works](docs/how-it-works.md) · [Commands](docs/commands.md) ·
-[Settings](docs/settings.md) · [Troubleshooting](docs/troubleshooting.md) · [Questions](docs/questions.md) ·
-[Internals](docs/internals.md). [The guides' index](docs/README.md) says what each covers.
+| Guide | What it covers |
+|:---|:---|
+| [Setup](docs/setup.md) | requirements, every way to install, upgrade and remove, the sandbox |
+| [How it works](docs/how-it-works.md) | the estimate, each step of a shrink and its checks |
+| [Commands](docs/commands.md) | the screen and setup, every command, flag, key and exit code |
+| [Settings](docs/settings.md) | `config.toml`, the pre-stop scripts, the files it writes |
+| [Troubleshooting](docs/troubleshooting.md) | less back than expected, a step that fails, an install that stops |
+| [Questions](docs/questions.md) | your files, a closed window, WSL 1, removing it |
+| [Internals](docs/internals.md) | what runs where, the layers, the tests |
 
 ## Contributing
 

@@ -6,6 +6,11 @@ that only fixes raises the patch number. Each release's section here is its rele
 
 ## [Unreleased]
 
+### Changed
+
+- The release notes are the changes alone, without the table of the files under them that 0.8.6 added: the README and
+  [Setup](docs/setup.md) say which file to take.
+
 ## [0.8.7] - 2026-11-17
 
 The setup counts its welcome, and a question's box stands on rows of its own.

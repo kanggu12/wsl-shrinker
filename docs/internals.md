@@ -154,6 +154,5 @@ naming it, as the install lines do (`make badges` sets both). `.github/workflows
 commit. Then `scripts/dist.sh` builds the files of the release, each named with the version but the Scoop manifest
 (Scoop names the app after it): the zips, `wsl-shrinker-0.8.7-checksums.txt`,
 `wsl-shrinker-0.8.7-windows-installer.ps1`, which installs that release, and `wsl-shrinker.json`. Every file gets
-build provenance (`gh attestation verify`), and the release goes out with the changelog's section as its notes, a table of
-what each file is for under it. The demo image goes to `ghcr.io/kanggu12/wsl-shrinker-demo` for amd64 and arm64. Last,
+build provenance (`gh attestation verify`), and the release goes out with the changelog's section as its notes. The demo image goes to `ghcr.io/kanggu12/wsl-shrinker-demo` for amd64 and arm64. Last,
 the installers run against the published release, as people do.

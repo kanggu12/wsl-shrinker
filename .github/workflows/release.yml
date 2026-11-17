@@ -50,21 +50,6 @@ jobs:
             found { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           test -s "$RUNNER_TEMP/notes.md" || { echo "CHANGELOG.md has no section for $GITHUB_REF_NAME"; exit 1; }
-          # Under the changes, what each file of the release is for, so the
-          # release page says which one to take. The text is quoted, its
-          # backticks kept; @V@ becomes the version.
-          sed "s/@V@/$v/g" >>"$RUNNER_TEMP/notes.md" <<'EOF'
-
-          ### Files
-
-          | File | What it is |
-          | --- | --- |
-          | `wsl-shrinker-@V@-windows-installer.ps1` | The installer for Windows: run in PowerShell, as the README's one line does, it takes the zip for the PC's processor, checks it and installs it. |
-          | `wsl-shrinker-@V@-windows-x64.zip` | The program for Windows on an Intel or AMD processor, as most PCs have, with the `wsl-shrinker` command for inside WSL: to unpack by hand. |
-          | `wsl-shrinker-@V@-windows-arm64.zip` | The same for Windows on Arm. |
-          | `wsl-shrinker-@V@-checksums.txt` | The SHA-256 of each zip, to check one downloaded by hand. |
-          | `wsl-shrinker.json` | The Scoop manifest: `scoop install` takes its address. |
-          EOF
       - run: sudo apt-get update && sudo apt-get install -y zip
       - name: the zips, checksums and Scoop manifest
         run: scripts/dist.sh "${GITHUB_REF_NAME#v}"
